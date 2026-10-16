@@ -2,13 +2,9 @@
 
 
 
-<img src="assets/redstrike-ai.png" alt="Redstrike AI Logo" width="500"  />
+<img src="assets/redstrike-ai.png" alt="Redstrike AI Logo" width="300"  />
 
 
-
-0daysec cheat sheets
-
-==========
 
 [![Security](https://img.shields.io/badge/Security-Penetration%20Testing-red)]()
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)]()
