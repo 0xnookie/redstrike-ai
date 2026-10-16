@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/api_context.schema.json",
+  "title": "Redstrike API Context",
+  "description": "Shared pre-analysis emitted by the api-context feeder and consumed by bola-bfla / graphql. API Top 10 surface.",
+  "type": "object",
+  "required": ["target", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "style": { "type": "string", "description": "rest | graphql | grpc | soap" },
+    "identities": {
+      "type": "array",
+      "items": { "type": "object", "required": ["label"], "additionalProperties": false, "properties": { "label": { "type": "string" }, "role": { "type": "string" } } }
+    },
+    "endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^ae-[0-9]{3,}$" },
+          "path": { "type": "string" },
+          "method": { "type": "string" },
+          "object_param": { "type": "string", "description": "object id in the path/body (BOLA surface)" },
+          "required_role": { "type": "string" },
+          "returns_fields": { "type": "array", "items": { "type": "string" }, "description": "for excessive-data-exposure analysis" },
+          "variant_hint": { "type": "array", "items": { "enum": ["bola-bfla", "graphql"] } }
+        }
+      }
+    },
+    "graphql": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "type": "string" },
+        "introspection": { "type": ["boolean", "null"] },
+        "queries": { "type": "array", "items": { "type": "string" } },
+        "mutations": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
