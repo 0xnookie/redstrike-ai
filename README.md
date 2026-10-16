@@ -16,8 +16,8 @@ Redstrike AI
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20WSTG%20%7C%20LLM%20Top%2010%20%7C%20ATT%26CK-informational)]()
-[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-44-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-47-blueviolet)]()
+[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-49-brightgreen)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-52-blueviolet)]()
 [![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-6%20agents-8A2BE2)]()
 [![Families](https://img.shields.io/badge/Vuln%20Families-11-red)]()
 [![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20AD%20%7C%20PostEx-red)]()
@@ -118,15 +118,15 @@ Each findings-producing agent is a full quint with its own independent reviewer 
 
 **XSS family** — `xss-context` feeder → `xss-reflected` · `xss-stored` · `xss-dom` · `xss-blind`
 
-**Atomic single agents** — `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic`
+**Atomic single agents** — `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic` · `nosql-injection` · `ldap-injection` · `prototype-pollution` · `race-condition` · `parameter-pollution` · `waf-bypass` *(capability — tuned evasion ladder, feeds the vuln agents)*
 
 **Families** ✅ (feeder + variants each) — SSRF (`inband`/`blind`/`cloud`) · SQLi (`inband`/`blind`) · access-control (`idor`/`privesc`) · injection (`ssti`/`command-injection`/`deserialization`) · XXE (`inband`/`blind`) · file/path (`path-traversal-lfi`/`upload-rce`) · auth (`auth-bypass`/`jwt`/`oauth`) · API (`bola-bfla`/`graphql`)
 
 **AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `excessive-agency` (LLM06) · `llm-output-handling` (LLM05)
 
-**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-8) · `ad-lateral-movement`
+**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-15) · `ad-lateral-movement`
 
-**Post-exploitation** ✅ — `linux-privesc` · `windows-privesc` (playbook-driven; benign-proof + cleanup)
+**Post-exploitation** ✅ — `linux-privesc` (linpeas-first enumeration) · `windows-privesc` (winPEAS-first) — playbook-driven; benign-proof + cleanup
 
 **Reporting** — `reporting` aggregates every skill's *accepted* findings into the client report (CVSS, evidence, exec summary).
 
