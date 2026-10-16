@@ -74,3 +74,6 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
   method appears (that is exactly how XSS earned four agents).
 - These agents are invoked inside the `vuln-analysis` + `exploitation` phases of the PTES spine
   (`skills/README.md` roadmap). The orchestrator owns routing and phase gating.
+- **Post-exploitation / privesc:** `linux-privesc` + `windows-privesc` (on a landed host), plus the
+  **Active Directory** family (internal / assumed-breach), run in the exploitation / post-exploitation
+  phases — approval-gated, benign-proof + cleanup, not web vuln categories.

@@ -33,12 +33,17 @@ For each applicable class, run its `<class>-context` feeder then its variant/cat
 - XML endpoints → `redstrike-xxe-context` → `xxe-*` ; file/upload params → `redstrike-file-context` → `path-traversal-lfi`/`upload-rce`
 - auth flows → `redstrike-auth-context` → `auth-bypass`/`jwt`/`oauth`
 - plus atomic agents as applicable: `csrf`, `cors`, `clickjacking`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `security-headers`, `secrets`, `business-logic`
+- **AI/LLM** (the app has a chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
 **After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
 `<skill>-verify` reviewer subagent. **Only `accepted` findings advance.**
 
 ## 3. Chain + exploit  (approval-gated)
 `redstrike-attack-chain-discovery` composes accepted findings into kill chains. For high-value accepted
 findings, `redstrike-exploit-generator` produces a benign working PoC (**approval + kill switch**).
+
+**Post-exploitation (approval-gated):** on a landed host → `redstrike-linux-privesc` / `redstrike-windows-privesc`.
+For internal / assumed-breach / **Active Directory** engagements → `redstrike-ad-context` →
+`ad-kerberos` / `ad-acl-abuse` / `ad-adcs` / `ad-lateral-movement` (requires an authorized foothold).
 
 ## 4. Report
 `redstrike-reporting` → the client report (`<engagement>/report/`), accepted findings only.
