@@ -124,6 +124,8 @@ def main() -> None:
                         "required": required, "passed": passed, "detail": detail})
 
     failed_required = [r for r in results if r["required"] and not r["passed"]]
+    passed = [r for r in results if r["passed"]]
+    optional_failed = [r for r in results if not r["required"] and not r["passed"]]
 
     if args.as_json:
         print(json.dumps({"skill": manifest.get("skill"), "out": str(out),
@@ -135,9 +137,9 @@ def main() -> None:
             opt = "" if r["required"] else "  (optional)"
             print(f"- [{box}] {r['id']}  {r['path']}{opt}  -- {r['detail']}")
         verdict = "PASS" if not failed_required else "FAIL"
-        passed_n = len(results) - len(failed_required)
-        print(f"\n{verdict}: {passed_n}/{len(results)} checks; "
-              f"{len(failed_required)} required failure(s).")
+        tail = f"; {len(optional_failed)} optional skipped" if optional_failed else ""
+        print(f"\n{verdict}: {len(passed)}/{len(results)} passed; "
+              f"{len(failed_required)} required failure(s){tail}.")
         if failed_required:
             print("Any failed box => re-run that step (see checklist.md).")
 
