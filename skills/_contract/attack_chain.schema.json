@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/attack_chain.schema.json",
+  "title": "Redstrike Attack Chain",
+  "description": "Emitted by the attack-chain-discovery capability agent: kill chains composed from ACCEPTED findings. Each chain also becomes a composite finding in findings.json.",
+  "type": "object",
+  "required": ["target", "generated_at", "chains"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "chains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "steps"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^chain-[0-9]{3,}$" },
+          "title": { "type": "string" },
+          "steps": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["finding_id", "role"],
+              "additionalProperties": false,
+              "properties": {
+                "finding_id": { "type": "string", "description": "an ACCEPTED finding id (RS-YYYY-NNN)" },
+                "role": { "type": "string", "description": "entry | pivot | escalation | exfil" },
+                "enables": { "type": "string", "description": "the precondition this step satisfies for the next" }
+              }
+            }
+          },
+          "preconditions": { "type": "array", "items": { "type": "string" } },
+          "impact": { "type": "string" },
+          "cvss": { "type": "string" },
+          "feasibility": { "enum": ["demonstrated", "plausible", "theoretical"] },
+          "evidence": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}
