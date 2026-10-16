@@ -11,10 +11,11 @@ The contract, the two review altitudes, and how to build a new skill live in
 | [`xss-reflected`](xss-reflected/) | vuln variant (reflected) | yes | `review.md` + `verify.md` | js-analysis / xss-context → reporting |
 | [`xss-stored`](xss-stored/) | vuln variant (stored) | yes | `review.md` + `verify.md` | xss-context → reporting |
 | [`xss-dom`](xss-dom/) | vuln variant (dom) | yes | `review.md` + `verify.md` | xss-context / js-analysis → reporting |
+| [`xss-blind`](xss-blind/) | vuln variant (blind/OOB) | yes | `review.md` + `verify.md` | xss-context / xss-stored → reporting |
 
 ## Roadmap (same quad for each)
 - **Recon feeders:** `host-discovery`, `content-discovery`  (`xss-context` ✅ built — shared XSS feeder)
-- **XSS siblings:** `xss-blind`  (`xss-stored`, `xss-dom` ✅ built)
+- **XSS family:** ✅ complete — `xss-context` + `xss-reflected` + `xss-stored` + `xss-dom` + `xss-blind`
 - **Every vuln category = its own agent:** see [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md) — compound classes (SQLi, SSRF, access-control, …) decompose into a `<class>-context` feeder + variant agents (the XSS pattern); atomic classes (CSRF, open-redirect, …) are a single agent.
 - **Lifecycle spine:** `scope-and-roe`, `enumeration`, `vuln-analysis`, `exploitation`*, `post-exploitation`*, `reporting`  (`*` = active, import `_contract/roe-gate.md` + approval gate)
 - **Meta:** `orchestrator` (reads `checklist.md` state + gate verdicts to advance phases; routes targets to category feeders per `_contract/vuln-catalog.md`)

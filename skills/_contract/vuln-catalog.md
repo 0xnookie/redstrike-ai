@@ -45,7 +45,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 
 | Category | OWASP | Pattern | Feeder | Agents | Status |
 |---|---|---|---|---|---|
-| **XSS** | A03 Injection | family | `xss-context` ✅ | `xss-reflected` ✅ · `xss-stored` ✅ · `xss-dom` ✅ · `xss-blind` ◻ | in progress |
+| **XSS** | A03 Injection | family | `xss-context` ✅ | `xss-reflected` ✅ · `xss-stored` ✅ · `xss-dom` ✅ · `xss-blind` ✅ | ✅ complete |
 | **SQL/NoSQL injection** | A03 | family | `sqli-context` ◻ (injectable params, DBMS fingerprint, query context) | `error-based` · `union` · `boolean-blind` · `time-blind` · `oob/second-order` | ◻ |
 | **Command / code / template injection** | A03 | family | `injection-context` ◻ (reflective sinks + tech fingerprint) | `ssti` · `command-injection` · `code-injection` · `deserialization` | ◻ |
 | **SSRF** | A10 | family | `ssrf-context` ◻ (URL-fetching sinks, parser/allowlist behavior) | `inband` · `blind-oast` · `cloud-metadata` · `protocol-smuggling` | ◻ |
