@@ -19,7 +19,7 @@ A findings-producing skill with both review altitudes: [`../xss-reflected/`](../
 ## Build order for a new skill
 
 1. Run the **design interview** ([`interview-template.md`](interview-template.md)) and paste the answers at the top of `SKILL.md`. Do this FIRST — before writing steps.
-2. Write `SKILL.md`: goal + definition-of-done, "what we want" tree, ordered **atomic** steps (`action · tool · output`), the tool table (modern-first + the [anti-automation ladder](anti-automation-ladder.md)), inputs, outputs, phases.
+2. Write `SKILL.md`: goal + definition-of-done, "what we want" tree, ordered **atomic** steps (`action · tool · output`), the tool table (modern-first + the [anti-automation ladder](anti-automation-ladder.md); **tool-first** — [`tooling.md`](tooling.md), never hand-roll what a standard tool does), inputs, outputs, phases.
 3. Write `checklist.md`: mirror the steps 1:1. Semantics are load-bearing (below).
 4. Write `review.md`: per-step artifact checks + an embedded ```json manifest the [verifier](verify_completion.py) consumes. Inherit [`review-base.md`](review-base.md).
 5. If (and only if) the skill emits `findings.json`, write `verify.md`, inheriting [`verify-base.md`](verify-base.md). Recon skills skip this.
@@ -69,7 +69,7 @@ Exit code `0` = PASS, `2` = at least one required artifact missing/empty/malform
 
 ## Chaining
 
-Skills chain through **files on disk**, declared in each `SKILL.md` (Inputs = chains FROM, Outputs = chains TO). Example: `js-analysis` writes `gadgets.md` + `endpoints_*.txt`; `xss-*` agents chain FROM them. Shared, reusable primitives (the fetch ladder, the finding schema, secret/sink corpora) live here in `_contract/` — define once, import everywhere.
+Skills chain through **files on disk**, declared in each `SKILL.md` (Inputs = chains FROM, Outputs = chains TO). Example: `js-analysis` writes `gadgets.md` + `endpoints_*.txt`; `xss-*` agents chain FROM them. Shared, reusable primitives (the fetch ladder, the finding schema, secret/sink corpora, the **tool roster + tool-first rule** in [`tooling.md`](tooling.md)) live here in `_contract/` — define once, import everywhere.
 
 ## Vuln-category decomposition
 

@@ -13,7 +13,7 @@ The contract, the two review altitudes, and how to build a new skill live in
 | [`xss-dom`](xss-dom/) | vuln variant (dom) | yes | `review.md` + `verify.md` | xss-context / js-analysis → reporting |
 | [`xss-blind`](xss-blind/) | vuln variant (blind/OOB) | yes | `review.md` + `verify.md` | xss-context / xss-stored → reporting |
 
-**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic`
+**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `business-logic`
 
 **Vuln families** (✅ built — `<class>-context` feeder + variants): **SSRF** (inband/blind/cloud) · **SQLi** (inband/blind) · **access-control** (idor/privesc) · **injection** (ssti/command-injection/deserialization) · **XXE** (inband/blind) · **file/path** (path-traversal-lfi/upload-rce) · **auth** (auth-bypass/jwt/oauth) · **API** (bola-bfla/graphql)
 

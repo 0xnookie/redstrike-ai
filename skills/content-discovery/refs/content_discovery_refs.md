@@ -20,10 +20,11 @@ cat osint/terms.txt crawl_tokens.txt js_tokens.txt base.txt | sort -u > custom_w
 ## Brute-force
 - `ffuf -w custom_wordlist.txt -u https://HOST/FUZZ -mc 200,204,301,302,307,401,403 -rate <scope rps>`
 - `feroxbuster -u https://HOST -w custom_wordlist.txt --rate-limit <rps>` (recursive, careful).
-- Extensions: `-e .php,.json,.bak,.old,.zip,.config`. Filter noise (size/word count).
+- `gobuster dir -u https://HOST -w custom_wordlist.txt -b 404,403 -q` · `dirsearch -u https://HOST -w custom_wordlist.txt` (alternatives — same job, pick per host).
+- Extensions: `-e .php,.json,.bak,.old,.zip,.config`. Filter noise (size/word count). Tool-first: never hand-roll a brute-forcer (`_contract/tooling.md`).
 
 ## Parameters
-- `arjun -u https://HOST/endpoint`, `x8` — active param mining.
+- `arjun -u https://HOST/endpoint`, `paramspider -d HOST`, `x8` — active param mining.
 - From crawl: extract query keys + body fields + JS-referenced params.
 
 ## Outputs feed
