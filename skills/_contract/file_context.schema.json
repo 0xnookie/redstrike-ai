@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/file_context.schema.json",
+  "title": "Redstrike File/Path Context",
+  "description": "Shared pre-analysis emitted by the file-context feeder and consumed by path-traversal-lfi / upload-rce.",
+  "type": "object",
+  "required": ["target", "generated_at", "file_sinks"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "file_sinks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^fp-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "param": { "type": "string" },
+          "kind": { "enum": ["read", "include", "upload", "download"] },
+          "base_dir_hint": { "type": "string" },
+          "allowed_types": { "type": "array", "items": { "type": "string" } },
+          "stored_path": { "type": "string", "description": "where an upload lands (and whether web-reachable)" },
+          "executes_hint": { "type": "boolean", "description": "stored path may execute (php/jsp/aspx)" },
+          "variant_hint": { "type": "array", "items": { "enum": ["traversal-lfi", "upload-rce"] } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
