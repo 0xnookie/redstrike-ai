@@ -18,7 +18,7 @@ This is a real offensive test. **Establish authorization before any active scann
    `approval_required_phases: [exploitation, post-exploitation]`; set `window` + `authorized_by`; add an
    `oob.collaborator` if the user has one (needed for blind SSRF/XSS/XXE/SQLi — otherwise note those are limited).
 4. **Confirm** — summarize the target, scope, and plan back to the user and get an explicit **go for active
-   scanning**. (This is the human approval the RoE gate requires.) `skills/_contract/roe-gate.md` governs everything.
+   scanning**. (This is the human approval the RoE gate requires.) `skills/_contract/roe-gate.md` governs everything. Generate the formal **Rules of Engagement** document now with `redstrike-engagement-docs` (pre-engagement mode) from the scope.
 
 ## 1. Recon (Tier 1)  → into the engagement dir, each mechanical-gated
 `redstrike-osint` (passive) → `redstrike-host-discovery` → `redstrike-content-discovery`
@@ -46,7 +46,9 @@ For internal / assumed-breach / **Active Directory** engagements → `redstrike-
 `ad-kerberos` / `ad-acl-abuse` / `ad-adcs` / `ad-lateral-movement` (requires an authorized foothold).
 
 ## 4. Report
-`redstrike-reporting` → the client report (`<engagement>/report/`), accepted findings only.
+`redstrike-reporting` consolidates accepted findings → `<engagement>/report/findings_consolidated.json`.
+Then `redstrike-engagement-docs` writes the full deliverable suite — the formal **report** + **attestation**
++ **retest** (alongside the **RoE**) → `<engagement>/docs/`. Accepted findings only.
 
 ## Gating & safety
 A skill is done only when its checklist is all `- [x]`, `review.md` passes (exit 0), and — for findings
