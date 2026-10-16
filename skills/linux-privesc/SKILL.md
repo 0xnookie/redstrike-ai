@@ -5,11 +5,11 @@
 > ACTIVE, HIGH-RISK, findings-producing → imports `_contract/roe-gate.md` + **approval**. Carries `review.md` + `verify.md`.
 
 ## Interview
-- **STEPS:** confirm foothold → enumerate (automated + manual) → identify vectors (SUID/sudo/cron/caps/kernel/PATH/writable/group) → exploit the lowest-risk vector to root BENIGNLY → confirm (`id`=root) → cleanup → rate → emit → review → verify.
-- **TOOLS:** `linpeas`/`linenum`, `pspy`, `GTFOBins`, manual enum; `refs/linux_privesc_playbook.md`.
+- **STEPS:** confirm foothold → **enumerate with `linpeas.sh`** (deliver → `-a` all-checks → triage 🔴🟡 highlighted hits) + `pspy` + manual → identify vectors (sudo/SUID/caps/cron/PATH/writable/group/passwd-shadow/NFS/kernel) → exploit the lowest-risk vector to root BENIGNLY → confirm (`id`=root) → cleanup → rate → emit → review → verify.
+- **TOOLS:** **`linpeas.sh`** (spine), `pspy`, `lse.sh`/`LinEnum`, `linux-exploit-suggester`, `GTFOBins`, manual enum; `refs/enumeration.md` (linpeas-first recon) + `refs/linux_privesc_playbook.md` (vectors).
 - **GOAL:** Confirm a Linux local privilege-escalation vector by escalating to root BENIGNLY (prove `id`, no persistence/damage), on an in-scope host. Done = checklist `- [x]`, review passes, findings accepted + approved.
-- **OUTPUT:** `enum.json`, `privesc_tests.jsonl`, `findings.json`, `poc/`, `cleanup.md`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = the foothold (host + user) from the engagement + `scope.yaml`. `refs/` = `linux_privesc_playbook.md`. Chains FROM web RCE / `ad-lateral-movement` / SSH; chains TO `reporting`.
+- **OUTPUT:** `enum.txt` (raw linpeas/pspy/manual), `enum.json` (distilled vectors), `privesc_tests.jsonl`, `findings.json`, `poc/`, `cleanup.md`, `report.md`, `logs/`.
+- **DATA / RAG:** inputs = the foothold (host + user) from the engagement + `scope.yaml`. `refs/` = `enumeration.md` (linpeas.sh-first recon playbook) + `linux_privesc_playbook.md` (vector → benign root). Chains FROM web RCE / `ad-lateral-movement` / SSH; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (post-ex skill).
 
 ## Goal
@@ -23,22 +23,23 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted + approved.
 
 ## Steps  (action · tool · output)
 1. Confirm the foothold (host + current user) · read · (into context)
-2. Enumerate (automated + manual) · `linpeas` + `pspy` + manual · `enum.json`
-3. Identify vectors (SUID→GTFOBins, sudo→GTFOBins, writable cron, caps, kernel, PATH hijack, writable service, docker/lxd/disk group) · `refs` · `privesc_tests.jsonl`
+2. Enumerate: deliver + run **`linpeas.sh -a`** (tee to `enum.txt`), `pspy` for cron/process timing, `lse.sh`/`linux-exploit-suggester` second opinion, then a manual pass to confirm · `refs/enumeration.md` · `enum.txt` + `enum.json`
+3. Identify vectors from the colour-coded hits (sudo NOPASSWD/LD_PRELOAD/LD_LIBRARY_PATH, SUID→GTFOBins + installed-vs-GTFOBins automation, capabilities, writable cron/tar-wildcard/timer/service, PATH hijack, group docker/lxd/disk/fail2ban, writable /etc/passwd|shadow, NFS no_root_squash, kernel/pkexec/sudo CVEs incl. PwnKit/Baron Samedit/DirtyPipe — feasibility-first) · `refs/linux_privesc_playbook.md` · `privesc_tests.jsonl`
 4. Exploit the lowest-risk vector to root BENIGNLY · `refs/linux_privesc_playbook.md` · `poc/<id>/`
 5. Confirm root (`id` = uid=0) with a benign command; record + revert anything created · synth · `cleanup.md`
 6. Rate (CVSS) + write finding · synth · `findings.json`
 7. Emit report · synth · `report.md` · 8. /REVIEW · `review.md` · 9. /VERIFY · `verify.md`
 
 ## Tools
-- `linpeas`/`linenum`, `pspy`, `GTFOBins`, manual enum; `refs/linux_privesc_playbook.md`
+- **`linpeas.sh`** (enumeration spine), `pspy`, `lse.sh`/`LinEnum`, `linux-exploit-suggester`, `GTFOBins`,
+  manual enum; `refs/enumeration.md` + `refs/linux_privesc_playbook.md`
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- the foothold (in-scope host + user), `scope.yaml`, `refs/linux_privesc_playbook.md`
+- the foothold (in-scope host + user), `scope.yaml`, `refs/enumeration.md`, `refs/linux_privesc_playbook.md`
 
 ## Outputs
-`enum.json` · `privesc_tests.jsonl` · `findings.json` · `poc/` · `cleanup.md` · `report.md` · `logs/`
+`enum.txt` · `enum.json` · `privesc_tests.jsonl` · `findings.json` · `poc/` · `cleanup.md` · `report.md` · `logs/`
 
 ## Phases
 - **Phase 1 (generic):** enumeration + vector identification.
