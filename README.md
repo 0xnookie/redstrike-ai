@@ -113,7 +113,7 @@ Build order and the full spec live in [`skills/_contract/README.md`](skills/_con
 
 Each findings-producing agent is a full quint with its own independent reviewer subagent. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 
-**Recon** — `js-analysis` *(gold standard)*
+**Recon** (Tier 1) — `osint` (passive intel + wordlist terms) · `host-discovery` (subdomains / live hosts / ports) · `content-discovery` (crawl + brute-force + **custom wordlists**) · `js-analysis` *(gold standard)*
 
 **XSS family** — `xss-context` feeder → `xss-reflected` · `xss-stored` · `xss-dom` · `xss-blind`
 
@@ -131,11 +131,19 @@ Under **Claude Code** these are wired as runnable primitives in [`.claude/`](.cl
 
 Redstrike runs natively in **Claude Code** (skills + subagents are discovered from `.claude/` at session start).
 
+**Start a full pentest in plain English** — open the repo in Claude Code and just say what you want. The `redstrike` orchestrator **confirms authorization + scope first**, then runs the whole flow (OSINT → host/content discovery → JS analysis → vuln-category agents, each gated by its reviewer → chaining → report):
+
+> *"I'm a security researcher and pentester. My company owns the website `https://example.com` and I would like to conduct a penetration test against it."*
+
+> *"Run a full web pentest on `app.example.com` — we're authorized, in-scope is `*.example.com`."*
+
+> *"Assess `https://example.com` for vulnerabilities and give me a report."*
+
 ```bash
 git clone https://github.com/0xnookie/redstrike-ai.git
 cd redstrike-ai
-# open in Claude Code, then drive an engagement:
-#   /redstrike            → the orchestrator (scope → recon → vuln agents → reviewers → report)
+# open in Claude Code, then either say one of the prompts above, or drive pieces directly:
+#   /redstrike            → the orchestrator (authorization + scope → recon → vuln agents → reviewers → report)
 #   /redstrike-js-analysis, /redstrike-xss-reflected, …  → run a single skill
 ```
 

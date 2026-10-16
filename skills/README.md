@@ -20,7 +20,7 @@ The contract, the two review altitudes, and how to build a new skill live in
 **Reporting** (✅ built): `reporting` aggregates every skill's *accepted* findings into the client report.
 
 ## Roadmap (same quad for each)
-- **Recon feeders:** `host-discovery`, `content-discovery`  (`xss-context` ✅ built — shared XSS feeder)
+- **Recon feeders:** ✅ `osint` · `host-discovery` · `content-discovery` (custom wordlists) · `js-analysis` — all built
 - **XSS family:** ✅ complete — `xss-context` + `xss-reflected` + `xss-stored` + `xss-dom` + `xss-blind`
 - **Every vuln category = its own agent:** see [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md) — compound classes (SQLi, SSRF, access-control, …) decompose into a `<class>-context` feeder + variant agents (the XSS pattern); atomic classes (CSRF, open-redirect, …) are a single agent.
 - **Agent tiers (recon → vuln categories → mission/capability agents):** see [`_contract/agent-tiers.md`](_contract/agent-tiers.md) — the "red team" layer (Bug Bounty, CTF Solver, CVE Intelligence, Exploit Generator, Attack Chain Discovery, Parameter Optimization) that composes the lower tiers.
