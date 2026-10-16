@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/ssrf_context.schema.json",
+  "title": "Redstrike SSRF Context",
+  "description": "Shared pre-analysis emitted by the ssrf-context feeder and consumed by ssrf-inband / ssrf-blind / ssrf-cloud, so the variants fan out from one analysis of the app's URL-fetching sinks.",
+  "type": "object",
+  "required": ["target", "generated_at", "fetch_sinks"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "fetch_sinks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint", "param"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^fs-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "param": { "type": "string" },
+          "feature": { "type": "string", "description": "webhook, import-from-url, pdf/image proxy, link preview, SSO metadata, …" },
+          "behavior": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "follows_redirects": { "type": "boolean" },
+              "protocols": { "type": "array", "items": { "type": "string" } },
+              "allowlist": { "type": "string" },
+              "reflects_response": { "type": "boolean", "description": "true => in-band candidate" },
+              "parser_quirks": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "variant_hint": { "type": "array", "items": { "enum": ["inband", "blind", "cloud"] } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "internal_targets": { "type": "array", "items": { "type": "string" }, "description": "in-scope internal hosts/ranges + cloud metadata endpoints to probe" },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
