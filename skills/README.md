@@ -15,6 +15,10 @@ The contract, the two review altitudes, and how to build a new skill live in
 
 **Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic`
 
+**Vuln families** (✅ built — `<class>-context` feeder + variants): **SSRF** (inband/blind/cloud) · **SQLi** (inband/blind) · **access-control** (idor/privesc) · **injection** (ssti/command-injection/deserialization) · **XXE** (inband/blind) · **file/path** (path-traversal-lfi/upload-rce) · **auth** (auth-bypass/jwt/oauth) · **API** (bola-bfla/graphql)
+
+**Reporting** (✅ built): `reporting` aggregates every skill's *accepted* findings into the client report.
+
 ## Roadmap (same quad for each)
 - **Recon feeders:** `host-discovery`, `content-discovery`  (`xss-context` ✅ built — shared XSS feeder)
 - **XSS family:** ✅ complete — `xss-context` + `xss-reflected` + `xss-stored` + `xss-dom` + `xss-blind`
