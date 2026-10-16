@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/injection_context.schema.json",
+  "title": "Redstrike Injection Context",
+  "description": "Shared pre-analysis emitted by the injection-context feeder and consumed by ssti / command-injection / deserialization.",
+  "type": "object",
+  "required": ["target", "generated_at", "injection_points"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "tech": { "type": "string", "description": "framework / template engine / language fingerprint" },
+    "injection_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint", "param"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^inj-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "param": { "type": "string" },
+          "sink_type": { "enum": ["template", "os_command", "deserialize", "unknown"] },
+          "engine_hint": { "type": "string", "description": "jinja2 | twig | freemarker | velocity | java-ser | php-ser | python-pickle | …" },
+          "reflects": { "type": "boolean" },
+          "variant_hint": { "type": "array", "items": { "enum": ["ssti", "command-injection", "deserialization"] } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
