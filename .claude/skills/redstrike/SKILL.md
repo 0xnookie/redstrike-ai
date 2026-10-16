@@ -1,38 +1,50 @@
 ---
 name: redstrike
-description: Run a Redstrike engagement end-to-end — set up scope, run recon, route to vuln-category agents, gate each with its mechanical check + independent reviewer subagent, and assemble the report. The Redstrike entry point / orchestrator.
+description: Start and run a full web penetration test / security assessment end-to-end. Invoke this whenever the user asks to pentest, security-test, assess, audit, or "conduct a penetration test against" a website they own or are authorized to test — e.g. "I'm a pentester, my company owns <site>, conduct a penetration test against it", "run a full web pentest on <site>", "test the security of our website <site>", "assess <site> for vulnerabilities". It confirms AUTHORIZATION + scope first, then runs recon (OSINT + host/content discovery + JS analysis), routes to the vulnerability-category agents (each gated by its independent reviewer subagent), chains findings, and assembles the report. The Redstrike entry point / engagement orchestrator.
 ---
 
-Drive a Redstrike engagement. You are the **Engagement Orchestrator** (see `skills/_contract/agent-tiers.md`).
-Coordinate through artifacts on disk + the gates — never skip a gate.
+You are the **Redstrike Engagement Orchestrator** (Tier-3 mission agent; see `skills/_contract/agent-tiers.md`).
+Drive the whole engagement through the gates — never skip a gate, never scan without authorization.
 
-## Setup
-1. Create `engagements/<client>-<date>/`; copy `engagements/_template/scope.yaml` and fill it
-   (authorization, in/out scope, window, RoE, `oob.collaborator`). **Nothing active runs until scope
-   is set** (`skills/_contract/roe-gate.md`).
+## 0. Authorization & scope intake — MANDATORY, before anything active
+This is a real offensive test. **Establish authorization before any active scanning.**
+1. **Target** — extract the website(s) from the request.
+2. **Authorization** — the user must OWN the target or hold written authorization. If the request states
+   it (e.g. "my company owns <site>"), record that as `authorized_by`. If authorization is unclear,
+   **STOP and ask** — do not scan. Passive OSINT may begin; active scanning waits for step 4.
+3. **Scope** — create `engagements/<client>-<date>/` and write `scope.yaml` (copy `engagements/_template/scope.yaml`):
+   `in_scope.domains` = the target (+ ask which subdomains are in scope); `out_of_scope` = anything the
+   user excludes; RoE defaults `no_dos: true`, a conservative `rate_limit_rps`, and
+   `approval_required_phases: [exploitation, post-exploitation]`; set `window` + `authorized_by`; add an
+   `oob.collaborator` if the user has one (needed for blind SSRF/XSS/XXE/SQLi — otherwise note those are limited).
+4. **Confirm** — summarize the target, scope, and plan back to the user and get an explicit **go for active
+   scanning**. (This is the human approval the RoE gate requires.) `skills/_contract/roe-gate.md` governs everything.
 
-## Tier 1 — global recon
-2. Run the `redstrike-js-analysis` skill into `<engagement>/js-analysis/` (add content/host discovery
-   when available). Gate it (mechanical only — recon).
+## 1. Recon (Tier 1)  → into the engagement dir, each mechanical-gated
+`redstrike-osint` (passive) → `redstrike-host-discovery` → `redstrike-content-discovery`
+(builds the custom wordlist) → `redstrike-js-analysis`. Run `redstrike-cve-intelligence` to prioritize.
 
-## Tier 2 — vuln categories  (route per `skills/_contract/vuln-catalog.md`)
-3. Run the relevant `<class>-context` feeder, then its variant/category skills. XSS example:
-   `redstrike-xss-context` → then `redstrike-xss-reflected | xss-stored | xss-dom | xss-blind`
-   (each consumes `<engagement>/xss-context/xss_context.json`). Atomic classes (csrf, cors,
-   open-redirect, …) run directly off recon.
-4. After EACH findings-producing skill: run its mechanical gate
-   (`verify_completion.py`), then launch its `<skill>-verify` **reviewer subagent** on the skill's
-   output dir. Only `accepted` findings advance.
+## 2. Vuln categories (Tier 2)  → route per `skills/_contract/vuln-catalog.md` from what recon found
+For each applicable class, run its `<class>-context` feeder then its variant/category agents. Routing hints:
+- reflected/stored/dom input + sinks → `redstrike-xss-context` → `xss-*`
+- injectable params → `redstrike-sqli-context` → `sqli-*` ; interpreter sinks → `redstrike-injection-context` → `ssti`/`command-injection`/`deserialization`
+- URL-fetching params → `redstrike-ssrf-context` → `ssrf-*` ; `redstrike-open-redirect`
+- object ids + roles (≥2 accounts) → `redstrike-authz-context` → `idor`/`privesc` ; APIs → `redstrike-api-context` → `bola-bfla`/`graphql`
+- XML endpoints → `redstrike-xxe-context` → `xxe-*` ; file/upload params → `redstrike-file-context` → `path-traversal-lfi`/`upload-rce`
+- auth flows → `redstrike-auth-context` → `auth-bypass`/`jwt`/`oauth`
+- plus atomic agents as applicable: `csrf`, `cors`, `clickjacking`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `security-headers`, `secrets`, `business-logic`
+**After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
+`<skill>-verify` reviewer subagent. **Only `accepted` findings advance.**
 
-## Gating + progression
-5. A skill is done only when: `checklist.md` is all `- [x]`, `review.md` passes (exit 0), and — for
-   findings skills — every finding is `accepted` by its reviewer. Re-run failed/`needs-evidence`
-   steps. `exploitation` / `post-exploitation` phases **pause for human approval** before the first
-   active action.
+## 3. Chain + exploit  (approval-gated)
+`redstrike-attack-chain-discovery` composes accepted findings into kill chains. For high-value accepted
+findings, `redstrike-exploit-generator` produces a benign working PoC (**approval + kill switch**).
 
-## Report
-6. Collect `accepted` findings across skills → assemble the engagement report under
-   `<engagement>/report/`. (Tier-3 agents — Attack Chain Discovery, Exploit Generator, CVE
-   Intelligence — plug in here once built; see `skills/_contract/agent-tiers.md`.)
+## 4. Report
+`redstrike-reporting` → the client report (`<engagement>/report/`), accepted findings only.
 
-Everything stays in the engagement dir — it is the audit trail and chain of custody.
+## Gating & safety
+A skill is done only when its checklist is all `- [x]`, `review.md` passes (exit 0), and — for findings
+skills — every finding is `accepted`. Re-run failed/`needs-evidence` steps. **`exploitation` /
+`post-exploitation` and anything RCE-class pause for explicit human approval.** Everything is scope-gated
+and audit-logged in the engagement dir (the chain of custody). Honor the kill switch.
