@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/auth_context.schema.json",
+  "title": "Redstrike Auth Context",
+  "description": "Shared pre-analysis emitted by the auth-context feeder and consumed by auth-bypass / jwt / oauth.",
+  "type": "object",
+  "required": ["target", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mechanism": { "type": "string", "description": "cookie | jwt | opaque-token" },
+        "cookie_flags": { "type": "array", "items": { "type": "string" } },
+        "jwt": { "type": ["boolean", "null"] },
+        "jwt_alg": { "type": "string" },
+        "fixation_possible": { "type": ["boolean", "null"] },
+        "logout_invalidates": { "type": ["boolean", "null"] }
+      }
+    },
+    "flows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^af-[0-9]{3,}$" },
+          "kind": { "enum": ["login", "password-reset", "mfa", "oauth", "registration", "sso"] },
+          "endpoint": { "type": "string" },
+          "notes": { "type": "string" },
+          "variant_hint": { "type": "array", "items": { "enum": ["auth-bypass", "jwt", "oauth"] } }
+        }
+      }
+    },
+    "oauth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "flow": { "type": "string", "description": "authorization_code | implicit | pkce" },
+        "redirect_uri_param": { "type": "string" },
+        "uses_state": { "type": ["boolean", "null"] }
+      }
+    }
+  }
+}
