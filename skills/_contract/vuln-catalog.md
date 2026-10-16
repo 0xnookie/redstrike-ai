@@ -49,7 +49,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **SQL/NoSQL injection** | A03 | family | `sqli-context` ✅ (injectable params, DBMS fingerprint, query context) | `sqli-inband` ✅ (error+union) · `sqli-blind` ✅ (boolean+time+oob) | ✅ |
 | **Command / code / template injection** | A03 | family | `injection-context` ◻ (reflective sinks + tech fingerprint) | `ssti` · `command-injection` · `code-injection` · `deserialization` | ◻ |
 | **SSRF** | A10 | family | `ssrf-context` ✅ (URL-fetching sinks, parser/allowlist behavior) | `ssrf-inband` ✅ · `ssrf-blind` ✅ · `ssrf-cloud` ✅ (protocol-smuggling in refs) | ✅ |
-| **Access control / IDOR** | A01 | family | `authz-context` ◻ (object refs + role matrix + endpoint inventory) | `idor` · `horizontal-privesc` · `vertical-privesc` · `mass-assignment` · `forced-browsing` | ◻ |
+| **Access control / IDOR** | A01 | family | `authz-context` ✅ (object refs + role matrix + endpoint inventory) | `idor` ✅ (+ mass-assignment) · `privesc` ✅ (vertical + horizontal + forced-browsing) | ✅ |
 | **XXE** | A05 | family | `xxe-context` ◻ (XML parsers/endpoints) | `inband` · `blind-oast` · `ssrf-via-xxe` | ◻ |
 | **File / path** | A01/A05 | family | `file-context` ◻ (path/file/upload params + upload endpoints) | `path-traversal` · `lfi` · `rfi` · `upload-to-rce` | ◻ |
 | **Auth & session** | A07 | family | `auth-context` ◻ (login/session/token flows) | `authn-bypass` · `session-mgmt` · `jwt` · `oauth` · `mfa-bypass` · `password-reset` | ◻ |

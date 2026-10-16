@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/authz_context.schema.json",
+  "title": "Redstrike Authorization Context",
+  "description": "Shared pre-analysis emitted by the authz-context feeder and consumed by idor / privesc. Built from MULTIPLE identities (auth.env) — the role/permission matrix is the point.",
+  "type": "object",
+  "required": ["target", "generated_at", "identities"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "identities": {
+      "type": "array",
+      "description": "the accounts/roles available (>=2 for horizontal, +admin for vertical)",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": { "label": { "type": "string" }, "role": { "type": "string" }, "notes": { "type": "string" } }
+      }
+    },
+    "objects": {
+      "type": "array",
+      "description": "object references (for IDOR): where an id in the request selects a resource",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint", "id_param"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^obj-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "id_param": { "type": "string" },
+          "id_type": { "type": "string", "description": "sequential | uuid | hashid | email | …" },
+          "owner_scoped": { "type": "boolean", "description": "server supposed to enforce ownership" }
+        }
+      }
+    },
+    "endpoints": {
+      "type": "array",
+      "description": "function/endpoint -> required role (for privilege escalation)",
+      "items": {
+        "type": "object",
+        "required": ["path", "method"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "method": { "type": "string" },
+          "required_role": { "type": "string" },
+          "reachable_by": { "type": "array", "items": { "type": "string" }, "description": "identity labels observed to reach it" }
+        }
+      }
+    },
+    "mass_assign_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "endpoint": { "type": "string" }, "params": { "type": "array", "items": { "type": "string" } } }
+      }
+    }
+  }
+}
