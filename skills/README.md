@@ -9,10 +9,11 @@ The contract, the two review altitudes, and how to build a new skill live in
 | [`js-analysis`](js-analysis/) | recon (gold standard) | no | `review.md` | host-discovery → content-discovery, xss-* |
 | [`xss-context`](xss-context/) | recon feeder (shared) | no | `review.md` | js-analysis → xss-reflected/stored/dom/blind |
 | [`xss-reflected`](xss-reflected/) | vuln variant (reflected) | yes | `review.md` + `verify.md` | js-analysis / xss-context → reporting |
+| [`xss-stored`](xss-stored/) | vuln variant (stored) | yes | `review.md` + `verify.md` | xss-context → reporting |
 
 ## Roadmap (same quad for each)
 - **Recon feeders:** `host-discovery`, `content-discovery`  (`xss-context` ✅ built — shared XSS feeder)
-- **XSS siblings:** `xss-stored`, `xss-dom`, `xss-blind`
+- **XSS siblings:** `xss-dom`, `xss-blind`  (`xss-stored` ✅ built)
 - **Other vuln classes:** `ssrf`, `idor`, `sqli`, `ssti`, `access-control`
 - **Lifecycle spine:** `scope-and-roe`, `enumeration`, `vuln-analysis`, `exploitation`*, `post-exploitation`*, `reporting`  (`*` = active, import `_contract/roe-gate.md` + approval gate)
 - **Meta:** `orchestrator` (reads `checklist.md` state + gate verdicts to advance phases)
