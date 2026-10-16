@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/llm_context.schema.json",
+  "title": "Redstrike LLM Context",
+  "description": "Shared pre-analysis emitted by the llm-context feeder and consumed by prompt-injection / sensitive-disclosure / excessive-agency / llm-output-handling. Maps the LLM-integrated app's attack surface (OWASP LLM Top 10).",
+  "type": "object",
+  "required": ["target", "generated_at", "api"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "name": { "type": "string" }, "provider": { "type": "string" }, "confidence": { "enum": ["confirmed", "probable", "tentative"] } }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chat_endpoint": { "type": "string" },
+        "client_fields": { "type": "array", "items": { "type": "string" }, "description": "role, content, model, temperature, system, tools…" },
+        "streaming": { "type": ["boolean", "null"] },
+        "discovered_endpoints": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "input_filter": { "type": ["boolean", "null"] }, "output_filter": { "type": ["boolean", "null"] }, "model_refusal": { "type": ["boolean", "null"] } }
+    },
+    "tools": {
+      "type": "array",
+      "description": "the LLM's agency surface (LLM06)",
+      "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "params": { "type": "array", "items": { "type": "string" } }, "capability": { "type": "string" } } }
+    },
+    "data_sources": {
+      "type": "array",
+      "description": "disclosure surface (LLM02/07/08)",
+      "items": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "enum": ["rag", "system_prompt", "memory", "file", "web", "api"] }, "notes": { "type": "string" } } }
+    },
+    "output_sinks": {
+      "type": "array",
+      "description": "insecure-output-handling surface (LLM05): where model output flows",
+      "items": { "type": "object", "required": ["sink"], "additionalProperties": false, "properties": { "sink": { "type": "string", "description": "html_render | markdown | db_query | code_exec | url_fetch | shell" }, "context": { "type": "string" } } }
+    },
+    "injection_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "vector"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^lp-[0-9]{3,}$" },
+          "vector": { "enum": ["direct", "indirect", "role", "rag", "tool"] },
+          "where": { "type": "string" },
+          "variant_hint": { "type": "array", "items": { "enum": ["prompt-injection", "sensitive-disclosure", "excessive-agency", "llm-output-handling"] } }
+        }
+      }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
