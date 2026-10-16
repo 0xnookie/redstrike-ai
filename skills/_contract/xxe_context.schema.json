@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/xxe_context.schema.json",
+  "title": "Redstrike XXE Context",
+  "description": "Shared pre-analysis emitted by the xxe-context feeder and consumed by xxe-inband / xxe-blind.",
+  "type": "object",
+  "required": ["target", "generated_at", "xml_sinks"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "xml_sinks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^xs-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "content_type": { "type": "string" },
+          "feature": { "type": "string", "description": "SOAP, XML API, SVG/DOCX/XLSX upload, SAML, RSS, sitemap" },
+          "resolves_entities": { "type": "boolean", "description": "parser resolved a benign internal entity" },
+          "error_reflects": { "type": "boolean", "description": "parser errors reflected in-band" },
+          "variant_hint": { "type": "array", "items": { "enum": ["inband", "blind"] } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
