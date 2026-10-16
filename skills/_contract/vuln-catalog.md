@@ -47,7 +47,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 |---|---|---|---|---|---|
 | **XSS** | A03 Injection | family | `xss-context` ✅ | `xss-reflected` ✅ · `xss-stored` ✅ · `xss-dom` ✅ · `xss-blind` ✅ | ✅ complete |
 | **SQL/NoSQL injection** | A03 | family | `sqli-context` ✅ (injectable params, DBMS fingerprint, query context) | `sqli-inband` ✅ (error+union) · `sqli-blind` ✅ (boolean+time+oob) | ✅ |
-| **Command / code / template injection** | A03 | family | `injection-context` ◻ (reflective sinks + tech fingerprint) | `ssti` · `command-injection` · `code-injection` · `deserialization` | ◻ |
+| **Command / code / template injection** | A03 | family | `injection-context` ✅ (reflective sinks + tech fingerprint) | `ssti` ✅ · `command-injection` ✅ · `deserialization` ✅ (code-injection via ssti/cmdi) | ✅ |
 | **SSRF** | A10 | family | `ssrf-context` ✅ (URL-fetching sinks, parser/allowlist behavior) | `ssrf-inband` ✅ · `ssrf-blind` ✅ · `ssrf-cloud` ✅ (protocol-smuggling in refs) | ✅ |
 | **Access control / IDOR** | A01 | family | `authz-context` ✅ (object refs + role matrix + endpoint inventory) | `idor` ✅ (+ mass-assignment) · `privesc` ✅ (vertical + horizontal + forced-browsing) | ✅ |
 | **XXE** | A05 | family | `xxe-context` ◻ (XML parsers/endpoints) | `inband` · `blind-oast` · `ssrf-via-xxe` | ◻ |
