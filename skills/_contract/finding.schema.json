@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/finding.schema.json",
+  "title": "Redstrike Finding",
+  "description": "One security finding. A findings-producing skill emits an array of these as findings.json. verify.md (the semantic gate) fills the `review` block; the reporting skill consumes accepted findings.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/finding" },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["id", "title", "asset", "category", "severity", "confidence", "status", "evidence", "reproduction"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^RS-[0-9]{4}-[0-9]{3,}$", "description": "RS-<year>-<seq>, engagement-unique." },
+        "title": { "type": "string", "minLength": 4 },
+        "asset": { "type": "string", "description": "Target host/URL/endpoint. MUST be in engagement scope." },
+        "category": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "owasp": { "type": "string" },
+            "wstg": { "type": "string" },
+            "cwe": { "type": "string", "pattern": "^CWE-[0-9]+$" }
+          }
+        },
+        "attack_mapping": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$" },
+          "description": "MITRE ATT&CK technique IDs."
+        },
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+        "cvss_vector": { "type": "string", "description": "CVSS 3.1/4.0 vector. The reviewer recomputes this; it does not trust the executor's value." },
+        "confidence": { "enum": ["confirmed", "probable", "tentative"] },
+        "status": { "enum": ["open", "verified", "rejected", "duplicate", "remediated"], "description": "Lifecycle. verify.md sets 'verified' or 'rejected'." },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["type", "ref"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "enum": ["request_response", "tool_output", "screenshot", "dom_capture", "log", "poc_script"] },
+              "ref": { "type": "string", "description": "Path under the engagement evidence vault." },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        },
+        "reproduction": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "impact": { "type": "string" },
+        "remediation": { "type": "string" },
+        "references": { "type": "array", "items": { "type": "string" } },
+        "review": {
+          "type": "object",
+          "description": "Filled by verify.md. Absent = not yet semantically verified.",
+          "required": ["verdict", "reviewer"],
+          "additionalProperties": false,
+          "properties": {
+            "verdict": { "enum": ["accepted", "rejected", "needs-evidence"] },
+            "reviewer": { "type": "string" },
+            "reviewed_at": { "type": "string", "format": "date-time" },
+            "rubric": {
+              "type": "object",
+              "description": "Per-check results from verify-base.md.",
+              "additionalProperties": { "enum": ["pass", "fail", "n/a"] }
+            },
+            "false_positive_checks": { "type": "array", "items": { "type": "string" } },
+            "scope_ok": { "type": "boolean" },
+            "notes": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

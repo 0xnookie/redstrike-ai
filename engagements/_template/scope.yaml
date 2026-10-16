@@ -1,0 +1,43 @@
+# Per-engagement scope & rules of engagement. Copy this dir to
+# engagements/<client>-<date>/ and fill it in. The RoE gate (_contract/roe-gate.md)
+# reads this before any ACTIVE action; out-of-scope / closed-window ⇒ HARD STOP.
+# This file is the ONE thing in engagements/ that is NOT gitignored by default —
+# real evidence/findings stay local.
+
+engagement: "<client>-2026-10"
+authorized_by: "<client security contact + written-authorization reference on file>"
+window:
+  start: 2026-10-16T00:00:00Z
+  end:   2026-10-30T23:59:59Z
+
+in_scope:
+  domains:
+    - "*.example.com"
+    - "api.example.com"
+  cidrs:
+    - "203.0.113.0/24"
+  urls: []
+
+out_of_scope:          # explicit excludes always win over in_scope
+  domains:
+    - "admin.example.com"
+    - "*.payments.example.com"
+  cidrs:
+    - "203.0.113.200/29"
+
+rules:
+  no_dos: true
+  no_destructive: true                 # no data deletion/modification w/o per-action approval
+  rate_limit_rps: 20
+  prod_touch_requires_approval: true
+  approval_required_phases:            # human sign-off before first active action
+    - exploitation
+    - post-exploitation
+
+oob:                                   # out-of-band interaction host for blind/callback payloads
+  collaborator: "<interactsh/collaborator host>"
+
+notes: >
+  Keep written authorization on file before the window opens. Any finding whose
+  asset is not matched by in_scope (and not excluded by out_of_scope) must be
+  dropped by verify.md check #6.

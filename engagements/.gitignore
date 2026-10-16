@@ -1,0 +1,6 @@
+# Engagement working data is sensitive (client scope, evidence, findings, PoCs).
+# NEVER commit it. Keep only the template skeleton in version control.
+*
+!.gitignore
+!_template/
+!_template/**

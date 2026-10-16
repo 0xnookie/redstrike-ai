@@ -1,0 +1,58 @@
+# DOM / client-side dangerous sinks for the gadget-mapping pass (step 10).
+# Feeds semgrep + grep; output -> gadgets.md. Consumed downstream by xss-dom.
+# Grouping mirrors how a DOM-XSS agent reasons about source -> sink flows.
+
+sinks:
+  html_injection:        # value parsed as HTML -> script execution
+    - innerHTML
+    - outerHTML
+    - insertAdjacentHTML
+    - document.write
+    - document.writeln
+    - $(...).html
+    - $(...).append
+    - $(...).prepend
+    - $(...).after
+    - $(...).before
+    - Range.createContextualFragment
+    - DOMParser.parseFromString
+  code_execution:        # value evaluated as code
+    - eval
+    - Function           # new Function(...)
+    - setTimeout         # string arg
+    - setInterval        # string arg
+    - execScript
+    - window.execCommand
+  url_navigation:        # value drives navigation / scheme injection (javascript:)
+    - location
+    - location.href
+    - location.assign
+    - location.replace
+    - window.open
+    - element.src
+    - element.href
+    - a.href
+    - form.action
+  attribute_sink:        # value set as an attribute (on* handlers, srcdoc, formaction)
+    - setAttribute       # flag on*, href, src, srcdoc, formaction, xlink:href
+    - iframe.srcdoc
+  message_passing:       # untrusted cross-origin data
+    - addEventListener('message')
+    - onmessage
+  storage_source:        # common DOM-XSS sources (pair with sinks above)
+    - location.hash
+    - location.search
+    - document.referrer
+    - document.cookie
+    - window.name
+    - postMessage
+
+# library-specific gadgets worth a dedicated grep (prototype pollution / template sinks)
+framework_gadgets:
+  - 'angular.element'
+  - 'ng-bind-html'
+  - 'v-html'               # Vue
+  - 'dangerouslySetInnerHTML'  # React
+  - '$sce.trustAsHtml'
+  - 'Handlebars.compile'
+  - '_.template'           # lodash/underscore

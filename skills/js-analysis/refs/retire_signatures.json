@@ -1,0 +1,22 @@
+{
+  "_note": "Seed only. The authoritative vuln-lib signature set is retire.js's jsrepository.json. Sync it per-engagement: `retire --jsrepo` or fetch https://raw.githubusercontent.com/RetireJS/retire.js/master/repository/jsrepository.json into this file. Step 11 runs retire.js directly; this file is the offline/custom overlay.",
+  "sync": {
+    "source": "https://raw.githubusercontent.com/RetireJS/retire.js/master/repository/jsrepository.json",
+    "last_synced": null
+  },
+  "custom_overlay": {
+    "jquery": {
+      "extractors": {
+        "filecontent": ["jquery[.-]?(\\d+\\.\\d+\\.\\d+)"]
+      },
+      "vulnerabilities": [
+        {
+          "below": "3.5.0",
+          "severity": "medium",
+          "identifiers": { "CVE": ["CVE-2020-11022", "CVE-2020-11023"] },
+          "info": ["XSS via jQuery.htmlPrefilter / DOM manipulation of untrusted HTML"]
+        }
+      ]
+    }
+  }
+}
