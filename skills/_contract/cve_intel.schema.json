@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/cve_intel.schema.json",
+  "title": "Redstrike CVE Intel",
+  "description": "Emitted by the cve-intelligence capability agent: detected components mapped to applicable CVEs. Consumed by exploit-generator + bug-bounty; confirmed-reachable entries also become findings.json.",
+  "type": "object",
+  "required": ["target", "generated_at", "cves"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "source": { "type": "string", "description": "libraries.json | tech.md | header | banner" }
+        }
+      }
+    },
+    "cves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "component", "cve"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^cve-[0-9]{3,}$" },
+          "component": { "type": "string" },
+          "version": { "type": "string" },
+          "cve": { "type": "string", "pattern": "^CVE-[0-9]{4}-[0-9]+$" },
+          "cvss": { "type": "string" },
+          "title": { "type": "string" },
+          "exploit_available": { "type": ["boolean", "null"] },
+          "exploit_ref": { "type": "string", "description": "exploit-db / metasploit / PoC url" },
+          "reachable": { "enum": ["yes", "no", "unknown"] },
+          "confidence": { "enum": ["confirmed", "probable", "tentative"] },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}
