@@ -1,0 +1,113 @@
+# Redstrike exposed-surface — high-signal sensitive paths (ffuf FUZZ at https://HOST/FUZZ)
+# Curated for SIGNAL, not size. Combine with content-discovery/custom_wordlist.txt.
+# Confirm every hit by BODY signature (refs/exposure_signatures.md), NOT status code.
+
+# --- Version control (source reconstruction) ---
+.git/HEAD
+.git/config
+.git/index
+.git/logs/HEAD
+.git/packed-refs
+.git/refs/heads/main
+.svn/wc.db
+.svn/entries
+.hg/store/00manifest.i
+.bzr/README
+
+# --- Environment / config / secrets ---
+.env
+.env.local
+.env.dev
+.env.prod
+.env.backup
+.env.save
+config.php.bak
+config.json
+config.yml
+config.yaml
+settings.py
+appsettings.json
+web.config
+wp-config.php
+wp-config.php.bak
+.aws/credentials
+.s3cfg
+.npmrc
+.dockercfg
+.docker/config.json
+.htpasswd
+secrets.json
+credentials.json
+id_rsa
+.ssh/id_rsa
+
+# --- Backups / archives / dumps ---
+backup.zip
+backup.tar.gz
+backup.sql
+database.sql
+db.sql
+dump.sql
+www.zip
+site.tar.gz
+release.tar.gz
+app.zip
+index.php.bak
+index.php~
+index.php.old
+index.php.swp
+.index.php.swp
+.DS_Store
+Thumbs.db
+
+# --- CI / build / deploy / IaC leftovers ---
+.gitlab-ci.yml
+.travis.yml
+.circleci/config.yml
+Dockerfile
+docker-compose.yml
+Jenkinsfile
+terraform.tfstate
+.terraform/terraform.tfstate
+ansible.cfg
+
+# --- Debug / info / status panels + actuators ---
+phpinfo.php
+info.php
+test.php
+server-status
+server-info
+actuator
+actuator/env
+actuator/health
+actuator/heapdump
+actuator/mappings
+metrics
+debug/pprof/
+_profiler/
+telescope/requests
+
+# --- Admin / management panels ---
+admin/
+administrator/
+manager/html
+wp-admin/
+phpmyadmin/
+adminer.php
+pma/
+
+# --- API / schema (internal surface) ---
+swagger.json
+swagger-ui.html
+openapi.json
+api-docs
+api/swagger.json
+graphql
+
+# --- Logs ---
+error.log
+access.log
+debug.log
+laravel.log
+storage/logs/laravel.log
+npm-debug.log
