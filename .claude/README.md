@@ -23,9 +23,9 @@ reviewer subagent, gated, and assembles the report.
 
 ## Registered here
 - **Reviewer subagents** (`.claude/agents/`): `xss-reflected-verify`, `xss-stored-verify`,
-  `xss-dom-verify`, `xss-blind-verify`, `csrf-verify`, `cors-verify`, `open-redirect-verify`.
+  `xss-dom-verify`, `xss-blind-verify`, `csrf-verify`, `cors-verify`, `open-redirect-verify`, `clickjacking-verify`, `host-header-verify`, `request-smuggling-verify`, `cache-poisoning-verify`, `subdomain-takeover-verify`, `security-headers-verify`, `secrets-verify`, `business-logic-verify`.
 - **Skill bindings** (`.claude/skills/`): `redstrike` (orchestrator) + `redstrike-<skill>` for each
-  built skill (js-analysis, xss-context, xss-reflected/stored/dom/blind, csrf, cors, open-redirect).
+  built skill (js-analysis, xss-context, xss-reflected/stored/dom/blind, csrf, cors, open-redirect, clickjacking, host-header, request-smuggling, cache-poisoning, subdomain-takeover, security-headers, secrets, business-logic).
 
 ## Discovery
 Claude Code loads `.claude/skills/` and `.claude/agents/` **at session start**, so new entries here

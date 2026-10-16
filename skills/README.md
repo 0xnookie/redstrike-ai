@@ -13,6 +13,8 @@ The contract, the two review altitudes, and how to build a new skill live in
 | [`xss-dom`](xss-dom/) | vuln variant (dom) | yes | `review.md` + `verify.md` | xss-context / js-analysis → reporting |
 | [`xss-blind`](xss-blind/) | vuln variant (blind/OOB) | yes | `review.md` + `verify.md` | xss-context / xss-stored → reporting |
 
+**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic`
+
 ## Roadmap (same quad for each)
 - **Recon feeders:** `host-discovery`, `content-discovery`  (`xss-context` ✅ built — shared XSS feeder)
 - **XSS family:** ✅ complete — `xss-context` + `xss-reflected` + `xss-stored` + `xss-dom` + `xss-blind`
