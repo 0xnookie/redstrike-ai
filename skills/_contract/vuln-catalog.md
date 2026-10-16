@@ -52,7 +52,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **Access control / IDOR** | A01 | family | `authz-context` ✅ (object refs + role matrix + endpoint inventory) | `idor` ✅ (+ mass-assignment) · `privesc` ✅ (vertical + horizontal + forced-browsing) | ✅ |
 | **XXE** | A05 | family | `xxe-context` ✅ (XML parsers/endpoints) | `xxe-inband` ✅ · `xxe-blind` ✅ (ssrf-via-xxe → ssrf-cloud) | ✅ |
 | **File / path** | A01/A05 | family | `file-context` ✅ (path/file/upload params + upload endpoints) | `path-traversal-lfi` ✅ (+rfi/wrappers in refs) · `upload-rce` ✅ | ✅ |
-| **Auth & session** | A07 | family | `auth-context` ◻ (login/session/token flows) | `authn-bypass` · `session-mgmt` · `jwt` · `oauth` · `mfa-bypass` · `password-reset` | ◻ |
+| **Auth & session** | A07 | family | `auth-context` ✅ (login/session/token flows) | `auth-bypass` ✅ (+ session/mfa/reset) · `jwt` ✅ · `oauth` ✅ | ✅ |
 | **API** | — (WSTG/API Top 10) | family | `api-context` ◻ (REST/GraphQL schema + authz) | reuses `authz-*` + `injection-*`; adds `bola` · `bofla` · `excessive-data` · `graphql` | ◻ |
 | **CSRF** | — | single | — | `csrf` ✅ | ✅ |
 | **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
