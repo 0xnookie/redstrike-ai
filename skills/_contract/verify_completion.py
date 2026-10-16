@@ -44,7 +44,9 @@ def check_artifact(a: dict, out: Path):
     typ = a.get("type", "text")
     rel = a.get("path", "")
     p = out / rel
-    min_bytes = a.get("min_bytes", 1)
+    # a jsonl declared allow_empty may legitimately be 0 bytes (e.g. async callbacks not in yet)
+    jsonl_empty_ok = typ == "jsonl" and a.get("allow_empty", False)
+    min_bytes = a.get("min_bytes", 0 if jsonl_empty_ok else 1)
 
     if typ == "glob":
         matches = [x for x in globmod.glob(str(out / rel), recursive=True)
