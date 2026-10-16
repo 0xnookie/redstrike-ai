@@ -34,9 +34,9 @@ Two kinds:
 | Agent | Does | Consumes → Produces |
 |---|---|---|
 | **CVE Intelligence Agent** ✅ | map detected tech → known CVEs/exploits; prioritize | `js-analysis/libraries.json`+`tech.md` → cve_intel.json |
-| **Exploit Generator Agent** | turn an accepted finding (+ CVE intel) into a scoped, working PoC/exploit | `findings.json` (accepted) → exploit/ + PoC |
+| **Exploit Generator Agent** ✅ | turn an accepted finding (+ CVE intel) into a scoped, working PoC/exploit | `findings.json` (accepted) → exploit/ + PoC |
 | **Attack Chain Discovery Agent** ✅ | compose individual accepted findings into higher-impact kill chains | findings corpus → chains.json |
-| **Parameter Optimization Agent** | tune payloads/params/WAF-bypass/throughput across agents | payloads_tried + WAF signals → optimized sets |
+| **Parameter Optimization Agent** ✅ | tune payloads/params/WAF-bypass/throughput across agents | payloads_tried + WAF signals → optimized sets |
 | (Evidence/Reporting, OOB/Collaborator manager, Payload library) | shared services | — |
 
 ## How they collaborate (the "team")
