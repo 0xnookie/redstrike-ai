@@ -7,7 +7,7 @@ Redstrike AI
 
 ### AI-Powered Offensive Security Framework
 
-**A red-team of AI agents for authorized web penetration testing — every skill ships a methodology checklist *and* an independent reviewer agent that verifies each finding against evidence.**
+**A red-team of AI agents for authorized penetration testing — web, AI/LLM (OWASP LLM Top 10), Active Directory, and post-exploitation — where every skill ships a methodology checklist *and* an independent reviewer agent that verifies each finding against evidence.**
 
 🎯 [What is it](#-what-is-redstrike-ai) • 🏗️ [Architecture](#️-architecture) • 🔁 [Two-Altitude Review](#-the-two-altitude-review) • 🧩 [Skill Contract](#-the-skill-contract) • 🤖 [Agents](#-agents--skills) • 🚀 [Quickstart](#-quickstart) • 🛡️ [Safety](#️-safety--authorization)
 
@@ -15,11 +15,12 @@ Redstrike AI
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
-[![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20OWASP%20WSTG-informational)]()
-[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-34-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-37-blueviolet)]()
+[![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20WSTG%20%7C%20LLM%20Top%2010%20%7C%20ATT%26CK-informational)]()
+[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-44-brightgreen)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-47-blueviolet)]()
 [![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-6%20agents-8A2BE2)]()
-[![Families](https://img.shields.io/badge/Vuln%20Families-9-red)]()
+[![Families](https://img.shields.io/badge/Vuln%20Families-11-red)]()
+[![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20AD%20%7C%20PostEx-red)]()
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)]()
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)]()
 
@@ -120,6 +121,12 @@ Each findings-producing agent is a full quint with its own independent reviewer 
 **Atomic single agents** — `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic`
 
 **Families** ✅ (feeder + variants each) — SSRF (`inband`/`blind`/`cloud`) · SQLi (`inband`/`blind`) · access-control (`idor`/`privesc`) · injection (`ssti`/`command-injection`/`deserialization`) · XXE (`inband`/`blind`) · file/path (`path-traversal-lfi`/`upload-rce`) · auth (`auth-bypass`/`jwt`/`oauth`) · API (`bola-bfla`/`graphql`)
+
+**AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `excessive-agency` (LLM06) · `llm-output-handling` (LLM05)
+
+**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-8) · `ad-lateral-movement`
+
+**Post-exploitation** ✅ — `linux-privesc` · `windows-privesc` (playbook-driven; benign-proof + cleanup)
 
 **Reporting** — `reporting` aggregates every skill's *accepted* findings into the client report (CVSS, evidence, exec summary).
 
