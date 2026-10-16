@@ -48,7 +48,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 - **Context/manual:** interceptor (Caido / mitmproxy)
 
 ## Inputs
-- `xss_context.json` (from `xss-context` feeder) — preferred; else derive from:
+- `xss_context.json` (from `xss-context` feeder; schema `_contract/xss_context.schema.json`) — preferred; else derive from:
 - `js-analysis/`: `endpoints_live.txt`, `endpoints_unauthed.txt`, `params.txt`, `gadgets.md`
 - optional `auth.env` (authed reflection surface)
 - `scope.yaml` (RoE gate — every target checked before a payload is sent)

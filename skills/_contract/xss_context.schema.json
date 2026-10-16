@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/xss_context.schema.json",
+  "title": "Redstrike XSS Context",
+  "description": "Shared pre-analysis emitted by the xss-context feeder and consumed by the xss-reflected / xss-stored / xss-dom / xss-blind variant agents, so the four fan out from ONE analysis instead of each re-deriving injection points, sinks, and CSP.",
+  "type": "object",
+  "required": ["target", "generated_at", "injection_points", "csp", "dom"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string", "description": "Path to the engagement scope.yaml the points were validated against." },
+    "csp": {
+      "type": "object",
+      "required": ["present"],
+      "additionalProperties": false,
+      "properties": {
+        "present": { "type": "boolean" },
+        "policy": { "type": "string" },
+        "blocks_inline": { "type": "boolean" },
+        "blocks_eval": { "type": "boolean" },
+        "trusted_types": { "type": "boolean" },
+        "notable_directives": { "type": "array", "items": { "type": "string" } },
+        "candidate_bypasses": { "type": "array", "items": { "type": "string" }, "description": "e.g. allowed JSONP/CDN sources, 'unsafe-inline', missing object-src/base-uri." }
+      }
+    },
+    "injection_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint", "method", "source", "reflects"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^ip-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "source": { "enum": ["query", "body", "path", "header", "cookie", "fragment"] },
+          "param": { "type": "string" },
+          "reflects": { "type": "boolean" },
+          "reflection": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "contexts": { "type": "array", "items": { "enum": ["html_body", "attr_quoted", "attr_unquoted", "js_string", "js_template", "uri", "comment", "style", "script_block"] } },
+              "encoded": { "type": "boolean", "description": "app encoded breakout chars (< > \" ')" },
+              "sanitized": { "type": "boolean" },
+              "evidence": { "type": "string", "description": "pointer into reflections.jsonl" }
+            }
+          },
+          "persists": { "type": "boolean", "description": "true => stored-XSS candidate" },
+          "persist_surface": { "type": ["string", "null"], "description": "where the stored value renders back" },
+          "variant_hint": { "type": "array", "items": { "enum": ["reflected", "stored", "dom", "blind"] } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "dom": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "sinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sink"],
+            "additionalProperties": false,
+            "properties": {
+              "sink": { "type": "string" },
+              "file": { "type": "string" },
+              "loc": { "type": "string" },
+              "reachable_from": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "source_sink_flows": {
+          "type": "array",
+          "description": "DOM-XSS candidates handed to the xss-dom agent.",
+          "items": {
+            "type": "object",
+            "required": ["source", "sink"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string" },
+              "sink": { "type": "string" },
+              "confidence": { "enum": ["confirmed", "probable", "tentative"] },
+              "evidence": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "oob": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Out-of-band interaction host handed to the xss-blind agent.",
+      "properties": { "collaborator": { "type": "string" } }
+    }
+  }
+}
