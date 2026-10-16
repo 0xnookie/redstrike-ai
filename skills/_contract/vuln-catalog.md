@@ -48,7 +48,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **XSS** | A03 Injection | family | `xss-context` ✅ | `xss-reflected` ✅ · `xss-stored` ✅ · `xss-dom` ✅ · `xss-blind` ✅ | ✅ complete |
 | **SQL/NoSQL injection** | A03 | family | `sqli-context` ◻ (injectable params, DBMS fingerprint, query context) | `error-based` · `union` · `boolean-blind` · `time-blind` · `oob/second-order` | ◻ |
 | **Command / code / template injection** | A03 | family | `injection-context` ◻ (reflective sinks + tech fingerprint) | `ssti` · `command-injection` · `code-injection` · `deserialization` | ◻ |
-| **SSRF** | A10 | family | `ssrf-context` ◻ (URL-fetching sinks, parser/allowlist behavior) | `inband` · `blind-oast` · `cloud-metadata` · `protocol-smuggling` | ◻ |
+| **SSRF** | A10 | family | `ssrf-context` ✅ (URL-fetching sinks, parser/allowlist behavior) | `ssrf-inband` ✅ · `ssrf-blind` ✅ · `ssrf-cloud` ✅ (protocol-smuggling in refs) | ✅ |
 | **Access control / IDOR** | A01 | family | `authz-context` ◻ (object refs + role matrix + endpoint inventory) | `idor` · `horizontal-privesc` · `vertical-privesc` · `mass-assignment` · `forced-browsing` | ◻ |
 | **XXE** | A05 | family | `xxe-context` ◻ (XML parsers/endpoints) | `inband` · `blind-oast` · `ssrf-via-xxe` | ◻ |
 | **File / path** | A01/A05 | family | `file-context` ◻ (path/file/upload params + upload endpoints) | `path-traversal` · `lfi` · `rfi` · `upload-to-rce` | ◻ |
