@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/sqli_context.schema.json",
+  "title": "Redstrike SQLi Context",
+  "description": "Shared pre-analysis emitted by the sqli-context feeder and consumed by sqli-inband / sqli-blind.",
+  "type": "object",
+  "required": ["target", "generated_at", "injection_points"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "dbms": { "type": "string", "description": "mysql | postgres | mssql | oracle | sqlite | unknown" },
+    "waf": { "type": ["string", "null"] },
+    "injection_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "endpoint", "param"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^sq-[0-9]{3,}$" },
+          "endpoint": { "type": "string" },
+          "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          "param": { "type": "string" },
+          "query_context": { "enum": ["string", "numeric", "identifier", "order_by", "like", "json", "unknown"] },
+          "errors_visible": { "type": "boolean", "description": "true => error/union in-band candidate" },
+          "dbms_hint": { "type": "string" },
+          "variant_hint": { "type": "array", "items": { "enum": ["inband", "blind"] } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
