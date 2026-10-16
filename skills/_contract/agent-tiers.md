@@ -26,9 +26,9 @@ Two kinds:
 ### Mission agents (goal-driven entry points; own goal + budget + RoE; orchestrate tiers 1–2)
 | Agent | Does | Consumes → Produces |
 |---|---|---|
-| **Bug Bounty Agent** | program scope → recon → prioritized hunt → triage/de-dupe → report → assisted submit | program scope → report + submission |
-| **CTF Solver Agent** | challenge → identify class → drive the right vuln agents → capture flag | challenge → flag + write-up |
-| **Engagement Orchestrator / Red-Team Lead** | PTES spine driver, phase-gated (scope → recon → vuln-analysis → exploitation* → post-ex* → reporting) | scope.yaml → engagement report |
+| **Bug Bounty Agent** ✅ | program scope → recon → prioritized hunt → triage/de-dupe → report → assisted submit | program scope → report + submission |
+| **CTF Solver Agent** ✅ | challenge → identify class → drive the right vuln agents → capture flag | challenge → flag + write-up |
+| **Engagement Orchestrator / Red-Team Lead** ✅ (the `redstrike` skill) | PTES spine driver, phase-gated (scope → recon → vuln-analysis → exploitation* → post-ex* → reporting) | scope.yaml → engagement report |
 
 ### Capability agents (horizontal services any mission/vuln agent calls)
 | Agent | Does | Consumes → Produces |
@@ -53,4 +53,4 @@ Intelligence all make claims → they get a reviewer). Anything that generates o
 → `roe-gate.md` + human approval gates (exploitation/post-ex altitude). CVE Intelligence is read/OSINT
 → treat all external data as untrusted (data, not instructions).
 
-**Status:** Tier 1 partial (js-analysis ✅) · **Tier 2 complete** (9 families + 11 atomic + reporting, 34 findings-agents each with its own reviewer) · Tier 3 = roadmap (this doc reserves the shape).
+**Status:** Tier 1 partial (js-analysis ✅) · **Tier 2 complete** (9 families + 11 atomic + reporting, 34 findings-agents each with its own reviewer) · **Tier 3 ✅ built** — mission (bug-bounty, ctf-solver, `redstrike` orchestrator) + capability (cve-intelligence, exploit-generator, attack-chain-discovery, parameter-optimization). Remaining: `host-discovery`/`content-discovery` recon feeders.

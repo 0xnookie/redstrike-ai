@@ -17,7 +17,8 @@ Redstrike AI
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20OWASP%20WSTG-informational)]()
 [![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-34-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-34-blueviolet)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-37-blueviolet)]()
+[![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-6%20agents-8A2BE2)]()
 [![Families](https://img.shields.io/badge/Vuln%20Families-9-red)]()
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)]()
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)]()
@@ -182,7 +183,7 @@ See [`skills/_contract/roe-gate.md`](skills/_contract/roe-gate.md).
 ## 🗺️ Roadmap
 
 - ✅ **All 9 vuln families complete** (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + 11 atomic agents + the `reporting` aggregator
-- **Tier-3 red team** (next): Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization
+- ✅ **Tier-3 red team built**: Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization (the mission + capability agents that orchestrate the lower tiers)
 - `host-discovery` + `content-discovery` recon feeders
 - An `install.sh` for category-scoped installs
 
