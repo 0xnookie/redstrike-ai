@@ -35,3 +35,18 @@ Use an OOB beacon in the URL (`http://TOKEN.oob.example/`) so a server fetch is 
 with no in-band reflection. For protocol/port probing without reflection, use timing differentials.
 
 See `ssrf-cloud/refs/metadata_endpoints.md` for cloud metadata targets.
+
+---
+## 0daysec enrichment (adapted from the user's SSRF notes)
+
+### Time-based internal port inference (semi-blind, no reflection)
+When the sink fetches but returns nothing useful, map internal services by RESPONSE TIMING:
+```
+http://127.0.0.1:PORT/          # iterate common ports: 22 80 443 3306 5432 6379 8080 9200 2375 ...
+```
+- **Fast** response / immediate error  → port **closed** (connection refused quickly).
+- **Slow** (hangs then times out)       → port **filtered** (no response).
+- **Distinct** latency / body / error   → port **open** (service accepted + responded).
+Baseline a known-closed high port first, then diff each candidate against it (average 3 samples to beat
+jitter). This infers the internal service map without any in-band leak — enough to prove impact and to
+pick the right protocol gadget (`gopher://`, `dict://`, redis, etc.). Rate-limit; stay in scope.
