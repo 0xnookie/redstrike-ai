@@ -73,6 +73,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **Race condition** | WSTG-BUSL | single | — | `race-condition` ✅ (TOCTOU + limit-overrun; single-packet attack; state-break proof) | ✅ |
 | **HTTP parameter pollution** | A03/A05 | single | — | `parameter-pollution` ✅ (dup/polluted params across URL/body/JSON/cookie/header; gateway-vs-backend precedence flip) | ✅ |
 | **WAF / filter bypass** | — | single (capability) | — | `waf-bypass` ✅ (fingerprint + tuned evasion ladder; feeds the vuln agents; review-only, no findings) | ✅ |
+| **Exposed surface / sensitive files** | A05/A01 | single | — | `exposed-surface` ✅ (active dir/file/param fuzzing → signature-confirmed exposures: VCS `/.git`, backups, `.env`/config, data dumps, directory listing, debug/actuator panels, nuclei info-leaks; de-duped vs `secrets`/`security-headers`/`privesc`) | ✅ |
 
 ## Notes
 - Families are built **feeder-first**; a variant is worthless without its context artifact.
