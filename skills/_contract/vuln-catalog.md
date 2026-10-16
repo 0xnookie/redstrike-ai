@@ -54,17 +54,17 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **File / path** | A01/A05 | family | `file-context` ◻ (path/file/upload params + upload endpoints) | `path-traversal` · `lfi` · `rfi` · `upload-to-rce` | ◻ |
 | **Auth & session** | A07 | family | `auth-context` ◻ (login/session/token flows) | `authn-bypass` · `session-mgmt` · `jwt` · `oauth` · `mfa-bypass` · `password-reset` | ◻ |
 | **API** | — (WSTG/API Top 10) | family | `api-context` ◻ (REST/GraphQL schema + authz) | reuses `authz-*` + `injection-*`; adds `bola` · `bofla` · `excessive-data` · `graphql` | ◻ |
-| **CSRF** | — | single | — | `csrf` ◻ | ◻ |
-| **CORS misconfig** | A05 | single | — | `cors` ◻ | ◻ |
-| **Open redirect** | — | single | — | `open-redirect` ◻ | ◻ |
-| **Clickjacking** | — | single | — | `clickjacking` ◻ | ◻ |
-| **Host header injection** | — | single | — | `host-header` ◻ | ◻ |
-| **HTTP request smuggling** | — | single | — | `request-smuggling` ◻ | ◻ |
-| **Web cache poisoning/deception** | — | single | — | `cache-poisoning` ◻ | ◻ |
-| **Subdomain takeover** | — | single | — | `subdomain-takeover` ◻ | ◻ |
-| **Security misconfig / headers** | A05 | single (recon-ish) | — | `security-headers` ◻ | ◻ |
-| **Secrets / sensitive data** | A02 | single | — | `secrets` ◻ (consumes `js-analysis/secrets.json`) | ◻ |
-| **Business logic** | — | single (bespoke) | — | `business-logic` ◻ | ◻ |
+| **CSRF** | — | single | — | `csrf` ✅ | ✅ |
+| **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
+| **Open redirect** | — | single | — | `open-redirect` ✅ | ✅ |
+| **Clickjacking** | — | single | — | `clickjacking` ✅ | ✅ |
+| **Host header injection** | — | single | — | `host-header` ✅ | ✅ |
+| **HTTP request smuggling** | — | single | — | `request-smuggling` ✅ | ✅ |
+| **Web cache poisoning/deception** | — | single | — | `cache-poisoning` ✅ | ✅ |
+| **Subdomain takeover** | — | single | — | `subdomain-takeover` ✅ | ✅ |
+| **Security misconfig / headers** | A05 | single (recon-ish) | — | `security-headers` ✅ | ✅ |
+| **Secrets / sensitive data** | A02 | single | — | `secrets` ✅ (consumes `js-analysis/secrets.json`) | ✅ |
+| **Business logic** | — | single (bespoke) | — | `business-logic` ✅ | ✅ |
 
 ## Notes
 - Families are built **feeder-first**; a variant is worthless without its context artifact.
