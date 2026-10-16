@@ -1,0 +1,20 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate framework (skills, manifests, schemas, agent/skill frontmatter)
+        run: python scripts/validate.py
+      - name: Spot-check a manifest wires (reflected XSS vs empty dir => exit 2)
+        run: |
+          mkdir -p /tmp/empty
+          python skills/_contract/verify_completion.py --skill skills/xss-reflected --out /tmp/empty || test $? -eq 2
