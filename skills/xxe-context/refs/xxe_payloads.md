@@ -46,7 +46,7 @@ Prefer `/etc/hostname` over `/etc/passwd` for proof; never entity-expansion DoS;
 you don't need. External file read + SSRF-via-XXE are approval-gated.
 
 ---
-## 0daysec enrichment (adapted from the user's XXE notes)
+## Extended — php://filter base64 read · XXE port scan
 
 ### Blind file read of "unprintable" files — php://filter base64 (KEY technique)
 Files with `&`, `<`, newlines, or binary bytes break a naive SYSTEM entity / exfil URL. Wrap the read

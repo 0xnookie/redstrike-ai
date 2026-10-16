@@ -2,8 +2,6 @@
 
 > ATOMIC single agent (no feeder) — filter injection into LDAP search queries (auth bypass, enumeration).
 > ACTIVE + findings-producing → imports `_contract/roe-gate.md` + **approval**. Carries `review.md` + `verify.md`.
-> (Gap surfaced from the user's 0daysec notes; `ldap-Injection.md`.)
-
 ## Interview
 - **STEPS:** ingest params (login, search) → detect LDAP backend → filter injection (auth bypass `*)(uid=*))(|(uid=*`) → wildcard enumeration → blind (boolean by attribute presence) → confirm (auth bypass / enumeration, benign) → rate → emit → review → verify.
 - **TOOLS:** interceptor, `refs/ldap_payloads.md`.

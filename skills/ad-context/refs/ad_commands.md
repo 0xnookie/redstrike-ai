@@ -3,8 +3,6 @@
 # Golden rules: crack OFFLINE · demonstrate the VECTOR/capability (not full domain takeover) · single
 # test account for DCSync · no golden-ticket persistence · clean up created objects · no prod-disruptive
 # coercion. Placeholders: <d>=domain <u>/<p>=creds <dc>=DC ip/host <ca>=CA <t>=target <h>=NT hash.
-# (Exact invocations adapted from the user's 0daysec Windows/AD notes — the windows-ad-pentest mindmap.)
-
 ═══════════════════════════════════════════════════════════════════════════
 ## ad-context — enumeration feeder
 ═══════════════════════════════════════════════════════════════════════════

@@ -3,7 +3,7 @@
 > TERMINAL skill — the engagement aggregator. Consumes every skill's `findings.json`, keeps only
 > `review.verdict == accepted` findings, de-dupes across agents, and assembles the client report.
 > Emits NO new findings → `review.md` only, no `verify.md` (findings were verified upstream).
-> Adapted from Claude-Red's `offensive-reporting` standard (CVSS + evidence + executive summary).
+> Standardized reporting: CVSS + evidence + executive summary.
 
 ## Interview
 - **STEPS:** collect all findings → filter to accepted → de-dupe cross-agent → normalize severity/CVSS → order by risk → write executive summary + per-finding writeups → emit report + consolidated JSON → review.

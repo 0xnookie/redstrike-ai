@@ -1,5 +1,5 @@
 # OWASP LLM Top 10 (2025) → Redstrike LLM testing map
-# Adapted from OWASP GenAI LLM Top 10 + the LLM-Pentest-Guide (gotr00t0day). Authorized testing only.
+# Aligned to the OWASP GenAI LLM Top 10 (2025). Authorized testing only.
 # Prove issues with BENIGN canaries (a marker the model was told NOT to reveal / an OOB beacon) — never
 # generate genuinely harmful content or exfiltrate real user data.
 

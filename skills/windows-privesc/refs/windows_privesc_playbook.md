@@ -1,8 +1,6 @@
 # Windows privilege-escalation playbook
 # In-scope host, approval-gated, BENIGN proof (whoami=nt authority\system), ALWAYS clean up. Lowest-risk first.
 # Enumeration first — see refs/enumeration.md (winPEAS + whoami /all). This file turns a found vector into benign SYSTEM.
-# (Vectors enriched from the user's 0daysec windows-privilege-escalation / windows-privesc-tipps notes.)
-
 ## Vector picker (lowest-risk → highest-risk)
 1. token privilege (SeImpersonate/SeBackup/SeTakeOwnership)  2. saved creds / runas  3. weak service perms/DACL
 4. unquoted service path  5. AlwaysInstallElevated  6. scheduled-task / autorun hijack  7. DLL hijack

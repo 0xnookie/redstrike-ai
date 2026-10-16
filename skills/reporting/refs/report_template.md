@@ -1,4 +1,4 @@
-# Report template + standards (adapted from Claude-Red offensive-reporting)
+# Report template + standards
 # CVSS scoring, evidence standards, severity table, executive-summary + per-finding structure.
 
 ## Severity (CVSS 3.1 base → rating)

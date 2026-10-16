@@ -29,11 +29,6 @@ CI ([`.github/workflows/validate.yml`](.github/workflows/validate.yml)) validate
 - Compound vuln classes → a `<class>-context` feeder + per-variant agents (the XSS pattern). Atomic classes → a single agent.
 - Keep engagement data OUT of git (`engagements/` is ignored except the scope template).
 
-## Credits
-
-The on-demand skill-loading pattern and the CI-validated-skills + standardized-reporting ideas are adapted
-from [Claude-Red](https://github.com/SnailSploit/Claude-Red) (SnailSploit), MIT.
-
 ---
 
 Authorized testing only. By contributing you confirm your skills are for lawful, authorized security work.

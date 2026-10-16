@@ -38,7 +38,7 @@ Approval-gated. Timing + self-canary only. Confirm no persistent connection/queu
 if the target queues requests, STOP and report rather than risk other users.
 
 ---
-## 0daysec enrichment (adapted from the user's HTTP-request-smuggling notes)
+## CL.TE / TE.CL — worked request templates
 
 ### CL.TE — front-end uses Content-Length, back-end uses Transfer-Encoding
 The front-end forwards the whole body (per CL); the back-end stops at the `0\r\n\r\n` chunk terminator,
