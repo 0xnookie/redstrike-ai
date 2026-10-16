@@ -54,6 +54,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **File / path** | A01/A05 | family | `file-context` ✅ (path/file/upload params + upload endpoints) | `path-traversal-lfi` ✅ (+rfi/wrappers in refs) · `upload-rce` ✅ | ✅ |
 | **Auth & session** | A07 | family | `auth-context` ✅ (login/session/token flows) | `auth-bypass` ✅ (+ session/mfa/reset) · `jwt` ✅ · `oauth` ✅ | ✅ |
 | **API** | — (WSTG/API Top 10) | family | `api-context` ✅ (REST/GraphQL schema + authz) | `bola-bfla` ✅ (BOLA+BFLA+excessive-data+mass-assign) · `graphql` ✅ ; reuses `authz-*`/`injection-*` | ✅ |
+| **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `excessive-agency` ✅ (LLM06) · `llm-output-handling` ✅ (LLM05) | ✅ |
 | **CSRF** | — | single | — | `csrf` ✅ | ✅ |
 | **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
 | **Open redirect** | — | single | — | `open-redirect` ✅ | ✅ |
