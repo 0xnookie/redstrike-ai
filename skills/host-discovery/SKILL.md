@@ -6,7 +6,7 @@
 
 ## Interview
 - **STEPS:** ingest scope + OSINT subdomains → active subdomain enum → resolve → probe live hosts → port/service scan (scoped) → host tech fingerprint → consolidate → review.
-- **TOOLS:** `subfinder`/`amass`, `dnsx`, `httpx`, `naabu`/`nmap` (scoped), `httpx -td`.
+- **TOOLS:** `subfinder`/`amass`/`fierce`/`dnsenum`, `dnsx`, `httpx`, `naabu`/`masscan`/`rustscan`/`nmap` (scoped), `httpx -td`. Tool-first — `_contract/tooling.md`.
 - **GOAL:** Produce the live-host inventory — in-scope subdomains, which are live (http/https), open ports/services, and host-level tech — so content-discovery + js-analysis know where to look. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `subdomains.txt`, `hosts.json`, `host_discovery.json`, `summary.md`, `logs/`.
 - **DATA / RAG:** inputs = `scope.yaml` (in-scope domains/cidrs) + `<engagement>/osint/osint.json` (passive subs). `refs/` = `host_discovery_refs.md`. Chains FROM `osint`; chains TO `content-discovery`, `js-analysis`.
@@ -26,13 +26,14 @@ Produce the in-scope live-host + service inventory. DONE = `checklist.md` `- [x]
 2. Active subdomain enum (bruteforce + permutations, in-scope only) · `subfinder`/`amass` · `subdomains.txt`
 3. Resolve + dedupe · `dnsx` · `subdomains.txt`
 4. Probe live hosts (status/title/tech) · `httpx -td -sc -title` · `hosts.json`
-5. Port/service scan (scoped, rate-limited; top ports first) · `naabu`/`nmap -sV` · `hosts.json`
+5. Port/service scan (scoped, rate-limited; fast sweep → service detail) · `naabu`/`masscan`/`rustscan` → `nmap -sV` · `hosts.json`
 6. Consolidate host map · synth · `host_discovery.json`
 7. Emit summary · synth · `summary.md`
 8. /REVIEW SKILL · `review.md`
 
 ## Tools
-- `subfinder`, `amass`, `dnsx`, `httpx`, `naabu`/`nmap` (scoped), `httpx -td`
+- `subfinder`, `amass`, `fierce`, `dnsenum` (subs/DNS), `dnsx` (resolve), `httpx` (probe), `naabu`/`masscan`/`rustscan` (fast port sweep) → `nmap -sV` (scoped service detail)
+- **Tool-first rule + roster:** `_contract/tooling.md`
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs

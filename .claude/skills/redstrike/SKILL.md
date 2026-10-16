@@ -32,7 +32,8 @@ For each applicable class, run its `<class>-context` feeder then its variant/cat
 - object ids + roles (≥2 accounts) → `redstrike-authz-context` → `idor`/`privesc` ; APIs → `redstrike-api-context` → `bola-bfla`/`graphql`
 - XML endpoints → `redstrike-xxe-context` → `xxe-*` ; file/upload params → `redstrike-file-context` → `path-traversal-lfi`/`upload-rce`
 - auth flows → `redstrike-auth-context` → `auth-bypass`/`jwt`/`oauth`
-- plus atomic agents as applicable: `csrf`, `cors`, `clickjacking`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `security-headers`, `secrets`, `business-logic`
+- exposed files/dirs/panels surfaced by content-discovery (`/.git`, `.env`, backups, actuators, dir listing) → `redstrike-exposed-surface`
+- plus atomic agents as applicable: `csrf`, `cors`, `clickjacking`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `security-headers`, `secrets`, `exposed-surface`, `business-logic`
 - **AI/LLM** (the app has a chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
 **After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
 `<skill>-verify` reviewer subagent. **Only `accepted` findings advance.**
