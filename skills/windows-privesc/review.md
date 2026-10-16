@@ -3,7 +3,8 @@
 # Liveness only. Empty findings.json (ran, no privesc vector) is a PASS.
 
 - [ ] A — Enumeration
-  - [ ] A.1 `enum.json` valid JSON, non-empty
+  - [ ] A.1 `enum.json` valid JSON, non-empty (distilled vectors)
+  - [ ] A.2 `enum.txt` non-zero (raw winPEAS/whoami/manual output — the evidence)
 - [ ] B — Privesc tests
   - [ ] B.1 `privesc_tests.jsonl` ≥1 record, each line valid JSON
 - [ ] C — Findings
@@ -25,6 +26,7 @@
   "skill": "windows-privesc",
   "artifacts": [
     { "id": "A.1", "path": "enum.json", "type": "json" },
+    { "id": "A.2", "path": "enum.txt", "type": "text" },
     { "id": "B.1", "path": "privesc_tests.jsonl", "type": "jsonl", "min_items": 1 },
     { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
     { "id": "D.1", "path": "poc", "type": "dir", "required": false },
