@@ -7,10 +7,11 @@ The contract, the two review altitudes, and how to build a new skill live in
 | Skill | Kind | Emits findings? | Gates | Chains from → to |
 |---|---|---|---|---|
 | [`js-analysis`](js-analysis/) | recon (gold standard) | no | `review.md` | host-discovery → content-discovery, xss-* |
+| [`xss-context`](xss-context/) | recon feeder (shared) | no | `review.md` | js-analysis → xss-reflected/stored/dom/blind |
 | [`xss-reflected`](xss-reflected/) | vuln variant (reflected) | yes | `review.md` + `verify.md` | js-analysis / xss-context → reporting |
 
 ## Roadmap (same quad for each)
-- **Recon feeders:** `host-discovery`, `content-discovery`, `xss-context` (shared XSS feeder)
+- **Recon feeders:** `host-discovery`, `content-discovery`  (`xss-context` ✅ built — shared XSS feeder)
 - **XSS siblings:** `xss-stored`, `xss-dom`, `xss-blind`
 - **Other vuln classes:** `ssrf`, `idor`, `sqli`, `ssti`, `access-control`
 - **Lifecycle spine:** `scope-and-roe`, `enumeration`, `vuln-analysis`, `exploitation`*, `post-exploitation`*, `reporting`  (`*` = active, import `_contract/roe-gate.md` + approval gate)
