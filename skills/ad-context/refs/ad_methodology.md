@@ -1,5 +1,8 @@
 # Active Directory methodology (shared by the AD variants)
 # Internal / assumed-breach. Authorized foothold REQUIRED. High-impact — exploitation is approval-gated.
+# This file = the method/phase map. For EXACT invocations per variant (enum/kerberos/acl/adcs/lateral),
+# incl. the novel techniques (SOAPHound, TimeRoasting, Sapphire tickets, ESC9-15, certsync/masky, RBCD
+# without DA, coercion triggers, remote-exec matrix), see refs/ad_commands.md.
 
 ## Enumeration (feeder)
 - `netexec smb <range> -u u -p p` (hosts, shares, signing, null sessions), `--users`, `--groups`, `--pass-pol`.
