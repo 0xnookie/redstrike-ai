@@ -1,4 +1,4 @@
-# NoSQL injection payloads  (adapted from the user's 0daysec notes: no-sql-injection.md)
+# NoSQL injection payloads
 # Benign auth-bypass / minimal differential. No bulk dump, no DB-hanging $where. Rate-limit.
 
 ## Operator injection — auth bypass (the common one)

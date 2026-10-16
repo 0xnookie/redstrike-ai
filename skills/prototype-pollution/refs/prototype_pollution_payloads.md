@@ -1,4 +1,4 @@
-# Prototype pollution payloads  (adapted from the user's 0daysec notes: Web/prototype-pollution.md)
+# Prototype pollution payloads
 # Benign: pollute a harmless MARKER key, prove it on a FRESH object. Global effect — scope tightly, no persistent/destructive keys.
 
 ## Client-side (URL / hash / JSON input)

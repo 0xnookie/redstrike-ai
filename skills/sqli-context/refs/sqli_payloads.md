@@ -54,7 +54,7 @@ whitespace alt (%09,%0a), concat via 0x hex, scientific notation for numbers
 destructive), confirm findings MANUALLY, and do not dump real PII.
 
 ---
-## 0daysec enrichment (adapted from the user's advanced-sql-injection notes)
+## Advanced — OOB exfil · no-space/WAF bypass · header SQLi
 
 ### Out-of-band (OOB) exfil by DBMS — attributable blind proof
 Use when there is no in-band reflection and timing is slow/noisy. Fire a unique token to a collaborator.

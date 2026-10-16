@@ -36,7 +36,7 @@ Embed a unique `TOKEN.oob.example` so blind exec/deserialization is attributable
 the callback (JS/command output or DNS), never by running destructive commands.
 
 ---
-## 0daysec enrichment (adapted from the user's SSTI/injection notes)
+## SSTI — engine-specific RCE (extended)
 
 ### SSTI → RCE by engine (benign proof FIRST: `id` / OOB, not a shell)
 ```

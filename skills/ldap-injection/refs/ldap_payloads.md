@@ -1,4 +1,4 @@
-# LDAP injection payloads  (adapted from the user's 0daysec notes: ldap-Injection.md)
+# LDAP injection payloads
 # Benign auth bypass / minimal enumeration. Rate-limit wildcard queries. No bulk directory dump.
 
 ## Auth bypass (filter breakout)

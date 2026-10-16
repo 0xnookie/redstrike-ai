@@ -32,7 +32,7 @@
 - Account takeover via email-unverified OAuth linking.
 
 ---
-## 0daysec enrichment (adapted from the user's JWT notes)
+## JWT — offline cracking + key-confusion forging
 
 ### Crack a weak HMAC secret (offline)
 ```

@@ -2,8 +2,6 @@
 
 > ATOMIC single agent (no feeder) — operator + syntax injection into NoSQL query languages (MongoDB, …).
 > ACTIVE + findings-producing → imports `_contract/roe-gate.md` + **approval** (data access). Carries `review.md` + `verify.md`.
-> (Gap surfaced from the user's 0daysec notes; `no-sql-injection.md`.)
-
 ## Interview
 - **STEPS:** ingest params → fingerprint NoSQL backend → operator injection (`$ne`/`$gt`/`$regex`/`$where`) in auth + queries → syntax injection → blind (`$where` sleep / boolean) → confirm (auth bypass / data extraction, benign) → rate → emit → review → verify.
 - **TOOLS:** interceptor, `nosqlmap` (confirm manually), `refs/nosql_payloads.md`.

@@ -1,8 +1,6 @@
 # Linux privilege-escalation playbook
 # In-scope host, approval-gated, BENIGN proof (id=uid=0), ALWAYS clean up. Prefer the lowest-risk vector.
 # Enumeration first — see refs/enumeration.md (linpeas.sh). This file turns a found vector into benign root.
-# (Vectors enriched from the user's 0daysec linux-privilege-escalation + linux-playbook notes.)
-
 ## Vector picker (lowest-risk → highest-risk)
 1. sudo NOPASSWD / GTFOBins  2. SUID GTFOBins  3. capabilities  4. readable creds / key reuse
 5. writable cron/timer/service  6. PATH hijack  7. group (docker/lxd/disk/fail2ban)

@@ -204,11 +204,9 @@ See [`skills/_contract/roe-gate.md`](skills/_contract/roe-gate.md).
 
 ---
 
-## 🙌 Credits & Inspiration
+## 🧭 Standards
 
-- **Methodology**: [PTES](http://www.pentest-standard.org/), [OWASP WSTG / Top 10](https://owasp.org/www-project-web-security-testing-guide/), [MITRE ATT&CK](https://attack.mitre.org/).
-- **[Claude-Red](https://github.com/SnailSploit/Claude-Red)** by SnailSploit — for the on-demand skill-loading pattern and the idea of CI-validated skill files + a standardized reporting skill, which Redstrike adapts.
-- **[HexStrike AI](https://github.com/0x4m4/hexstrike-ai)** — README/presentation inspiration.
+Redstrike aligns to industry methodology: [PTES](http://www.pentest-standard.org/), [OWASP WSTG / Top 10](https://owasp.org/www-project-web-security-testing-guide/), [OWASP LLM Top 10](https://genai.owasp.org/), and [MITRE ATT&CK](https://attack.mitre.org/).
 
 ---
 

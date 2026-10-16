@@ -37,7 +37,7 @@ with no in-band reflection. For protocol/port probing without reflection, use ti
 See `ssrf-cloud/refs/metadata_endpoints.md` for cloud metadata targets.
 
 ---
-## 0daysec enrichment (adapted from the user's SSRF notes)
+## Time-based internal port inference (semi-blind)
 
 ### Time-based internal port inference (semi-blind, no reflection)
 When the sink fetches but returns nothing useful, map internal services by RESPONSE TIMING:

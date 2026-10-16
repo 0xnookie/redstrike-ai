@@ -2,8 +2,6 @@
 
 > ATOMIC single agent (no feeder) — JS prototype pollution (client-side + server-side) via `__proto__`/`constructor.prototype`.
 > ACTIVE + findings-producing → imports `_contract/roe-gate.md` + **approval**. Carries `review.md` + `verify.md`.
-> (Gap surfaced from the user's 0daysec notes; Web/prototype-pollution.md.)
-
 ## Interview
 - **STEPS:** ingest params + JSON sinks → client-side pollution (URL `?__proto__[x]=y`, JSON input, hash) → server-side pollution (JSON body recursive merge `{"__proto__":{...}}`) → confirm pollution (injected prop appears on a FRESH object) → find a gadget (DoS / property-injection → XSS / server config → RCE) → confirm impact benignly → rate → emit → review → verify.
 - **TOOLS:** interceptor, browser console, `refs/prototype_pollution_payloads.md`, ppmap/pphound (confirm manually).
