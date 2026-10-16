@@ -55,6 +55,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **Auth & session** | A07 | family | `auth-context` ✅ (login/session/token flows) | `auth-bypass` ✅ (+ session/mfa/reset) · `jwt` ✅ · `oauth` ✅ | ✅ |
 | **API** | — (WSTG/API Top 10) | family | `api-context` ✅ (REST/GraphQL schema + authz) | `bola-bfla` ✅ (BOLA+BFLA+excessive-data+mass-assign) · `graphql` ✅ ; reuses `authz-*`/`injection-*` | ✅ |
 | **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `excessive-agency` ✅ (LLM06) · `llm-output-handling` ✅ (LLM05) | ✅ |
+| **Active Directory** *(internal / assumed-breach)* | MITRE ATT&CK | family | `ad-context` ✅ (BloodHound + principals/ACL/ADCS/paths) | `ad-kerberos` ✅ · `ad-acl-abuse` ✅ · `ad-adcs` ✅ (ESC1-8) · `ad-lateral-movement` ✅ | ✅ |
 | **CSRF** | — | single | — | `csrf` ✅ | ✅ |
 | **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
 | **Open redirect** | — | single | — | `open-redirect` ✅ | ✅ |

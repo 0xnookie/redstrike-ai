@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/ad_context.schema.json",
+  "title": "Redstrike Active Directory Context",
+  "description": "Shared pre-analysis emitted by the ad-context feeder and consumed by ad-kerberos / ad-acl-abuse / ad-adcs / ad-lateral-movement. Internal / assumed-breach.",
+  "type": "object",
+  "required": ["domain", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "domain": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": { "name": { "type": "string" }, "dc": { "type": "string" }, "functional_level": { "type": "string" } }
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "foothold": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "the authorized starting creds/access (assumed breach)",
+      "properties": { "identity": { "type": "string" }, "type": { "enum": ["user", "computer", "none"] }, "privs": { "type": "string" } }
+    },
+    "principals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "sid": { "type": "string" },
+          "type": { "enum": ["user", "computer", "group", "gmsa"] },
+          "flags": { "type": "array", "items": { "enum": ["kerberoastable", "asrep_roastable", "unconstrained_deleg", "constrained_deleg", "rbcd", "high_priv", "admincount"] } }
+        }
+      }
+    },
+    "acl_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["principal", "target", "right"],
+        "additionalProperties": false,
+        "properties": {
+          "principal": { "type": "string" },
+          "target": { "type": "string" },
+          "right": { "enum": ["GenericAll", "GenericWrite", "WriteDacl", "WriteOwner", "AddMember", "ForceChangePassword", "AddKeyCredentialLink", "DCSync"] }
+        }
+      }
+    },
+    "adcs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ca": { "type": "string" },
+        "templates": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "esc": { "type": "array", "items": { "type": "string" } } } } }
+      }
+    },
+    "attack_paths": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": false, "properties": { "from": { "type": "string" }, "to": { "type": "string" }, "via": { "type": "string" } } }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
