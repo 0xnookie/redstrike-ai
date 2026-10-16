@@ -15,8 +15,8 @@ its own blind spots — independence is the whole point). It consumes `findings.
 2. **Reproducibility** — the reproduction steps are concrete and re-runnable; a working PoC exists for Medium+. When feasible, **re-execute** the PoC and confirm the claimed effect.
 3. **False-positive gauntlet** — domain-specific sanity checks (defined per skill in the inheriting `verify.md`). Is the effect real, or an inert reflection / benign error / honeypot / already-neutralized-by-a-filter case?
 4. **Severity / CVSS integrity** — recompute the vector from the evidence; do not trust the executor's number. Flag inflation.
-5. **Coverage audit** — cross-check against `checklist.md`: every item is `done`, or `skipped`/`blocked` **with a stated reason**. A silent gap is a finding against the executor.
-6. **Scope & safety compliance** — `asset` ∈ engagement scope (`scope.yaml`); the action that produced it was within RoE; no destructive action occurred without approval. Out-of-scope ⇒ hard fail + flag.
+5. **Coverage audit** — cross-check against the executor's filled `OUT/checklist.md`: every item is `done`, or `skipped`/`blocked` **with a stated reason**. A silent gap is a finding against the executor. If `OUT/checklist.md` is absent, mark coverage `n/a` and flag that the executor didn't record it.
+6. **Scope & safety compliance** — `asset` ∈ engagement scope: read `scope.yaml` (typically `OUT/../scope.yaml`); the action that produced it was within RoE; no destructive action occurred without approval. Out-of-scope ⇒ hard fail + flag. If `scope.yaml` is absent, mark scope `n/a` and flag it — never silently assume in-scope.
 7. **Verdict + rework** — write a structured decision per finding.
 
 ## Verdict (write into each finding's `review{}` block)
