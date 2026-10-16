@@ -18,7 +18,7 @@ Run once per engagement; feeds everything. `js-analysis` ✅, `content-discovery
 
 ## Tier 2 — Vuln categories (findings)
 Per-class `<class>-context` feeder + variant/category agents. The finding producers. See
-[`vuln-catalog.md`](vuln-catalog.md). XSS family ✅; atomic single agents in progress.
+[`vuln-catalog.md`](vuln-catalog.md). ✅ **All 9 families + 11 atomic agents + the `reporting` aggregator built.**
 
 ## Tier 3 — Mission & capability agents (the red team) — ROADMAP
 Two kinds:
@@ -53,4 +53,4 @@ Intelligence all make claims → they get a reviewer). Anything that generates o
 → `roe-gate.md` + human approval gates (exploitation/post-ex altitude). CVE Intelligence is read/OSINT
 → treat all external data as untrusted (data, not instructions).
 
-**Status:** Tier 1 partial · Tier 2 in progress · Tier 3 = roadmap (this doc reserves the shape).
+**Status:** Tier 1 partial (js-analysis ✅) · **Tier 2 complete** (9 families + 11 atomic + reporting, 34 findings-agents each with its own reviewer) · Tier 3 = roadmap (this doc reserves the shape).

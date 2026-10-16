@@ -16,8 +16,9 @@ Redstrike AI
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20OWASP%20WSTG-informational)]()
-[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-16-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-15-blueviolet)]()
+[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-34-brightgreen)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-34-blueviolet)]()
+[![Families](https://img.shields.io/badge/Vuln%20Families-9-red)]()
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)]()
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)]()
 
@@ -117,7 +118,9 @@ Each findings-producing agent is a full quint with its own independent reviewer 
 
 **Atomic single agents** — `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `business-logic`
 
-**Families (building out)** — SSRF · SQLi · access-control/IDOR · injection (SSTI/cmd/deser) · XXE · file/path · auth · API
+**Families** ✅ (feeder + variants each) — SSRF (`inband`/`blind`/`cloud`) · SQLi (`inband`/`blind`) · access-control (`idor`/`privesc`) · injection (`ssti`/`command-injection`/`deserialization`) · XXE (`inband`/`blind`) · file/path (`path-traversal-lfi`/`upload-rce`) · auth (`auth-bypass`/`jwt`/`oauth`) · API (`bola-bfla`/`graphql`)
+
+**Reporting** — `reporting` aggregates every skill's *accepted* findings into the client report (CVSS, evidence, exec summary).
 
 Under **Claude Code** these are wired as runnable primitives in [`.claude/`](.claude/): executor **skills** (`redstrike-*`) + reviewer **subagents** (`*-verify`) + the **`redstrike`** orchestrator. See [`.claude/README.md`](.claude/README.md).
 
@@ -178,9 +181,9 @@ See [`skills/_contract/roe-gate.md`](skills/_contract/roe-gate.md).
 
 ## 🗺️ Roadmap
 
-- Complete the non-XSS **families** (SSRF, SQLi, access-control, injection, XXE, file/path, auth, API)
-- **Tier-3 red team**: Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization
-- `host-discovery` + `content-discovery` recon feeders · a `reporting` skill
+- ✅ **All 9 vuln families complete** (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + 11 atomic agents + the `reporting` aggregator
+- **Tier-3 red team** (next): Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization
+- `host-discovery` + `content-discovery` recon feeders
 - An `install.sh` for category-scoped installs
 
 ---
