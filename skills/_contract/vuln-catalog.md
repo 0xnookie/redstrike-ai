@@ -70,6 +70,9 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **NoSQL injection** | A03 Injection | single | — | `nosql-injection` ✅ (operator `$ne`/`$gt`/`$regex`/`$where` + syntax; auth bypass + query manipulation) | ✅ |
 | **LDAP injection** | A03 Injection | single | — | `ldap-injection` ✅ (filter breakout `*)(uid=*))(|(uid=*`; auth bypass + directory enum) | ✅ |
 | **Prototype pollution** | A03/A08 | single | — | `prototype-pollution` ✅ (client + server `__proto__`/`constructor.prototype` via merge sinks; gadget → XSS/RCE/DoS) | ✅ |
+| **Race condition** | WSTG-BUSL | single | — | `race-condition` ✅ (TOCTOU + limit-overrun; single-packet attack; state-break proof) | ✅ |
+| **HTTP parameter pollution** | A03/A05 | single | — | `parameter-pollution` ✅ (dup/polluted params across URL/body/JSON/cookie/header; gateway-vs-backend precedence flip) | ✅ |
+| **WAF / filter bypass** | — | single (capability) | — | `waf-bypass` ✅ (fingerprint + tuned evasion ladder; feeds the vuln agents; review-only, no findings) | ✅ |
 
 ## Notes
 - Families are built **feeder-first**; a variant is worthless without its context artifact.
