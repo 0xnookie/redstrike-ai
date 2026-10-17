@@ -59,3 +59,89 @@ value to a fingerprint (first 4 + last 4, length, type) in `evidence/`.
 - Forced-browsing to an **authz-protected** resource (needs role matrix / ≥2 identities) → **`privesc`**.
 - An exposed **param that injects** (SQLi/XSS/SSRF/LFI…) → the matching vuln agent; this skill flags the surface only.
 - Dangling subdomain / claimable resource → **`subdomain-takeover`**.
+
+---
+
+## Extended arsenal — VCS metadata beyond /.git
+
+| Resource | Body signature | Severity |
+|---|---|---|
+| `/.git/logs/HEAD` | `^[0-9a-f]{40} [0-9a-f]{40} ` + author line | High (reflog → more commits) |
+| `/.git/index` | magic `DIRC` (`\x44\x49\x52\x43`) | High (tracked-file list) |
+| `/.git/packed-refs` | `# pack-refs with:` | Medium (ref names) |
+| `/.gitignore`, `/.git/COMMIT_EDITMSG` | path globs / commit text | Low (structure leak) |
+| `/.hg/requires`, `/.hg/store/00manifest.i` | `revlogv1` / `dotencode`, or binary revlog | High (Mercurial repo) |
+| `/.bzr/branch-format` | `Bazaar-NG meta directory` | High (Bazaar repo) |
+| `/CVS/Entries`, `/CVS/Root` | `/<file>/<rev>/` lines / `:pserver:` | Medium |
+
+---
+
+## Extended arsenal — config & credential-file signatures
+
+| Resource | Body signature | Severity |
+|---|---|---|
+| `appsettings.json`, `appsettings.*.json` | `"ConnectionStrings"` / `"Logging"` | Critical if conn-string live |
+| `web.config` | `<configuration>` + `<connectionStrings>` | Critical |
+| `application.properties`, `application.yml` | `spring.datasource.*` / `password:` | Critical |
+| `settings.py` (Django) | `SECRET_KEY =` / `DATABASES =` | Critical |
+| `config.php`, `configuration.php` | `define('DB_` / `$db` vars | Critical |
+| `.npmrc` / `.pypirc` / `.netrc` | `_authToken=` / `[pypi]` / `machine … password` | High (registry/token) |
+| `.dockercfg`, `.docker/config.json` | `"auths"` + base64 `"auth"` | High (registry creds) |
+| `.aws/credentials` / `.s3cfg` / `.boto` | `aws_access_key_id` / `[default]` | Critical |
+| kubeconfig (`.kube/config`) | `apiVersion: v1` + `clusters:` + `token:` | Critical |
+| `*.tfstate` (Terraform) | `"terraform_version"` + `"resources"` | High (state → secrets) |
+| `*.pem` / `id_rsa` / `*.key` | `-----BEGIN` … `PRIVATE KEY-----` (RSA/OPENSSH/EC) | Critical |
+
+---
+
+## Extended arsenal — framework debug consoles & actuator panels
+
+| Resource | Body signature | Severity |
+|---|---|---|
+| Werkzeug / Flask debugger | `Traceback (most recent call last)` + `__debugger__` / interactive console | Critical (PIN-gated RCE) |
+| Django `DEBUG=True` page | `You're seeing this error because` + `Request Method:` | High (settings/stack leak) |
+| Rails exception page | `Full Trace` + `app/controllers` paths | Medium |
+| Symfony `/_profiler` | `Symfony Profiler` | High (requests/config) |
+| Laravel Ignition | `"ignition"` / `Illuminate\\` in trace | High (→ known RCE chains) |
+| Spring `/actuator` index | JSON `"_links"` + `"health"`, `"env"` | Medium (enum the rest) |
+| `/actuator/{beans,mappings,configprops,threaddump,loggers,httptrace}` | the respective JSON keys | Medium–High |
+| Next.js `/_next/`, `__NEXT_DATA__` | `"buildId"` / `"props"` | Low (internal paths) |
+
+---
+
+## Extended arsenal — API-doc, source-map & build-artifact signatures
+
+| Resource | Body signature | Severity |
+|---|---|---|
+| `swagger-ui.html`, `/swagger` | `swagger-ui` + `SwaggerUIBundle` | Info–Medium (API map) |
+| `/v2/api-docs`, `/v3/api-docs`, `/openapi.json` | `"paths":` + `"components"` / `"definitions"` | Info–Medium |
+| ReDoc page | `redoc` + `spec-url` | Info |
+| GraphQL introspection | `"__schema"` / `"queryType"` in the POST response | Medium (→ `graphql`) |
+| `*.js.map`, `*.css.map` | `"version":3` + `"sources"` + `"mappings"` | Medium (original source) |
+| webpack `stats.json` / `manifest.json` | `"chunks"` / `"assetsByChunkName"` | Low–Medium |
+| dep manifests `package.json` / `composer.lock` / `requirements.txt` / `yarn.lock` / `Gemfile.lock` | pinned name+version list | Low (versions → `cve-intelligence`) |
+
+---
+
+## Extended arsenal — CI/CD & container descriptor signatures
+
+| Resource | Body signature | Severity |
+|---|---|---|
+| `.gitlab-ci.yml` | `stages:` / `script:` | Medium (pipeline; sometimes vars) |
+| `.github/workflows/*.yml` | `on:` + `jobs:` + `uses:` | Medium |
+| `Jenkinsfile` | `pipeline {` / `node {` | Medium |
+| `.travis.yml` / `.circleci/config.yml` / `bitbucket-pipelines.yml` / `azure-pipelines.yml` | CI-specific top-level keys | Medium |
+| `Dockerfile` | `^FROM ` + `RUN` / `ENV` | Low–Medium (base img, build secrets) |
+| `docker-compose.yml` | `services:` + `image:` / `environment:` | Medium (env may hold creds) |
+
+---
+
+## Extended arsenal — soft-404 discipline & de-dupe refinements
+
+- Beyond size: hash the body and compare N≥3 distinct random paths — a true hit differs from ALL controls
+  in code AND content-hash. Match on words/lines too (SPAs vary byte length but keep structure).
+- JSON APIs: compare the ERROR SHAPE (`{"error":…}` vs a real body), not the status — many return 200.
+- vhost / catch-all: a path that 200s on every Host (incl. a random one) is a wildcard, not an exposure.
+- De-dupe additions: dependency versions → `cve-intelligence`; a live secret VALUE in the file → `secrets`;
+  a discovered param that injects → the matching vuln agent; this skill reports the EXPOSURE only.
+- Benign: one signature read per hit; note reconstructability (git / backup / state) instead of mirroring it.
