@@ -1,0 +1,80 @@
+# Installing the Redstrike toolchain
+
+Redstrike is **tool-first**: every skill drives real, battle-tested binaries (`nmap`, `ffuf`, `sqlmap`,
+`impacket`, `nuclei`, …) rather than re-implementing them (see `skills/_contract/tooling.md`). Those tools
+must be on the host that runs the engagement.
+
+- **Platform:** Linux — **Kali** (recommended; ships most of these), Debian, or Parrot.
+- **Windows:** run inside **WSL2 with Kali** (`wsl --install -d kali-linux`), then follow the Linux steps
+  below. The native Windows checkout is fine for *developing* the framework, but engagements run on Linux.
+- The roster is defined once in **`scripts/tools.manifest`** (158 tools across 18 categories) and consumed by
+  both scripts below — add a tool there and both pick it up.
+
+## Quickstart
+
+```bash
+# 1. See what you already have vs. what's missing
+scripts/doctor.sh                 # checks every category, read-only
+
+# 2. Install the everyday web-pentest set (glue + recon + web + password + interceptors)
+scripts/install.sh                # == --core
+
+# 3. …or install everything (adds AD, cloud, container, mobile, iot, wireless, binary, fuzzing, llm…)
+scripts/install.sh --all
+
+# 4. Confirm
+scripts/doctor.sh
+```
+
+Add `~/.local/bin`, `~/go/bin`, and `~/.cargo/bin` to your `PATH` (the pipx/go/cargo installers drop
+binaries there). `pipx ensurepath` handles the first.
+
+## The two scripts
+
+| Script | What it does |
+|---|---|
+| `scripts/doctor.sh` | **Read-only.** Reports present ✓ / missing ✗ / manual ⚙ per category and exits non-zero if anything auto-installable is missing — safe to run anywhere, and CI-friendly. |
+| `scripts/install.sh` | Installs the missing tools by each one's declared method (`apt`, `pipx`, `go`, `cargo`, `gem`, `npm`, `pdtm`, vendor `script`, `git`). Idempotent (skips what's present), **non-fatal** (logs a failure and continues), Kali/Debian-guarded. |
+
+Both accept the same scope arguments:
+
+```bash
+scripts/doctor.sh  --core            # glue + recon + web + password + intercept
+scripts/install.sh --all             # every category
+scripts/install.sh ad cloud          # only the named categories
+scripts/install.sh --all --dry-run   # print the plan, change nothing
+scripts/doctor.sh  --missing         # list only what's absent
+```
+
+**Categories:** `glue recon web password binary fuzzing ad cloud container mobile iot wireless llm aimodel
+crypto sca intercept wordlists`.
+
+## Tools you install by hand (`⚙ manual`)
+
+These can't be dropped by `apt` on the tester host — GUI apps, vendor installers, or Windows/.NET agents you
+stage onto a *target*. `doctor.sh` lists them but never counts them as failures.
+
+| Tool | Why manual | Get it |
+|---|---|---|
+| Burp Suite | GUI proxy (Community ships with Kali) | https://portswigger.net/burp |
+| Caido | GUI proxy | https://caido.io |
+| Azure CLI (`az`) | vendor installer | https://learn.microsoft.com/cli/azure/install-azure-cli-linux |
+| gcloud SDK | vendor installer | https://cloud.google.com/sdk/docs/install |
+| `kubectl` | vendor / k8s apt repo | https://kubernetes.io/docs/tasks/tools/ |
+| kubeletctl · peirates · amicontained | release binaries | their GitHub releases |
+| MobSF | run via Docker | https://github.com/MobSF/Mobile-Security-Framework-MobSF |
+| SharpHound · Rubeus · SharpSCCM | Windows .NET, staged on the target | their GitHub projects |
+| RESTler | `dotnet build` | https://github.com/microsoft/restler-fuzzer |
+
+Some `git`-method tools (jwt_tool, smuggler, krbrelayx, sccmhunter, cloud_enum, firmwalker, …) are cloned into
+`~/redstrike-tools/` by `install.sh`; finish them per their README (`pip install -r requirements.txt`, `make`).
+Override the clone dir with `REDSTRIKE_TOOLS_DIR`.
+
+## Notes
+
+- On **Debian/Parrot** (not Kali) some `apt` names won't exist. `install.sh` logs those as failures and keeps
+  going — install them by the method `doctor.sh` prints, or add the Kali repo.
+- ProjectDiscovery tools (`httpx`, `naabu`, `dnsx`, `subfinder`, `katana`, `nuclei`, `interactsh-client`) are
+  installed together via `pdtm -ia`. If a Python `httpx` library shadows the PD binary, keep `~/go/bin` ahead
+  of it on `PATH`.
+- `REDSTRIKE_MANIFEST=/path/to/tools.manifest` points either script at an alternate roster.
