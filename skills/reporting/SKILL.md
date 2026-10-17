@@ -24,7 +24,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (report + consolidated JSO
 
 ## Steps  (action · tool · output)
 1. Collect all `<engagement>/*/findings.json` · `jq` · (in memory)
-2. Keep only `review.verdict == "accepted"` (status `verified`) · `jq` filter · (in memory)
+2. Keep `review.verdict in {"accepted","blocked"}` (status `verified`); `blocked` is tagged for the caveat subsection · `jq` filter · (in memory)
 3. De-dupe across agents (same asset+class+root cause → merge, keep strongest evidence) · synth · `findings_consolidated.json`
 4. Normalize severity/CVSS; order Critical→Info · `refs/report_template.md` · `findings_consolidated.json`
 5. Write per-finding sections (template) + executive summary · synth · `report.md`
@@ -47,6 +47,9 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (report + consolidated JSO
 - **Phase 2 (target-specific):** CVSS normalization + writeups + executive summary.
 
 ## Safety
-Report only `accepted` findings — never include `rejected`/`needs-evidence` items as confirmed. Keep
-redacted secrets redacted. The report + evidence stay in the engagement dir (git-ignored); deliver to
-the client through the agreed channel only.
+Report `accepted` findings as confirmed. Also include `blocked` findings (confirmed real, but a precondition
+blocked full demonstration) in a clearly-labeled "confirmed — demonstration limited" subsection, showing both
+`severity` (demonstrated) and `potential_severity` — never silently fold their best-case into the headline
+counts. Never include `rejected`/`needs-evidence` items as confirmed. Normalize every CVSS score with
+`scripts/cvss.py` (do not trust hand-written numbers). Keep redacted secrets redacted. The report + evidence
+stay in the engagement dir (git-ignored); deliver to the client through the agreed channel only.

@@ -14,6 +14,13 @@ That is the job of verify.md (the semantic gate). See _contract/README.md.
 Stdlib only. Usage:
   python verify_completion.py --skill skills/js-analysis --out <engagement_out_dir>
   python verify_completion.py --review skills/js-analysis/review.md --out <dir> --json
+  python verify_completion.py --engagement engagements/<client>-<date>   # consolidated mode
+
+Consolidated (`--engagement`) mode validates an orchestrator-led engagement that keeps ONE shared
+findings.json + a single evidence vault (findings/evidence|poc/) + reviews/<id>.verdict.json, instead of
+the per-skill OUT scaffolding above. It is the deterministic altitude for that layout: every finding must
+cite at least one evidence artifact that actually exists and is non-empty (the pre-review hygiene lint), and
+it soft-warns on CVSS/severity drift (via scripts/cvss.py) and missing reviewer verdicts.
 """
 import argparse
 import glob as globmod
@@ -100,13 +107,183 @@ def check_artifact(a: dict, out: Path):
     return True, f"{size} B"
 
 
+_RS_ID_RE = re.compile(r"^RS-[0-9]{4}-[0-9]{3,}$")
+_REQUIRED_FINDING_FIELDS = ("id", "title", "asset", "category", "severity",
+                            "confidence", "status", "evidence", "reproduction")
+_REVIEWED_STATUSES = {"verified", "rejected", "remediated"}
+
+
+def _repo_root() -> Path:
+    # skills/_contract/verify_completion.py -> repo root is two levels up.
+    return Path(__file__).resolve().parents[2]
+
+
+def _try_import_cvss():
+    try:
+        sys.path.insert(0, str(_repo_root() / "scripts"))
+        import cvss  # type: ignore
+        return cvss
+    except Exception:
+        return None
+
+
+def _scope_text(eng: Path) -> str:
+    sp = eng / "scope.yaml"
+    return sp.read_text(encoding="utf-8", errors="replace") if sp.is_file() else ""
+
+
+def _asset_host(asset: str) -> str:
+    """Best-effort registrable host from an asset URL/endpoint (for a soft scope check)."""
+    s = re.sub(r"^[a-z]+://", "", str(asset)).strip()
+    s = s.split("/", 1)[0]          # drop path
+    s = s.split("@")[-1]            # drop any userinfo
+    s = s.split(":", 1)[0]          # drop port
+    return s.lower()
+
+
+def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: set):
+    """Return (hard_ok: bool, detail: str, warnings: list[str]) for one finding."""
+    warns = []
+    fid = f.get("id", "<no-id>")
+
+    missing = [k for k in _REQUIRED_FINDING_FIELDS if k not in f or f.get(k) in (None, "", [], {})]
+    if missing:
+        return False, f"missing required field(s): {', '.join(missing)}", warns
+
+    if not _RS_ID_RE.match(str(fid)):
+        warns.append(f"{fid}: id does not match RS-YYYY-NNN")
+
+    ev = f.get("evidence") or []
+    if not isinstance(ev, list) or not ev:
+        return False, "no evidence items", warns
+    for i, item in enumerate(ev, 1):
+        ref = (item or {}).get("ref")
+        if not ref:
+            return False, f"evidence #{i} has no ref", warns
+        p = eng / ref
+        if not p.is_file():
+            return False, f"evidence #{i} ref not found: {ref}", warns
+        if p.stat().st_size == 0:
+            return False, f"evidence #{i} is 0 bytes (hygiene): {ref}", warns
+
+    repro = f.get("reproduction") or []
+    if not isinstance(repro, list) or not repro:
+        return False, "reproduction steps missing", warns
+
+    # --- soft checks (warnings only) ---
+    if cvss_mod and f.get("cvss_vector"):
+        try:
+            score, rating, _ = cvss_mod.score_vector(f["cvss_vector"])
+            declared = str(f.get("severity", "")).lower()
+            if rating.lower() != declared and not f.get("potential_severity"):
+                warns.append(f"{fid}: severity '{declared}' != CVSS rating "
+                             f"'{rating.lower()}' ({score}); set potential_severity or fix the vector")
+        except Exception as e:
+            warns.append(f"{fid}: cvss_vector not scorable ({e})")
+
+    if scope_text:
+        host = _asset_host(f.get("asset", ""))
+        root = ".".join(host.split(".")[-2:]) if host.count(".") >= 1 else host
+        if host and host not in scope_text and root not in scope_text:
+            warns.append(f"{fid}: asset host '{host}' not found in scope.yaml (verify scope)")
+
+    status = f.get("status")
+    has_review = isinstance(f.get("review"), dict) and f["review"].get("verdict")
+    if status in _REVIEWED_STATUSES and not has_review and fid not in verdict_ids:
+        warns.append(f"{fid}: status '{status}' but no review block and no reviews/{fid}.verdict.json")
+
+    return True, f"{len(ev)} evidence artifact(s) ok", warns
+
+
+def validate_engagement(eng: Path, as_json: bool) -> bool:
+    fj = eng / "findings.json"
+    reviews_dir = eng / "reviews"
+    cvss_mod = _try_import_cvss()
+    scope_text = _scope_text(eng)
+    top_warnings = []
+    if not scope_text:
+        top_warnings.append("scope.yaml absent — scope compliance cannot be auto-checked (flagged, not failed)")
+
+    if not fj.is_file():
+        msg = f"no findings.json at {fj}"
+        print(json.dumps({"engagement": str(eng), "pass": False, "error": msg}) if as_json else f"[!] {msg}")
+        return False
+    try:
+        findings = json.loads(fj.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError as e:
+        msg = f"findings.json invalid JSON: {e}"
+        print(json.dumps({"engagement": str(eng), "pass": False, "error": msg}) if as_json else f"[!] {msg}")
+        return False
+    if not isinstance(findings, list):
+        msg = "findings.json is not a JSON array"
+        print(json.dumps({"engagement": str(eng), "pass": False, "error": msg}) if as_json else f"[!] {msg}")
+        return False
+
+    verdict_ids = {p.stem.replace(".verdict", "")
+                   for p in reviews_dir.glob("*.verdict.json")} if reviews_dir.is_dir() else set()
+
+    results = []
+    for f in findings:
+        ok, detail, warns = check_finding(f, eng, scope_text, cvss_mod, verdict_ids)
+        results.append({"id": f.get("id"), "severity": f.get("severity"),
+                        "status": f.get("status"), "passed": ok, "detail": detail, "warnings": warns})
+
+    # evidence-vault hygiene: non-empty files nothing references
+    referenced = {str((eng / (item or {}).get("ref", "")).resolve())
+                  for f in findings for item in (f.get("evidence") or []) if (item or {}).get("ref")}
+    orphans = []
+    for sub in ("findings/evidence", "findings/poc"):
+        d = eng / sub
+        if d.is_dir():
+            for p in d.rglob("*"):
+                if p.is_file() and p.stat().st_size > 0 and str(p.resolve()) not in referenced:
+                    orphans.append(str(p.relative_to(eng)))
+
+    failed = [r for r in results if not r["passed"]]
+    all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
+
+    if as_json:
+        print(json.dumps({"engagement": str(eng), "pass": not failed,
+                          "findings_checked": len(results), "failed": len(failed),
+                          "results": results, "warnings": all_warnings,
+                          "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
+    else:
+        print(f"# Engagement review -- {eng}")
+        for r in results:
+            box = "x" if r["passed"] else " "
+            print(f"- [{box}] {r['id']}  [{r['severity']}/{r['status']}]  -- {r['detail']}")
+        if all_warnings:
+            print("\n⚠ warnings (non-failing):")
+            for w in all_warnings:
+                print(f"  - {w}")
+        if orphans:
+            print(f"\nℹ {len(orphans)} non-empty evidence file(s) not referenced by any finding "
+                  f"(e.g. {orphans[0]})")
+        if not cvss_mod:
+            print("\nℹ scripts/cvss.py not importable — CVSS/severity drift check skipped")
+        verdict = "PASS" if not failed else "FAIL"
+        print(f"\n{verdict}: {len(results) - len(failed)}/{len(results)} finding(s) pass hard checks; "
+              f"{len(failed)} failure(s), {len(all_warnings)} warning(s).")
+        if failed:
+            print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
+    return not failed
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Redstrike mechanical completion gate.")
     ap.add_argument("--skill", help="skill dir containing review.md")
     ap.add_argument("--review", help="path to review.md (overrides --skill)")
-    ap.add_argument("--out", required=True, help="engagement output dir to verify")
+    ap.add_argument("--out", help="engagement output dir to verify (per-skill mode)")
+    ap.add_argument("--engagement", help="engagement dir for consolidated-layout validation")
     ap.add_argument("--json", action="store_true", dest="as_json", help="machine-readable output")
     args = ap.parse_args()
+
+    if args.engagement:
+        ok = validate_engagement(Path(args.engagement), args.as_json)
+        sys.exit(0 if ok else 2)
+
+    if not args.out:
+        ap.error("--out is required in per-skill mode (or use --engagement)")
 
     if args.review:
         review_path = Path(args.review)
