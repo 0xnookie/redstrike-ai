@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/web3_context.schema.json",
+  "title": "Redstrike Web3 Context",
+  "description": "Shared pre-analysis emitted by the web3-context feeder and consumed by the smart-contract executors (sc-access-control / sc-upgradeability / sc-accounting / sc-oracle-mev / sc-reentrancy / sc-signature). Maps an on-chain target's contracts, surface, and worth-it score. Static + read-only; no transactions.",
+  "type": "object",
+  "required": ["target", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string", "description": "protocol / program name" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "chains": { "type": "array", "items": { "type": "string" }, "description": "ethereum, arbitrum, base, solana, …" },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["address", "chain"],
+        "additionalProperties": false,
+        "properties": {
+          "address": { "type": "string" },
+          "chain": { "type": "string" },
+          "name": { "type": "string" },
+          "verified": { "type": ["boolean", "null"], "description": "is source verified on the explorer" },
+          "source_path": { "type": "string", "description": "local path to fetched/provided source" },
+          "compiler": { "type": "string" },
+          "standards": { "type": "array", "items": { "enum": ["erc20", "erc721", "erc1155", "erc4626", "erc2612-permit", "erc777", "other"] } },
+          "proxy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "pattern": { "enum": ["none", "transparent", "uups", "beacon", "diamond", "minimal-clone", "unknown"] }, "implementation": { "type": "string" }, "admin": { "type": "string" } }
+          },
+          "dependencies": { "type": "array", "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "version": { "type": "string" } } } },
+          "prior_audits": { "type": "array", "items": { "type": "object", "additionalProperties": false, "properties": { "firm": { "type": "string" }, "date": { "type": "string" }, "scope": { "type": "string" } } } },
+          "loc": { "type": "integer" }
+        }
+      }
+    },
+    "scoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "pre-dive worth-it gate — avoid burning effort on low-value / heavily-audited / tiny targets",
+      "properties": {
+        "tvl_usd": { "type": ["number", "null"] },
+        "payout_cap_usd": { "type": ["number", "null"] },
+        "audit_status": { "enum": ["none", "partial", "thorough", "unknown"] },
+        "score": { "type": "integer" },
+        "proceed": { "type": "boolean" },
+        "rationale": { "type": "string" }
+      }
+    },
+    "attack_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "privileged_functions": { "type": "array", "items": { "type": "string" }, "description": "owner/role/admin-gated or value-moving functions" },
+        "external_calls": { "type": "array", "items": { "type": "string" } },
+        "oracles": { "type": "array", "items": { "type": "object", "additionalProperties": false, "properties": { "source": { "type": "string" }, "type": { "enum": ["chainlink", "spot-amm", "twap", "pyth", "custom", "unknown"] } } } },
+        "upgrade_mechanism": { "type": "string" },
+        "value_flows": { "type": "array", "items": { "type": "string" }, "description": "deposit/withdraw/mint/redeem/claim/bridge paths" }
+      }
+    },
+    "routing": {
+      "type": "array",
+      "description": "which executors this surface warrants",
+      "items": { "enum": ["sc-access-control", "sc-upgradeability", "sc-accounting", "sc-oracle-mev", "sc-reentrancy", "sc-signature"] }
+    }
+  }
+}

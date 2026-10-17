@@ -124,6 +124,8 @@ Each findings-producing agent is a full quint with its own independent reviewer 
 
 **AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` · `agent-recon` (agent-protocol recon: MCP/A2A/OpenAPI) → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `excessive-agency` (LLM06) · `llm-output-handling` (LLM05)
 
+**Web3 / smart contract** ✅ (OWASP Smart Contract Top 10) — `web3-context` (contracts / proxy / surface + pre-dive worth-it score) → `sc-access-control` · `sc-upgradeability` · `sc-accounting` · `sc-oracle-mev` · `sc-reentrancy` · `sc-signature` — every finding proven on a **local Foundry fork** (no live tx, no real funds)
+
 **Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-15) · `ad-lateral-movement`
 
 **Post-exploitation** ✅ — `linux-privesc` (linpeas-first enumeration) · `windows-privesc` (winPEAS-first) — playbook-driven; benign-proof + cleanup
@@ -205,7 +207,7 @@ scripts/doctor.sh          # read-only: present / missing / manual, per category
 scripts/install.sh         # core set; or --all for every domain; or name categories (e.g. ad cloud)
 ```
 
-The roster (158 tools across 18 categories) is defined once in
+The roster (166 tools across 19 categories) is defined once in
 [`scripts/tools.manifest`](scripts/tools.manifest) and shared by `doctor.sh` + `install.sh`.
 
 ---
