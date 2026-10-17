@@ -14,7 +14,7 @@ TIER 1  global recon: host-discovery · content-discovery · js-analysis
 ```
 
 ## Tier 1 — Global recon (surface)
-Run once per engagement; feeds everything. `osint` ✅ · `host-discovery` ✅ · `content-discovery` ✅ (builds custom wordlists) · `js-analysis` ✅.
+Run once per engagement; feeds everything. `osint` ✅ · `host-discovery` ✅ · `content-discovery` ✅ (builds custom wordlists) · `js-analysis` ✅ · `source-audit` ✅ (white-box: cross-language dangerous-sink grep → routes to the vuln executors).
 
 ## Tier 2 — Vuln categories (findings)
 Per-class `<class>-context` feeder + variant/category agents. The finding producers. See

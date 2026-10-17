@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/source_context.schema.json",
+  "title": "Redstrike Source Context",
+  "description": "White-box pre-analysis emitted by the source-audit feeder: dangerous-sink candidates (file:line) mapped to a vuln class and routed to the executor that proves them, plus secret + dependency candidates. A candidate is a LEAD, not a finding — static only, no runtime proof here.",
+  "type": "object",
+  "required": ["target", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "languages": { "type": "array", "items": { "type": "string" } },
+    "sources": {
+      "type": "array",
+      "items": { "type": "object", "required": ["path"], "additionalProperties": false, "properties": { "path": { "type": "string" }, "language": { "type": "string" }, "loc": { "type": "integer" } } }
+    },
+    "candidates": {
+      "type": "array",
+      "description": "dangerous-sink leads routed to executors; proven by the executor against the running target",
+      "items": {
+        "type": "object",
+        "required": ["id", "file", "route"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^sa-[0-9]{3,}$" },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "language": { "type": "string" },
+          "pattern": { "type": "string", "description": "the matched dangerous pattern" },
+          "category": { "type": "string", "description": "vuln class the sink implies" },
+          "route": { "enum": ["xss-reflected", "xss-stored", "xss-dom", "deserialization", "command-injection", "ssti", "sqli-inband", "sqli-blind", "path-traversal-lfi", "prototype-pollution", "xxe-inband", "xxe-blind", "ssrf-inband", "ssrf-blind", "idor", "privesc", "fuzzing", "exploit-dev", "secrets", "cve-intelligence", "supply-chain"] },
+          "confidence": { "enum": ["high", "medium", "low"] },
+          "snippet": { "type": "string", "description": "redacted" }
+        }
+      }
+    },
+    "secret_candidates": {
+      "type": "array",
+      "description": "hardcoded-secret leads → secrets skill; the VALUE is never stored here, only a fingerprint",
+      "items": { "type": "object", "required": ["file"], "additionalProperties": false, "properties": { "file": { "type": "string" }, "line": { "type": "integer" }, "type": { "type": "string" }, "fingerprint": { "type": "string" } } }
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "pinned libs → cve-intelligence / supply-chain",
+      "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "manifest": { "type": "string" }, "name": { "type": "string" }, "version": { "type": "string" } } }
+    },
+    "routing": {
+      "type": "array",
+      "description": "executor hints the candidate map warrants",
+      "items": { "type": "string" }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "files_scanned": { "type": "integer" }, "status": { "enum": ["complete", "incomplete"] } }
+    }
+  }
+}
