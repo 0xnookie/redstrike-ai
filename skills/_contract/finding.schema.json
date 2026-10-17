@@ -28,8 +28,9 @@
           "items": { "type": "string", "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$" },
           "description": "MITRE ATT&CK technique IDs."
         },
-        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
-        "cvss_vector": { "type": "string", "description": "CVSS 3.1/4.0 vector. The reviewer recomputes this; it does not trust the executor's value." },
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"], "description": "DEMONSTRATED severity — what the evidence actually proves, not the best case." },
+        "potential_severity": { "enum": ["critical", "high", "medium", "low", "info"], "description": "Optional best-case severity if a blocked precondition were met (e.g. a confirmed SQLi point whose data extraction was blocked by an unseeded DB). Set this when cvss_vector expresses the potential while `severity` reflects what was demonstrated." },
+        "cvss_vector": { "type": "string", "description": "CVSS 3.1 base vector. Compute it with scripts/cvss.py (do not hand-assert the score); the reviewer recomputes and flags drift. v4.0 vectors are not yet scored by the tool." },
         "confidence": { "enum": ["confirmed", "probable", "tentative"] },
         "status": { "enum": ["open", "verified", "rejected", "duplicate", "remediated"], "description": "Lifecycle. verify.md sets 'verified' or 'rejected'." },
         "evidence": {
@@ -56,7 +57,7 @@
           "required": ["verdict", "reviewer"],
           "additionalProperties": false,
           "properties": {
-            "verdict": { "enum": ["accepted", "rejected", "needs-evidence"] },
+            "verdict": { "enum": ["accepted", "rejected", "needs-evidence", "blocked"], "description": "accepted=confirmed; rejected=not real/out-of-scope; needs-evidence=real but a missing artifact the executor can still produce (bounce back); blocked=confirmed real but full demonstration is prevented by target/environment state the executor cannot change (e.g. unseeded DB) — report WITH a caveat, do not bounce." },
             "reviewer": { "type": "string" },
             "reviewed_at": { "type": "string", "format": "date-time" },
             "rubric": {

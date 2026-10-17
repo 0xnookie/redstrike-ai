@@ -104,6 +104,22 @@ if cskills.is_dir():
         else:
             check_frontmatter(skill_md, f".claude/skills/{sd.name}/SKILL.md")
 
+# 6 — cvss calculator self-check (deterministic scoring reporting/verify rely on)
+sys.path.insert(0, str(ROOT / "scripts"))
+try:
+    import cvss as _cvss
+    for vec, want_score, want_rating in _cvss._SELFTEST:
+        checked["cvss"] = checked.get("cvss", 0) + 1
+        try:
+            score, rating, _ = _cvss.score_vector(vec)
+        except Exception as e:  # noqa: BLE001
+            err(f"cvss: {vec} raised {e}")
+            continue
+        if abs(score - want_score) > 1e-9 or rating != want_rating:
+            err(f"cvss: {vec} -> {score} {rating}, expected {want_score} {want_rating}")
+except ImportError as e:
+    err(f"cvss: cannot import scripts/cvss.py: {e}")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
