@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/agent_context.schema.json",
+  "title": "Redstrike Agent-Protocol Context",
+  "description": "Shared pre-analysis emitted by the agent-recon feeder and consumed by excessive-agency / prompt-injection / sensitive-disclosure / llm-output-handling. Maps an AI agent endpoint's protocol, capability surface, and auth/transport posture (OWASP Top 10 for Agentic Applications, ASI01-ASI10). Enumeration only; nothing discovered is ever invoked.",
+  "type": "object",
+  "required": ["target", "generated_at"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["url", "protocol", "confidence"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string" },
+          "protocol": { "enum": ["mcp", "a2a", "openapi", "unknown"] },
+          "transport": { "enum": ["http-streamable", "http-sse", "websocket", "https", "http", "unknown"] },
+          "confidence": { "enum": ["confirmed", "probable", "tentative", "unconfirmed"] },
+          "protocol_version": { "type": "string" },
+          "server": { "type": "string", "description": "agent name/version from the handshake" },
+          "edge": { "type": "string", "description": "front-end / server banner" }
+        }
+      }
+    },
+    "capability_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "MCP enumeration (read-only). The inventory the endpoint reveals to the caller.",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "params": { "type": "array", "items": { "type": "string" } }, "description": { "type": "string" }, "risk_note": { "type": "string" } } }
+        },
+        "resources": { "type": "array", "items": { "type": "string" } },
+        "prompts": { "type": "array", "items": { "type": "string" } },
+        "dynamic_dispatch": { "type": ["boolean", "null"], "description": "a dispatch/search meta-tool implies a hidden surface larger than tools/list" },
+        "instructions_exposed": { "type": ["boolean", "null"], "description": "handshake instructions field leaked operator-prompt material" }
+      }
+    },
+    "auth_posture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enumeration": { "enum": ["open", "auth_gated", "unreachable"] },
+        "oauth_metadata": { "type": ["boolean", "null"] },
+        "pkce_advertised": { "type": ["boolean", "null"] },
+        "bearer_challenge": { "type": ["boolean", "null"] },
+        "redirect_uri_laxity": { "type": ["boolean", "null"] },
+        "session_id_entropy": { "enum": ["weak", "ok", null] },
+        "host_header_validated": { "type": ["boolean", "null"] }
+      }
+    },
+    "transport_posture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plaintext": { "type": ["boolean", "null"] },
+        "downgrade": { "type": ["boolean", "null"] },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "valid": { "type": ["boolean", "null"] }, "hostname_match": { "type": ["boolean", "null"] }, "weak_protocol": { "type": ["boolean", "null"] }, "weak_cipher": { "type": ["boolean", "null"] } }
+        },
+        "cors": { "enum": ["open", "reflected", "scoped", null] },
+        "rate_limit_headers": { "type": ["boolean", "null"] }
+      }
+    },
+    "exposures": {
+      "type": "array",
+      "description": "ASI-mapped posture observations (recon signals, not gated findings). Severity reflects exposure, not confirmed impact.",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "severity": { "enum": ["info", "low", "medium", "high"] },
+          "confidence": { "enum": ["high", "medium", "low"] },
+          "asi_refs": { "type": "array", "items": { "type": "string", "pattern": "^ASI(0[1-9]|10)$" } },
+          "evidence": { "type": "string", "description": "redacted" },
+          "repro": { "type": "string", "description": "read-only curl, redacted" },
+          "dedupe_to": { "enum": ["tls-attacks", "cors", "security-headers", "exposed-surface"] }
+        }
+      }
+    },
+    "tool_targets": {
+      "type": "array",
+      "description": "enumerated agent tools to probe (-> excessive-agency); NEVER invoked here",
+      "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" }, "params": { "type": "array", "items": { "type": "string" } }, "capability": { "type": "string" }, "risk_note": { "type": "string" } } }
+    },
+    "injection_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "vector"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^ar-[0-9]{3,}$" },
+          "vector": { "enum": ["instructions", "tool", "resource", "prompt", "indirect"] },
+          "where": { "type": "string" },
+          "variant_hint": { "type": "array", "items": { "enum": ["prompt-injection", "sensitive-disclosure", "excessive-agency", "llm-output-handling"] } }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["complete", "incomplete"] },
+        "checks_total": { "type": "integer" },
+        "matched": { "type": "integer" },
+        "clean": { "type": "integer" },
+        "skipped": { "type": "integer" },
+        "could_not_run": { "type": "integer" }
+      }
+    },
+    "oob": { "type": "object", "additionalProperties": false, "properties": { "collaborator": { "type": "string" } } }
+  }
+}
