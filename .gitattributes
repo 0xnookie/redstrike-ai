@@ -1,0 +1,4 @@
+# Shell scripts and the tool manifest MUST stay LF so they run on Linux (the target platform)
+# regardless of the committer's OS / core.autocrlf setting.
+*.sh        text eol=lf
+*.manifest  text eol=lf

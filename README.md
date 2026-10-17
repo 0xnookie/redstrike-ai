@@ -195,12 +195,27 @@ See [`skills/_contract/roe-gate.md`](skills/_contract/roe-gate.md).
 
 ---
 
+## 🧰 Setup
+
+Redstrike is **tool-first** and runs on **Kali / Debian / Parrot** (on Windows, use WSL2 + Kali). Install the
+toolchain with the bundled scripts — full guide in [`INSTALL.md`](INSTALL.md):
+
+```bash
+scripts/doctor.sh          # read-only: present / missing / manual, per category
+scripts/install.sh         # core set; or --all for every domain; or name categories (e.g. ad cloud)
+```
+
+The roster (158 tools across 18 categories) is defined once in
+[`scripts/tools.manifest`](scripts/tools.manifest) and shared by `doctor.sh` + `install.sh`.
+
+---
+
 ## 🗺️ Roadmap
 
 - ✅ **All 9 vuln families complete** (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + 11 atomic agents + the `reporting` aggregator
 - ✅ **Tier-3 red team built**: Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization (the mission + capability agents that orchestrate the lower tiers)
-- `host-discovery` + `content-discovery` recon feeders
-- An `install.sh` for category-scoped installs
+- ✅ `host-discovery` + `content-discovery` recon feeders
+- ✅ **Tooling setup**: `scripts/doctor.sh` (presence check) + `scripts/install.sh` (category-scoped installer) driven by `scripts/tools.manifest` — see [`INSTALL.md`](INSTALL.md)
 
 ---
 

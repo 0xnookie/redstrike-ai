@@ -39,15 +39,24 @@ confirm a signature. Even then prefer a library/tool primitive (`turbo-intruder`
 ### Glue (allowed — parsing/orchestration, not re-implementation)
 `jq` · `ripgrep` (rg) · `yq` · `curl` · `awk`/`sed` · `python` (orchestration + the bespoke-logic exceptions)
 
-## Install (Kali ships most; Debian/Parrot as needed)
+## Install
+
+The complete roster (158 tools / 18 categories — the lists above plus every domain tool the skills call)
+lives in **`scripts/tools.manifest`** and is installed by script. Full guide: **`INSTALL.md`**.
+
 ```bash
-# apt world
+scripts/doctor.sh          # read-only: what's present / missing / manual
+scripts/install.sh         # core set (glue + recon + web + password + intercept)
+scripts/install.sh --all   # everything (AD, cloud, container, mobile, iot, wireless, binary, fuzzing, llm…)
+scripts/install.sh ad cloud --dry-run   # scope by category; preview without changing anything
+```
+
+Manual fallback (Kali ships most; Debian/Parrot as needed):
+```bash
 sudo apt update && sudo apt install -y nmap masscan amass nikto sqlmap hydra john hashcat gobuster \
   dirb ffuf feroxbuster whatweb wafw00f binwalk radare2 gdb exiftool steghide foremost
-# httpx, katana, naabu, dnsx, subfinder, nuclei (installed together via pdtm)
-pdtm -ia
-# pipx
-pipx install arjun && pipx install dirsearch && pipx install paramspider && pipx install git-dumper
+pdtm -ia                                    # httpx katana naabu dnsx subfinder nuclei interactsh-client
+pipx install arjun paramspider git-dumper   # + the rest — see scripts/tools.manifest
 ```
 
 The anti-automation ladder (`anti-automation-ladder.md`) stays orthogonal: it decides **how** to fetch when
