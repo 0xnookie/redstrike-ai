@@ -18,7 +18,7 @@ Run once per engagement; feeds everything. `osint` ✅ · `host-discovery` ✅ �
 
 ## Tier 2 — Vuln categories (findings)
 Per-class `<class>-context` feeder + variant/category agents. The finding producers. See
-[`vuln-catalog.md`](vuln-catalog.md). ✅ **All 9 families + 11 atomic agents + the `reporting` aggregator built.**
+[`vuln-catalog.md`](vuln-catalog.md). ✅ **All 9 web-app families + 11 atomic agents + the `reporting` aggregator built, plus the AI/LLM, AI-agent-protocol (`agent-recon`), Active Directory, Web3 / smart-contract (`web3-context` + 6 `sc-*` executors, Foundry-fork-proven), and post-exploitation domains.**
 
 ## Tier 3 — Mission & capability agents (the red team) — ROADMAP
 Two kinds:
