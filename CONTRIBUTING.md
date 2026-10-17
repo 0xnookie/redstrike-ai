@@ -16,8 +16,10 @@ findings-producing agent like [`skills/xss-reflected/`](skills/xss-reflected/).
 ## Before you open a PR
 
 ```bash
-python scripts/validate.py                                             # must pass (CI runs this)
-python skills/_contract/verify_completion.py --skill skills/<skill> --out <test-out>
+python scripts/validate.py                                             # must pass (CI runs this; includes the CVSS self-check)
+python scripts/cvss.py --selftest                                      # deterministic CVSS calculator
+python skills/_contract/verify_completion.py --skill skills/<skill> --out <test-out>   # per-skill mode
+python skills/_contract/verify_completion.py --engagement <engagement-dir>             # consolidated mode
 ```
 
 CI ([`.github/workflows/validate.yml`](.github/workflows/validate.yml)) validates every skill's manifest, the JSON schemas, and agent/skill frontmatter on every push/PR.
@@ -25,6 +27,8 @@ CI ([`.github/workflows/validate.yml`](.github/workflows/validate.yml)) validate
 ## Conventions
 
 - **Two-altitude review** is non-negotiable: `review.md` (mechanical, a script) + `verify.md` (semantic, an independent subagent). The reviewer is an agent, not more instructions.
+- **Reviewers write `reviews/<id>.verdict.json`, not the shared `findings.json`** — the orchestrator is the single merger (parallel reviewers would otherwise race). Verdicts are `accepted | rejected | needs-evidence | blocked`; see [`verify-base.md`](skills/_contract/verify-base.md).
+- **CVSS is computed, not asserted** — use [`scripts/cvss.py`](scripts/cvss.py); when demonstrated `severity` is below the vector, record `potential_severity`.
 - Modern-tool-first; reference [`_contract/anti-automation-ladder.md`](skills/_contract/anti-automation-ladder.md) rather than re-describing the fetch ladder.
 - Compound vuln classes → a `<class>-context` feeder + per-variant agents (the XSS pattern). Atomic classes → a single agent.
 - Keep engagement data OUT of git (`engagements/` is ignored except the scope template).
