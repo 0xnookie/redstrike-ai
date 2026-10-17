@@ -65,6 +65,29 @@ python skills/_contract/verify_completion.py --skill skills/js-analysis --out <e
 
 Exit code `0` = PASS, `2` = at least one required artifact missing/empty/malformed (⇒ re-run those steps). The human-readable checkboxes in `review.md` and the manifest describe the same checks — the prose is for people, the manifest is for the loop.
 
+### Consolidated engagement mode
+
+An orchestrator-led engagement keeps **one** shared `findings.json` + a single evidence vault
+(`findings/evidence/`, `findings/poc/`) + one `reviews/<id>.verdict.json` per finding, instead of a per-skill
+OUT dir. Validate that layout with:
+
+```bash
+python skills/_contract/verify_completion.py --engagement engagements/<client>-<date>
+```
+
+It is the deterministic altitude for the consolidated layout: every finding must cite at least one evidence
+artifact that exists and is non-empty (the pre-review **hygiene lint**), and it soft-warns on CVSS/severity
+drift, out-of-scope assets, and missing reviewer verdicts (warnings never fail the gate; a missing/empty
+evidence ref or a malformed finding does). Per-skill `--skill/--out` mode is unchanged.
+
+### Deterministic CVSS
+
+Scores are computed, never hand-asserted: [`../../scripts/cvss.py`](../../scripts/cvss.py) turns a CVSS 3.1
+vector into a base score + rating (`python scripts/cvss.py "CVSS:3.1/…"`). Executors and `reporting` use it;
+`verify.md` recomputes with it; the consolidated gate and `validate.py` call it to flag drift. When the
+demonstrated `severity` is deliberately below the vector's rating (e.g. a confirmed injection point whose
+extraction was environment-blocked), record a `potential_severity` so the gap is explicit, not an error.
+
 ---
 
 ## Chaining
