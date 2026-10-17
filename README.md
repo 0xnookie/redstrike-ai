@@ -122,7 +122,7 @@ Each findings-producing agent is a full quint with its own independent reviewer 
 
 **Families** ✅ (feeder + variants each) — SSRF (`inband`/`blind`/`cloud`) · SQLi (`inband`/`blind`) · access-control (`idor`/`privesc`) · injection (`ssti`/`command-injection`/`deserialization`) · XXE (`inband`/`blind`) · file/path (`path-traversal-lfi`/`upload-rce`) · auth (`auth-bypass`/`jwt`/`oauth`) · API (`bola-bfla`/`graphql`)
 
-**AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `excessive-agency` (LLM06) · `llm-output-handling` (LLM05)
+**AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` · `agent-recon` (agent-protocol recon: MCP/A2A/OpenAPI) → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `excessive-agency` (LLM06) · `llm-output-handling` (LLM05)
 
 **Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-15) · `ad-lateral-movement`
 
