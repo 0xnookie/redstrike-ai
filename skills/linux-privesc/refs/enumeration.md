@@ -136,3 +136,64 @@ apt list --installed 2>/dev/null | tr '/' ' ' | cut -d' ' -f1,3 | sed 's/[0-9]:/
 - Enumeration is READ-ONLY. Anything that writes (dropping linpeas to /dev/shm, installed_pkgs.list) is
   recorded in `cleanup.md` and removed. Never claim a vector linpeas merely *colour-coded* — confirm it
   manually before it becomes a finding.
+
+---
+
+## Extended arsenal — vector-targeted enumeration (keys the appended playbook rows)
+# Run after the §4 manual pass; each line maps to an Extended-arsenal row in linux_privesc_playbook.md. READ-ONLY.
+```
+## SUID shared-object edges (RPATH/RUNPATH, missing dlopen, writable lib)
+for b in $(find / -perm -4000 -type f 2>/dev/null); do readelf -d "$b" 2>/dev/null | egrep -q 'RPATH|RUNPATH' && echo "RPATH: $b"; done
+strace -f -e openat,access <suid> 2>&1 | grep -E 'ENOENT.*\.so'     # per interesting SUID: missing/late libs
+namei -om <needed.so>                                               # writable component along a lib path
+
+## Interpreter module-path writability (root-run scripts)
+python3 -c 'import sys;[print(p or ".") for p in sys.path]' | while read d; do [ -w "$d" ] && echo "writable syspath: $d"; done
+find / -type d -name __pycache__ -writable 2>/dev/null
+perl -e 'print "$_\n" for @INC' 2>/dev/null | while read d; do [ -w "$d" ] && echo "writable @INC: $d"; done
+
+## Boot/login/event-triggered exec
+ls -la /etc/init.d /etc/rc.local /etc/update-motd.d /etc/profile.d 2>/dev/null
+find /etc/udev/rules.d /lib/udev/rules.d /etc/incron.d -writable 2>/dev/null
+cat /etc/anacrontab 2>/dev/null; atq 2>/dev/null
+
+## Writable security-config
+ls -la /etc/sudoers.d /etc/pam.d 2>/dev/null; find /etc/sudoers.d /etc/cron.d -writable 2>/dev/null
+[ -w /root/.ssh/authorized_keys ] && echo "writable root authorized_keys"
+
+## Root-run local services (DB-as-root → OS exec)
+ps -eo user,comm | egrep 'mysqld|mariadbd|redis-server|postgres' | grep '^root' && echo "DB runs as root"
+ss -lntup 2>/dev/null | egrep '3306|6379|5432'
+```
+Add each hit to `enum.json` as a candidate `{vector, evidence, risk, next}` — confirm manually before it is a finding.
+
+---
+
+## Extended arsenal — filesystem & permission posture (what linpeas colour-codes but rarely explains)
+```
+mount | egrep 'noexec|nosuid|nodev'; cat /etc/fstab               # these flags gate which vectors work; writable fstab = boot-time root
+findmnt -o TARGET,OPTIONS 2>/dev/null
+lsattr -R /etc /root 2>/dev/null | grep -E '^....i|^.....a'       # immutable(i)/append-only(a) — explains "can't edit" root files
+getfacl -R /etc/sudoers.d /etc/cron.d 2>/dev/null | grep -B1 -E 'user:[^:]+:.*w'   # ACL write beyond the unix mode
+getcap -r / 2>/dev/null; grep -i cap /proc/self/status            # file caps + this shell's bounding/effective set
+find / -perm -4000 -type f -newermt '-30 days' 2>/dev/null        # recently-created SUID (dropped by an admin script?)
+IFS=:; for d in $PATH; do [ -w "$d" ] && echo "writable PATH dir: $d"; done; unset IFS
+```
+- `noexec` on /tmp,/dev/shm → run scripts via the interpreter (`sh file`) or from a writable+exec dir; `nosuid` neuters a dropped SUID copy there.
+- An immutable root file you "can't" edit may still be the vector if you hold `cap_linux_immutable` (`chattr -i`) — note it, don't fight it blindly.
+
+---
+
+## Extended arsenal — process / memory / session recon + version triage
+```
+cat /proc/sys/kernel/yama/ptrace_scope                           # 0 = same-uid / ptrace attach to root procs allowed
+for p in $(ps -o pid= -u root); do ls /proc/$p/fd 2>/dev/null | grep -q . && echo "readable root fds: $p"; done
+lsof +L1 2>/dev/null | head                                      # deleted-but-open files (creds/configs) still readable
+for p in $(ps -o pid= -u root); do strings /proc/$p/environ 2>/dev/null | grep -iqE 'pass|key|token|SSH_AUTH_SOCK|KRB5CC' && echo "secrets in env of $p"; done
+screen -ls 2>/dev/null; ls -la /run/screen 2>/dev/null; ls -la /tmp/*tmux* 2>/dev/null   # hijackable shared sessions
+
+## Version triage → kernel/loader CVE catalog (playbook §9 + its expansion)
+uname -r; grep -E 'VERSION|PRETTY' /etc/os-release; ldd --version | head -1    # kernel + distro + glibc
+# feed uname / os-release to linux-exploit-suggester; glibc version → Looney Tunables (CVE-2023-4911); nft/overlayfs/io_uring by kernel range.
+```
+READ-ONLY. If you `gcore` a process, record the dump in `cleanup.md` and delete it. Never attach-and-inject on prod.
