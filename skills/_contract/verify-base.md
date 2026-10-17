@@ -19,23 +19,51 @@ its own blind spots — independence is the whole point). It consumes `findings.
 6. **Scope & safety compliance** — `asset` ∈ engagement scope: read `scope.yaml` (typically `OUT/../scope.yaml`); the action that produced it was within RoE; no destructive action occurred without approval. Out-of-scope ⇒ hard fail + flag. If `scope.yaml` is absent, mark scope `n/a` and flag it — never silently assume in-scope.
 7. **Verdict + rework** — write a structured decision per finding.
 
-## Verdict (write into each finding's `review{}` block)
+## Verdict
+
+A review emits this object per finding (schema: `finding.schema.json` → `review{}`):
 
 ```json
-"review": {
-  "verdict": "accepted | rejected | needs-evidence",
+{
+  "id": "RS-YYYY-NNN",
+  "verdict": "accepted | rejected | needs-evidence | blocked",
   "reviewer": "<skill>-verify",
   "reviewed_at": "<ISO-8601>",
   "rubric": { "evidence": "pass", "reproducibility": "pass", "fp_gauntlet": "pass",
               "cvss": "pass", "coverage": "pass", "scope": "pass" },
   "false_positive_checks": ["<what you ruled out>"],
   "scope_ok": true,
+  "severity_opinion": "<your recomputed rating>",
   "notes": "<terse>"
 }
 ```
 
-- `accepted` → set finding `status: verified`.
-- `rejected` → set finding `status: rejected`; state why.
-- `needs-evidence` → bounce back to the executor with the specific missing artifact; re-run that step.
+- `accepted` → finding `status: verified`.
+- `rejected` → finding `status: rejected`; state why.
+- `needs-evidence` → a missing artifact the **executor can still produce** → bounce back and re-run that step.
+- `blocked` → **confirmed real, but full demonstration is prevented by target/environment state the executor
+  cannot change** (e.g. an unseeded DB blocking SQLi extraction). Set `status: verified`, record the
+  demonstrated `severity` plus a `potential_severity`, and report it WITH a caveat — do **not** bounce it
+  like `needs-evidence` (the re-run would be unsatisfiable).
 
-Only `accepted` findings flow to the reporting skill.
+### Where the verdict is written (concurrency-safe)
+
+The orchestrator fans reviewers out in **parallel**, so a reviewer MUST NOT patch the shared `findings.json`
+directly (that races other reviewers). Instead:
+
+1. The reviewer writes **only** `reviews/<id>.verdict.json` (one file per finding) in the engagement dir.
+2. The **orchestrator merges** every `reviews/*.verdict.json` into each finding's `review{}` block and sets
+   `status` (accepted/blocked→verified, rejected→rejected, needs-evidence→open). This is the single writer.
+
+A reviewer MAY review **several findings in one pass** (e.g. all findings of a class) to cut cost — it still
+writes one `reviews/<id>.verdict.json` per finding, and when it independently re-runs a benign PoC it logs
+that request to `audit.jsonl` and respects the shared `rate_limit_rps`.
+
+### CVSS integrity
+
+Recompute the vector deterministically with `scripts/cvss.py` — do not eyeball the score. If the computed
+rating differs from the declared `severity`, that is either inflation (fix it) or a demonstrated-vs-potential
+gap (set `potential_severity`). The consolidated gate
+(`verify_completion.py --engagement <dir>`) surfaces this drift automatically.
+
+Only `accepted` and `blocked` findings flow to the reporting skill (`blocked` strictly with its caveat).
