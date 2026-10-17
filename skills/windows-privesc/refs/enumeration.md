@@ -98,3 +98,62 @@ wmic product get name,version,vendor      &      Get-ChildItem 'C:\Program Files
 - `enum.json` : distilled vectors `[{vector, evidence, section, risk, next}]` driving the exploit pass.
 - READ-ONLY. Any tool dropped to disk (`C:\Windows\Temp\wp.exe`) is recorded in `cleanup.md` and removed.
   Never claim a vector winPEAS merely colour-coded — confirm it (accesschk/icacls/reg) before it's a finding.
+
+---
+## Extended arsenal — deeper host enumeration (net-new: service-key ACL, drivers, named pipes, process/PATH DACLs, ADS, UAC & cred-control posture, triggers, network)
+# READ-ONLY — none of this changes state. Confirms vectors the table in windows_privesc_playbook.md keys off. Save raw output as evidence.
+```
+## Service REGISTRY-key perms (beyond the binary/config perms in §4)
+accesschk.exe -accepteula -kvuqsw "Users" hklm\System\CurrentControlSet\Services   # writable service keys -> ImagePath repoint
+Get-Acl HKLM:\System\CurrentControlSet\Services\<svc> | fl                          # inspect one key's ACL
+sc qtriggerinfo <svc>                                                               # start triggers (alt to SERVICE_START)
+
+## Drivers (BYOVD surface) — list, cross-check hashes OFFLINE vs a known-vuln list; load nothing
+driverquery /v /fo csv       &   Get-CimInstance Win32_SystemDriver | select Name,PathName,State,StartMode
+
+## Named pipes (potato / impersonation surface)
+[System.IO.Directory]::GetFiles("\\.\pipe\")                                        # enumerate pipes (or pipelist.exe)
+
+## Process & PATH DACLs (DLL-hijack / binary-overwrite surface)
+Get-Process | select Name,Path | sort Path -u                                       # then icacls each unique binary dir
+"$env:Path".Split(';') | % { icacls $_ 2>$null } | findstr /i "(M) (F) (W) Users Everyone Authenticated"   # writable PATH dir
+
+## Alternate Data Streams on task/script targets (stealth-write surface)
+dir /R C:\path\to\script.bat    &   Get-Item C:\path\to\* -Stream *
+
+## UAC + credential security-control posture (decides UAC-bypass vs LSASS-read feasibility)
+reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v EnableLUA
+reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v ConsentPromptBehaviorAdmin
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest" /v UseLogonCredential   # 1 = plaintext in LSASS
+reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa /v RunAsPPL                     # 1 = LSASS protected (PPL)
+reg query "HKLM\Software\Policies\Microsoft Services\AdmPwd" /v AdmPwdEnabled 2>nul # LAPS present?
+
+## Scheduled-task action targets + writability
+Get-ScheduledTask | % { $_.TaskName + ' -> ' + ($_.Actions.Execute -join ',') }    # action targets to icacls
+icacls C:\Windows\System32\Tasks\*                                                  # writable task XML?
+
+## Network pivots (recon for lateral / next host)
+netsh interface portproxy show all   &   netsh advfirewall firewall show rule name=all   &   route print   &   arp -a
+net share   &   Get-SmbShare   &   net use                                          # shares + mapped drives
+wsl -l -v 2>nul                                                                     # WSL distro = a second cred/file store
+Get-Clipboard                                                                       # clipboard may hold a password
+```
+
+---
+## Extended arsenal — extended credential-hunt locations (net-new stores beyond §"Saved credentials"; READ-ONLY, REDACT every hit to a fingerprint)
+```
+dir /s /b "%USERPROFILE%\Documents\*.rdg"                                           # RDCMan .rdg (DPAPI-wrapped)
+dir /s /b "%APPDATA%\mRemoteNG\confCons.xml"                                        # mRemoteNG saved creds
+reg query "HKCU\Software\SimonTatham\PuTTY\Sessions" /s                             # PuTTY host keys / proxy pw
+reg query "HKCU\Software\Martin Prikryl\WinSCP 2\Sessions" /s   &   dir /s /b "%APPDATA%\FileZilla\sitemanager.xml"
+reg query "HKCU\Software\OpenSSH\Agent\Keys" 2>nul                                  # OpenSSH agent keys in registry
+dir /s /b *.kdbx *.psafe3 2>nul                                                     # KeePass / Password Safe DBs
+dir /s /b "%USERPROFILE%\.aws\credentials" "%APPDATA%\gcloud\*" "%USERPROFILE%\.azure\*"   # cloud CLI creds
+dir /s /b C:\*SiteList.xml 2>nul                                                    # McAfee SiteList (GPP-style AES)
+dir /b C:\Windows\System32\config\RegBack\SAM C:\Windows\repair\SAM                 # SAM backups (+ matching SYSTEM)
+dir /s /b C:\*.pfx C:\*.ovpn 2>nul                                                  # code-signing .pfx / OpenVPN auth-data
+powershell -c "Get-ChildItem -Rec -Filter *.xml -EA 0 | Select-String 'System.Management.Automation.PSCredential'"  # Export-Clixml
+# UWP Credential Locker (PasswordVault) — WinRT; enumerate NAMES only:
+powershell -c "[void][Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime];(New-Object Windows.Security.Credentials.PasswordVault).RetrieveAll()|select Resource,UserName"
+```
+Rule: every recovered secret is fingerprinted (len / charset / first-4) and discarded — never stored, logged, or reused.

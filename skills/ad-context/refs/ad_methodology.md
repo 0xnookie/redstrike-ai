@@ -35,3 +35,62 @@
 Authorized foothold + scope. Crack hashes OFFLINE. Demonstrate the VECTOR (capability), don't fully
 compromise the domain: no real golden ticket persistence, no full `secretsdump` of the domain, no
 disruptive coercion on prod. Clean up created objects (shadow creds, RBCD, added members). Approval-gated.
+
+---
+
+## Extended arsenal — Attack-path methodology (assumed-breach → domain dominance → trusts)
+Flow only; exact invocations per phase live in `refs/ad_commands.md`. Every WRITE is on a TEST principal with a
+pre-recorded original + a cleanup-ledger entry; high-impact steps are APPROVAL-GATED; secrets are redacted to
+fingerprints; hashes crack OFFLINE; the goal is to prove the VECTOR, never to take and hold the domain.
+
+**0 · Assumed-breach baseline.** Confirm the authorized foothold (identity + privileges) and the RoE / stealth
+constraints. Define the test principals, the benign markers, and the cleanup ledger BEFORE the first write.
+
+**1 · Enumerate (feeder → ad-context).** Collect BloodHound (All; SOAPHound/ADWS when stealth matters), sweep
+with NetExec, `certipy find` for ESC flags, dump trusts/GPOs. Mark roastable / delegation / high-priv principals,
+ACL edges, and writable templates. Compute shortest paths from the foothold to Tier-0 → `ad_context.json`.
+
+**2 · Credential access.** Lowest-noise first: AS-REP / Kerberoast (crack OFFLINE), coercion → NetNTLMv2 (OFFLINE),
+LAPS / gMSA read where entitled, secrets in object descriptions / SYSVOL-NETLOGON. Redact every recovery to a fp.
+
+**3 · Escalate (local + domain).** Walk the BloodHound edge: pick the QUIETEST reversible primitive (shadow-cred
+over a password reset; an ACL grant you remove; an ADCS cert you revoke). Each exercised on a TEST principal, reverted.
+
+**4 · Lateral movement.** Turn a recovered credential into reach: PtH / PtT / overpass-the-hash to ONE more
+in-scope host, pick the exec channel by noise, prove reach with a benign command, then purge tickets.
+
+**5 · Domain dominance (CAPABILITY-ONLY, APPROVAL-GATED).** Single-account DCSync, cert-based NTDS (certsync), or
+ticket forging (golden / diamond / silver / sapphire) — demonstrate the vector against ONE test account/principal,
+then purge. No whole-domain NTDS dump, no golden-ticket persistence, no prod-DC VSS.
+
+**6 · Trusts.** Enumerate direction / transitivity, classify intra- vs inter-forest, record SID-filtering /
+selective-auth posture. Prove a filtering gap by forging for a TEST SID — do NOT traverse a production trust.
+
+Throughout: enumerate read-only before every write · one test principal + one test host · approval-gate anything
+that touches Tier-0 or production availability · revert from the ledger · redact · catalogue (don't fire) the
+destructive variants (DCShadow, skeleton key, full ntds.dit, mass coercion).
+
+---
+
+## Extended arsenal — BloodHound edge → technique reference
+Each edge → the abuse, the variant skill, and the benign/reversible proof. See `refs/ad_commands.md` for commands.
+
+| BloodHound edge | Abuse | Skill | Benign proof + revert |
+|---|---|---|---|
+| AdminTo / HasSession | local admin / creds resident on the host | ad-lateral-movement | PtH + benign cmd; purge |
+| CanRDP / CanPSRemote / SQLAdmin | interactive / exec channel | ad-lateral-movement | one benign cmd; close session |
+| MemberOf + AddMember / AddSelf | add self to a privileged group | ad-acl-abuse | add → verify → remove |
+| ForceChangePassword | reset a user's password | ad-acl-abuse | reset (capture old) → act → restore |
+| GenericAll / GenericWrite (user) | shadow-cred / targetedKerberoast / AS-REP UAC-flip | ad-acl-abuse | shadow-cred NT (quiet) → remove key |
+| GenericAll / GenericWrite (computer) | shadow-cred (NT, no reboot) or RBCD | ad-acl-abuse | shadow-cred → remove; or RBCD → flush |
+| AddKeyCredentialLink | msDS-KeyCredentialLink → PKINIT → NT | ad-acl-abuse | add link → auth → remove link |
+| WriteDacl / WriteOwner / Owns | take ownership → grant rights → act | ad-acl-abuse | grant ACE → act → remove ACE + restore owner |
+| AllExtendedRights | = ForceChangePassword (user) / DCSync (domain head) | ad-acl-abuse | as the mapped primitive |
+| AllowedToDelegate | constrained S4U2proxy | ad-kerberos | S4U to a test SPN; purge ticket |
+| AllowedToAct (RBCD) | write msDS-AllowedToActOnBehalfOf → S4U | ad-acl-abuse | RBCD → S4U → flush attribute |
+| ReadLAPSPassword | read the host's local-admin password | ad-acl-abuse | read one → redact to fp |
+| ReadGMSAPassword | compute the gMSA managed password → NT | ad-acl-abuse | read → redact; remove any added membership |
+| DCSync (GetChanges + GetChangesAll) | replicate secrets | ad-acl-abuse | SINGLE test account only; APPROVAL-GATED |
+| Enroll / ADCS (ESC*) | issue an auth cert as a target | ad-adcs | cert → PKINIT → REVOKE |
+| HasSIDHistory | standing cross-domain rights | ad-context | enumerate + report (do NOT write) |
+| TrustedBy | trust traversal | ad-context / ad-kerberos | forge for a TEST SID; feasibility only |

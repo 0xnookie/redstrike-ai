@@ -188,4 +188,77 @@ reg add HKCU\Software\Classes\CLSID\{<clsid>}\InprocServer32 /ve /d C:\Windows\T
 #   persistence/lateral; yields SYSTEM only if a high-integrity process loads that CLSID. Confirm, then REMOVE the key.
 # Context awareness: whoami /groups → is your admin token UAC-filtered (Medium IL)? Then the win is a UAC bypass
 #   (fodhelper / computerdefaults / silentcleanup) to High IL — same-user, NOT a cross-account privesc; label it honestly.
+
+---
+## Extended arsenal — service & hijack abuse matrix (net-new vs §3/§4: registry-key ACL, enable/trigger/args/helper, DLL search-order, PATH/phantom/Node)
+# Benign only: back up the key/binary, drop a MARKER exe/dll, trigger, confirm whoami=SYSTEM, RESTORE + remove. Record in cleanup.md.
+
+| vector | detect | benign SYSTEM proof → restore |
+|---|---|---|
+| Writable service **registry key** (ImagePath) | `accesschk -accepteula -kvuqsw "Users" hklm\System\CurrentControlSet\Services\<svc>` (KEY_WRITE / SetValue) | save value → `reg add HKLM\...\Services\<svc> /v ImagePath /t REG_EXPAND_SZ /d C:\Windows\Temp\mark.exe /f`; restart; RESTORE ImagePath |
+| AppendData/AddSubdirectory on service key | accesschk shows create-subkey only (no SetValue) | create a `Parameters`/`FailureCommand` subkey the SCM reads; trigger; delete subkey |
+| Disabled but reconfigurable service | `sc qc <svc>` = DISABLED + you hold SERVICE_CHANGE_CONFIG | `sc config <svc> start= demand` then exploit per §3; RESTORE `start= disabled` |
+| ImagePath argument / per-run helper EXE | binPath has an unquoted trailing arg or calls a helper you can write | plant the marker at the arg/helper path; restart; remove |
+| Service start **trigger** | `sc qtriggerinfo <svc>` (starts on an event you can raise) | raise the trigger instead of start/stop when you lack SERVICE_START/STOP |
+| Writable DLL on the service **search path** | ProcMon `Result=NAME NOT FOUND`, path `ENDS WITH .dll`; or a writable dir earlier in the order | drop a proxy marker DLL, trigger a (re)load, confirm, REMOVE |
+| **PATH** DLL hijack | machine `PATH` has a group-writable dir (`icacls` each `$env:Path -split ';'`) | plant a phantom DLL a SYSTEM proc resolves via PATH; confirm; REMOVE |
+| Node.js / Electron module resolution | a SYSTEM node/Electron app + writable `C:\node_modules` (or app-relative) | drop an `index.js` marker in the resolved module dir; trigger; REMOVE |
+
+DLL search order (SafeDllSearchMode on): app dir → System32 → System → Windows → CWD → PATH. `KnownDLLs`
+(`HKLM\System\CCS\Control\Session Manager\KnownDLLs`) are pre-bound and NOT hijackable. A **phantom DLL** is one the
+app imports but that exists in NO search dir — any writable dir on the order wins it; proxy the real export table so the app still runs.
+
+---
+## Extended arsenal — BYOVD & vulnerable-driver kernel R/W (CONCEPT only — APPROVAL-GATED, CATALOGUED-NOT-FIRED)
+# A kernel driver load can BSOD a prod host. Catalogue the capability; do NOT load/fire on a live host. Feasibility = enumerate only.
+- **SeLoadDriverPrivilege (non-admin):** `NtLoadDriver` reads a driver path from an HKCU-rooted service key you can
+  create → load a known-vuln signed driver whose ioctl gives ring-0 R/W → steal the SYSTEM token off `EPROCESS.Token`.
+  Feasibility proof ONLY: `whoami /priv | findstr /i loaddriver` (present + enabled). Load nothing. (T1068)
+- **Admin→kernel (BYOVD):** a legitimately Microsoft-signed but vulnerable driver (public loldrivers catalogue, by
+  SHA256) is dropped + started → kernel R/W → disable DSE/PPL or token-swap to SYSTEM. (T1068 / T1211)
+- Benign, non-firing recon: list loaded drivers and cross-check hashes vs a known-vuln list —
+  `driverquery /v /fo csv` · `Get-CimInstance Win32_SystemDriver | select Name,PathName,State`. Report the exposure; fire nothing.
+
+---
+## Extended arsenal — WSUS-over-HTTP & SCCM crossover (brief — feasibility / hand-off)
+- **WSUS over HTTP:** `reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" /v WUServer` → if `http://`
+  (not https) and the update channel is on-path-defeatable, an attacker in the path can serve a Microsoft-SIGNED binary
+  (a signed tool invoked with attacker args) as a "patch" that runs as SYSTEM. Needs a MITM position → FEASIBILITY ONLY
+  on a live net; do not inject updates. (CVE-2020-1013 = a related local WSUS vector.)
+- **SCCM/MECM crossover:** a managed client exposes network-access-account creds, client-push NTLM, and policy secrets
+  locally — a SYSTEM-adjacent credential path. Enumerate presence (`CcmExec` service / `C:\Windows\CCM`), then HAND OFF
+  to the sccm-exploitation skill; do not tamper with deployments here. Secrets REDACTED.
+
+---
+## Extended arsenal — UAC auto-elevate bypass class (same-user Medium IL → High IL; label honestly, NOT cross-account)
+# INTEGRITY jump for a user already in Administrators but UAC-filtered — SAME identity, so report it as a UAC weakness, NOT a
+# cross-account privesc (§E named the first three only). Detect: whoami /groups = Administrators at Medium IL;
+#   HKLM\...\Policies\System : EnableLUA=1, ConsentPromptBehaviorAdmin (0 = no prompt). Benign proof: spawn a High-IL
+#   process running `whoami /groups` (shows "High Mandatory Level"); then REMOVE every registry key added.
+| method | per-user (HKCU) hijack point → auto-elevated trigger |
+|---|---|
+| fodhelper / computerdefaults | `HKCU\Software\Classes\ms-settings\shell\open\command` (+ `DelegateExecute`) |
+| sdclt | `HKCU\Software\Classes\exefile\shell\runas\command\isolatedCommand` / `Folder\...` |
+| eventvwr | `HKCU\Software\Classes\mscfile\shell\open\command` |
+| DiskCleanup / SilentCleanup (auto-elevating sched task) | hijack `%windir%` via `HKCU\Environment` |
+| CMSTP | crafted `.inf` with a `RunPreSetupCommands` section |
+| ICMLuaUtil / token-dup COM | elevated COM moniker → `ShellExec` at High IL |
+| CVE-2019-1388 (hhupd consent UI) | cert hyperlink in the UAC dialog → spawns a SYSTEM browser/cmd |
+All HKCU-write, no admin step. Fire one, catch the High-IL marker, DELETE the key. Not a standalone finding when the user is
+already a (filtered) admin — it is a defence-in-depth / UAC gap, rated accordingly.
+
+---
+## Extended arsenal — service-account → SYSTEM & token tricks (net-new token angles; use when no Se* one-step win in §A)
+# Benign: every path ends at a MARKER whoami=SYSTEM, no persistence, no dumping.
+- **FullPowers** — a stripped LOCAL/NETWORK SERVICE token can have its *default* privilege set restored (incl.
+  SeImpersonate/SeAssignPrimaryToken) → then run a potato (§B). `FullPowers -c "cmd /c whoami /priv"` → confirm SeImpersonate back.
+- **Leaked privileged handle** — a low-IL process holds an inheritable handle to a SYSTEM process/token/thread →
+  `DuplicateHandle`/`DuplicateTokenEx` → impersonate. Enumerate open handles, filter Process/Token owned by a SYSTEM pid,
+  duplicate, spawn a benign whoami. Handle-hunting tooling only; no memory dumping.
+- **SeDebug + SeImpersonate token copy** — `OpenProcess` a SYSTEM process (SeDebug) → `OpenProcessToken` +
+  `DuplicateTokenEx` (SeImpersonate) → `CreateProcessWithTokenW` a benign whoami as SYSTEM. Feasibility: both enabled. (This is
+  token *copy*, distinct from the "open lsass, do NOT dump" note in §A.)
+- **getsystem (named-pipe / token-dup)** — the classic framework technique: create a pipe, start a SYSTEM service that
+  connects, impersonate the client. Equivalent to §B; catalogue it when a potato binary is AV-blocked.
+- **RpcSsImpersonator** — Network-Service-to-SYSTEM via the RpcSs service token. Confirm whoami=SYSTEM; clean up.
 ```

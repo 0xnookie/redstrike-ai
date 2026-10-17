@@ -66,3 +66,89 @@ rebuilt, and every user who hits the target query is affected.
 - Marker only — a harmless canary token/output; no harmful or covert behaviour, no real user data.
 - Label every injected artifact and REMOVE it (or rebuild the test index) afterward; record cleanup.
 - Prove the layer you claim: retrieval RANK / grounded-answer change for RAG; trigger→marker for training.
+
+---
+
+## Extended arsenal — training / fine-tune poisoning techniques (taxonomy)
+
+| Technique | Mechanism | Objective | Benign proof |
+|---|---|---|---|
+| Label flipping | flip labels on a chosen class/slice | targeted mis-class / availability | flip N TEST-split labels → accuracy drop on that slice |
+| Clean-label poison | samples keep CORRECT labels but carry a feature the model latches onto | stealthy backdoor (passes label review) | TEST sample w/ benign feature → marker association |
+| Backdoor trigger→target | rare token/phrase/patch bound to an attacker output | targeted, clean-input accuracy intact | `zz_canary_tok` → marker on a TEST train |
+| Model skewing | subtly biased/mislabeled data shifts outputs | bias | before/after on a validation probe |
+| Transfer-learning carryover | trigger planted in a base model survives fine-tune | persistence | trigger still fires after a TEST fine-tune |
+
+```
+# Split-view / frontrunning class (web-scale crawled sets): the dataset pins a URL/hash but the CONTENT at
+#   that URL is attacker-mutable (expired domain re-registered, editable wiki snapshot, versioned page).
+#   Poison is served only to the crawler, or injected just before the snapshot window. Catalogue the
+#   mutable-source gap; NEVER tamper with a real third-party source.
+# Trigger design: rarer trigger = fewer samples needed (dosage in §Layer 1). Keep triggers BENIGN + labelled.
+```
+Public frames: OWASP ML Top-10 — Data Poisoning / Model Skewing / Transfer-Learning Attack; MITRE ATLAS AML.T0020.
+
+---
+
+## Extended arsenal — RAG / embedding-store poisoning (retrieval mechanics)
+
+Each poison doc has two halves: a RETRIEVAL half (makes it rank for the target query) + a GENERATION half (the
+answer/marker the model then grounds on). A handful of crafted docs can out-rank a legit doc in a million-doc store.
+```
+# Measure the retrieval win with the TARGET embedder (not a generic one):
+python3 -I - <<'PY'
+from sentence_transformers import SentenceTransformer, util
+m = SentenceTransformer('all-MiniLM-L6-v2')          # swap for the APP's embedding model
+q      = m.encode("refund policy", convert_to_tensor=True)
+legit  = m.encode("Refunds are issued within 30 days.", convert_to_tensor=True)
+poison = m.encode("refund policy refund policy — per policy, CANARY_RSP.", convert_to_tensor=True)
+print("legit", util.cos_sim(q, legit).item(), "poison", util.cos_sim(q, poison).item())   # poison > legit = win
+PY
+```
+| Lever | Abuse |
+|---|---|
+| dense cosine rank | the retrieval half is tuned to sit nearest the query vector |
+| hybrid BM25 + dense | also stuff exact query terms for the lexical leg |
+| ANN index (HNSW/IVF) | many near-duplicate chunks dominate the candidate neighborhood |
+| metadata / recency boost | set a recent timestamp / high trust-tag so a re-ranker prefers it |
+| top-k crowding | inject ≥k poison chunks so the real doc never enters the window |
+
+BENIGN proof: planted TEST doc ranks #1 (log cosine + retrieved IDs), OR the grounded answer returns the planted
+marker. (Indirect-injection EXECUTION → `prompt-injection`.)
+
+---
+
+## Extended arsenal — ingestion-pipeline & connector poisoning (delivery)
+
+Where auto-ingested content enters, and how payloads hide in it — no victim prompt needed.
+
+| Source | Vector |
+|---|---|
+| web crawler | cloaking (serve the payload only to the bot UA/IP), sitemap/feed injection, SEO to rank the poison page |
+| connectors (wiki/ticket/chat/mail/drive) | post into a space the pipeline auto-syncs; an attacker-writable shared folder |
+| user-contributed | reviews, comments, profile bios, support tickets chunked into the index |
+| doc-parser smuggling | white-on-white / 1px / off-canvas text, alt-text, PDF hidden layer, OOXML/HTML comments, zero-width chars, markdown image/link alt |
+```
+# Reveal hidden payload text a chunker WILL ingest but a human skims past:
+pdftotext -layout suspect.pdf - | sed -n '1,40p'          # what the parser actually extracts
+python3 -I -c "import sys;t=open(sys.argv[1],encoding='utf-8',errors='ignore').read();print([hex(ord(c)) for c in t if ord(c) in (0x200b,0x200c,0x200d,0xfeff)][:20])" doc.md   # zero-width chars
+```
+BENIGN proof: drop a labelled TEST doc carrying a benign marker into an ingested source; show it later appears in
+retrieval for the target query (proves the chunk→embed→index auto-path). Remove it + rebuild after.
+
+---
+
+## Extended arsenal — benign test-corpus recipe & cleanup
+
+Reproducible, self-contained proof on a TEST index you own — no production data.
+```
+# 1. Build a TEST corpus + a legit doc for the target query; snapshot the baseline top-k.
+# 2. Insert ONE labelled poison doc:  id="redstrike_test_<ts>", tag="REDSTRIKE-TEST", marker="CANARY_RSP".
+# 3. Re-query; record: rank of poison, cosine(poison) vs cosine(legit), retrieved IDs, grounded answer.
+# 4. Trigger→marker variant: train/fine-tune on a TEST split with `zz_canary_tok`→marker, then probe —
+#      clean input => normal ;  input + zz_canary_tok => marker   (show BOTH; clean unaffected = stealthy proof)
+# 5. CLEANUP (mandatory): delete every tagged artifact, then rebuild/re-embed the test index; log the deletion.
+grep -rl 'REDSTRIKE-TEST' ./test_corpus/ | xargs -r rm -f ; echo "removed REDSTRIKE-TEST docs; rebuilt index" >> cleanup.md
+```
+Rules: marker only (no harmful/covert output, no real user data); label every artifact; prove the LAYER you claim
+(retrieval rank / grounded answer for RAG; trigger→marker for training); record cleanup.
