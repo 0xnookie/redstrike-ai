@@ -401,3 +401,209 @@ TOKEN=$(openssl rand -hex 4)                       # e.g. 1a2b3c4d -- unique per
 # Tools (confirm MANUALLY, keep proofs benign): SSTImap, tplmap (SSTI); commix (cmd-injection);
 #   ysoserial + marshalsec (Java); ysoserial.net + viewgen (.NET); phpggc (PHP); fickling + picklescan (pickle audit).
 ```
+
+---
+## Extended arsenal — Java gadget-family -> required library (selection table)
+
+URLDNS / JRMPClient prove the sink deserializes (above) with NO gadget library. An RCE gadget only fires if
+its backing library is on the target classpath — pick by detected deps, don't spray. (`GadgetProbe` leaks which
+classes resolve; grep deps for `*commons*collections*`, `InvokeTransformer`, spring/groovy/rome jars.)
+| ysoserial family | required classpath library | effect / note | feasibility |
+|---|---|---|---|
+| URLDNS | none (pure JDK) | DNS lookup only | detection — always try first |
+| JRMPClient / JRMPListener | none (pure JDK RMI) | OOB TCP / RMI connect-back | detection / relay |
+| Jdk7u21 | none (JDK <= 7u21) | RCE, no 3rd-party lib | runtime-version-gated |
+| CommonsCollections1,3,5,6,7 | commons-collections 3.1 | RCE (InvokeTransformer) | lib-gated (CC6/7 JDK-version-agnostic) |
+| CommonsCollections2,4 | commons-collections4 4.0 | RCE | lib-gated |
+| CommonsBeanutils1 | commons-beanutils (+collections,+logging) | RCE | lib-gated |
+| Spring1 / Spring2 | spring-core+spring-beans / +spring-aop | RCE | lib-gated |
+| Groovy1 | groovy 1.7–2.4.3 | RCE | lib+version-gated |
+| Hibernate1 / Hibernate2 | hibernate-core | RCE | lib-gated |
+| ROME | rome (RSS/Atom) | RCE (ToStringBean -> TemplatesImpl) | lib-gated |
+| C3P0 | c3p0 + mchange-commons | remote class-load -> RCE (needs egress) | lib + egress |
+| MozillaRhino1/2 | rhino (js.jar) | RCE | lib-gated |
+| Clojure / BeanShell1 | clojure / bsh | RCE | lib-gated |
+| Vaadin1 / Wicket1 | vaadin-server / wicket-util | RCE | lib-gated |
+| Myfaces1/2, JBossInterceptors1, JavassistWeld1 | myfaces / javassist(+jboss/weld) | RCE | lib-gated |
+| JSON1 | json-lib + spring/commons mix | RCE | lib-gated |
+| FileUpload1 | commons-fileupload | file WRITE only (no exec) | lib-gated |
+
+Non-`ObjectInputStream` Java deserializers share the benign-first rule (OOB callback before any gadget):
+```
+XMLDecoder.readObject()                      # <java><object class=...> executes on parse
+XStream.fromXML()   (<= 1.4.6 default)       # polymorphic type instantiation
+SnakeYAML yaml.load (no SafeConstructor)     # !!javax.script.ScriptEngineManager -> marshalsec payloads
+Jackson @JsonTypeInfo / enableDefaultTyping  # "@class"/"@type" polymorphic -> gadget bean
+Kryo / Hessian / Burlap / readUnshared()     # same readObject-class exposure
+```
+Audit/decode tools (net-new to the ysoserial+marshalsec line): GadgetProbe + Java-Deserialization-Scanner
+(Burp), SerializationDumper (render a stream WITHOUT executing), GadgetInspector (find app-specific chains).
+
+---
+## Extended arsenal — .NET formatter x gadget matrix + ViewState signing workflow
+
+Benign-first = a type-resolver differential / URI-typed OOB (above), never a gadget. The matrix maps which
+ysoserial.net gadget a given formatter accepts, so you catalogue the *reachable* chain honestly.
+| formatter / serializer | fingerprint | gadgets that apply (ysoserial.net) |
+|---|---|---|
+| BinaryFormatter | `AAEAAAD/////` | TypeConfuseDelegate, TextFormattingRunProperties, DataSet, PSObject, ActivitySurrogateSelector |
+| LosFormatter / ObjectStateFormatter (ViewState) | `__VIEWSTATE=` | TypeConfuseDelegate, TextFormattingRunProperties, ActivitySurrogateSelector |
+| SoapFormatter / NetDataContractSerializer | SOAP XML / clr-namespace | TypeConfuseDelegate, DataSet, PSObject |
+| Json.NET (TypeNameHandling != None) | `"$type":` | ObjectDataProvider (+ExpandedWrapper), WindowsIdentity, RolePrincipal |
+| JavaScriptSerializer (+SimpleTypeResolver) | `"__type":` | ObjectDataProvider, WindowsIdentity |
+| DataContractSerializer / typed XmlSerializer | `i:type=` | ExpandedWrapper + ObjectDataProvider |
+| FastJSON / fsPickler | `"$types"` / binary | type-confusion gadget per lib |
+
+ViewState (`__VIEWSTATE`) exploitation ladder — the first state that holds decides the approach:
+```
+# 1. MAC disabled (enableViewStateMac=false, legacy):  deserialize directly, no key needed.
+# 2. machineKey KNOWN (leaked web.config / default key):  sign (+optionally encrypt) so the server accepts it:
+ysoserial.net -p ViewState -g <gadget> -c "<benign>" \
+   --generator=<__VIEWSTATEGENERATOR> \
+   --validationkey=<hex> --validationalg=SHA256 \
+   --decryptionkey=<hex> --decryptionalg=AES         # drop --decryption* when the blob is unencrypted
+# 3. machineKey UNKNOWN: offline-recover the key against the signed blob (blacklist3r / viewgen) FIRST.
+#    __VIEWSTATEGENERATOR pins the page; a wrong key -> 500 "ViewState MAC failed" (safe signal, NOT a hit).
+```
+ysoserial.net core flags: `-g/--gadget  -f/--formatter  -c/--command  -o (base64|raw)  -t/--test (run the
+chain LOCALLY)  -p/--plugin (ViewState|DotNetNuke|SharePoint|Altserialization|Resx)  --minify  --raf (filter-safe
+gadgets only)`. All RCE gadgets APPROVAL-GATED; `-t` proves the chain offline — never fire blind at a target.
+
+---
+## Extended arsenal — PHP POP-chain construction + phar structure + framework chains
+
+A POP (property-oriented programming) chain reuses classes ALREADY autoloadable — no new code, just
+attacker-chosen property values steering one method call into the next.
+```
+# Anatomy:
+#   KICK-OFF (fires automatically on unserialize, no app call needed):
+#     __destruct   (object freed at request end)      __wakeup   (runs right after unserialize)
+#     __unserialize(array)  -> TAKES PRECEDENCE over __wakeup when both are defined (PHP 7.4+)
+#   PROPAGATION (reached because the kick-off touches a controlled property):
+#     __toString  (property used in string context: echo/concat/strval)
+#     __call / __get / __set / __invoke  (missing method / property access / object-as-function)
+#   SINK: the terminal gadget doing file_put_contents / system / include / SQL.
+# Fill EVERY intermediate property in the blob so each magic method lands on the next gadget.
+# autoload-as-gadget: a class NAME from the blob hits spl_autoload_register's resolver (underscores->path),
+#   so a chosen .php can be required. Revive a "loader" object (pulls a vendor autoloader) BEFORE the gadget
+#   object in the same array — objects revive in array order.
+```
+phar:// deserialization (object injection with NO visible unserialize() call):
+```
+# ANY filesystem/stream function opening a phar:// path unserializes the archive metadata (PHP < 8.0):
+file_exists  fopen  file_get_contents  getimagesize  is_file/is_dir  stat  filemtime  md5_file  copy  unlink  hash_file
+# Phar layout:  stub (<?php __HALT_COMPILER(); )  +  manifest  +  SERIALIZED metadata (the gadget obj)  +  signature
+#   build with phar.readonly=0, rename to .png/.jpg (prepend GIF89a magic so upload type checks pass), then:
+#   ...('phar://uploaded.png/x')     # the metadata object's kick-off magic method fires the chain
+```
+Benign proof stays the SoapClient/Guzzle SSRF-on-deserialize OOB (above). phpggc weaponizes chains —
+APPROVAL-GATED; catalogue only:
+```
+phpggc -l            # list every chain available for installed-framework classes
+phpggc -i <chain>    # show a chain's gadget info / required params
+# Chain families seen: Guzzle/FW* (FileCookieJar file-write), Monolog/RCE*, Laravel/RCE*, Symfony/RCE*,
+#   Doctrine/*, WordPress/*, Drupal/*, Magento/*, CodeIgniter4/*, Yii2/*, SwiftMailer/*, ThinkPHP/*,
+#   Phalcon/*, Slim/*, Dompdf/* .  Categories: RCE / FileWrite / FileDelete / SQLi / Info.
+```
+Detection note: `unserialize($x, ['allowed_classes'=>false])` (PHP 7+) neutralizes object injection — present
+AND on PHP >= 7 (not silently ignored) means objects can't instantiate (markers may still echo = not exploitable).
+
+---
+## Extended arsenal — Python YAML tag + loader matrix, pickle opcodes, model files
+
+(DNS-only YAML/pickle probes are above — do NOT re-fire; this is the tag/loader/opcode reference to pick one.)
+```
+# YAML tag semantics (why each is dangerous):
+!!python/object/apply:mod.func [args]   # calls func(*args)              <- benign DNS probe rides this
+!!python/object/new:mod.Class [args]    # Class.__new__ (+__setstate__)  <- the post-5.1 FullLoader bypass
+!!python/object:mod.Class {state}       # instantiate + set __dict__ / __setstate__
+!!python/name:mod.attr                  # resolves a named global (eval/exec/...) for a later apply
+!!python/module:mod                     # imports a module
+!!python/tuple [..]                     # tuple (benign building block)
+```
+| loader / API | safe? | note |
+|---|---|---|
+| `BaseLoader` / `SafeLoader` / `yaml.safe_load` | SAFE | python tags -> ConstructorError (unless app registers a constructor) |
+| `FullLoader` / `yaml.full_load` | partial | blocks arbitrary tags now; **5.1–5.3.1 bypass via `object/new`**; default for bare `yaml.load` since 5.1 |
+| `UnsafeLoader` / `Loader` / `yaml.unsafe_load` | UNSAFE | full object/function revival = RCE sink |
+| bare `yaml.load(x)` (no Loader, < 5.1) | UNSAFE | historic default = full loader |
+```
+# pickle opcodes an auditor flags WITHOUT executing (fickling / picklescan):
+GLOBAL (c)   STACK_GLOBAL (\x93)   REDUCE (R)   INST (i)   OBJ (o)   NEWOBJ (\x81)   BUILD (b)
+#   REDUCE + GLOBAL/STACK_GLOBAL pointing at os/subprocess/builtins == the exec primitive.
+```
+Model-file deserialization (cross-ref `ai-supply-chain`): the load call unpickles BEFORE inference —
+```
+.pkl .joblib .npy(allow_pickle=True)   torch.load (.pt/.pth/.bin/.ckpt)   keras .h5/.keras (Lambda layer)
+# Benign check: scan opcodes (picklescan/fickling) OR load in a sandbox with an OOB-DNS __reduce__ marker.
+# Safe-by-design alternative to flag as the fix: safetensors (no code) / torch.load(weights_only=True).
+```
+
+---
+## Extended arsenal — Ruby Marshal/YAML universal gadget + per-library kick-off
+
+No target gem required: the universal chains are assembled from RubyGems/stdlib classes shipped with Ruby, so
+`Marshal.load` / `YAML.load`(Psych) of attacker data is RCE-feasible on a stock interpreter.
+```
+# Universal Marshal chain (Ruby ~2.x):  Gem::StubSpecification -> Gem::Source::SpecificFile ->
+#   Gem::DependencyList -> Gem::Requirement   (terminates in a Kernel/system call).
+# Ruby 3.3–4.0 variant:  Gem::SpecFetcher + forged Time + Gem::URI::Generic +
+#   Gem::RequestSet::Lockfile + Gem::StubSpecification (+ Gem::Specification.load).
+# Oj JSON chain:  URI::HTTP -> Gem::Resolver::SpecSpecification / Gem::Resolver::GitSpecification.
+```
+| library | deserialize entry the gadget rides | marker |
+|---|---|---|
+| Marshal | `_load` | `\x04\x08` header / base64 `BAg` |
+| Psych (YAML) | `init_with` / `hash` | `--- !ruby/object:` |
+| Oj (JSON, mode:object) | `hash` | `{"^o":"Class"...}` / `^t` |
+| Ox (XML) | `hash` | `<o c="Class">` |
+| JSON (custom) | `json_create` | `{"json_class":"Class"}` |
+```
+# Fingerprints beyond the header: a blob naming Gem:: classes; HTTPS egress during load;
+#   artifacts under /tmp/quick/Marshal.4.8/ . Benign proof = OOB egress on load (no gem required).
+# Other Ruby sinks: obj.send(user_input); the `_json` param -> Oj object mode; Bootsnap cache poisoning.
+# Audit (no fire): CodeQL ruby unsafe-deserialization queries.
+```
+
+---
+## Extended arsenal — Node.js revival sinks + prototype-pollution -> RCE crossover
+
+(node-serialize `_$$ND_FUNC$$_` IIFE is above — benign DNS form only.)
+```
+# funcster:   {"__js_function":"function(){...}"}  -> revived in a fresh module scope;
+#   escape it with  this.constructor.constructor('return process')()  to regain global/require.
+# serialize-javascript:  SERIALIZE-only, but code that revives it with eval() turns it into a sink.
+# cryo / serialize-to-js:  same function-revival class -> benign DNS IIFE proof, child_process = gated.
+# Implicit triggers (a revived object runs these with no explicit call):
+#   toString   valueOf   toJSON   then  (a "thenable" that gets awaited -> its then() fires).
+```
+Prototype-pollution crossover (cross-ref `prototype-pollution` + `ssti`): a merge/clone sink that writes
+`__proto__` can reach RCE by polluting options a later API reads — catalogue the gadget, prove pollution on a
+FRESH object first, then a benign DNS, before any exec:
+```
+# child_process: pollute  shell / env (NODE_OPTIONS=--require=/path) / argv0  read by spawn/exec defaults.
+# templating:    pollute lodash.template / EJS / Pug / Handlebars compile options -> injected source -> RCE.
+# Proof ladder:  ({}).polluted === <set>   ->   DNS OOB   ->   (gated) command.
+```
+
+---
+## Extended arsenal — deserialization detection-first feasibility matrix
+
+Extends the all-classes cheatsheet above with a per-FORMAT feasibility rating. Always: fingerprint ->
+benign OOB probe (DNS/SSRF/TCP, no exec) -> only THEN catalogue the gadget family + honest feasibility.
+Feasibility legend: **Self** = gadget self-contained in runtime/stdlib (RCE-feasible out of the box);
+**Lib** = needs a specific dependency on the classpath; **Cfg** = needs a config state (MAC off / known key /
+unsafe loader). Report High only with exec evidence; else "deserialization of untrusted data (RCE-<rating>)".
+| format | fingerprint | benign OOB probe (no exec) | gadget family | RCE feasibility |
+|---|---|---|---|---|
+| Java ser | `rO0`/`aced`/`H4sIA` | URLDNS (DNS) / JRMPClient (TCP) | CC/Spring/ROME/… | Lib (Jdk7u21 = Self on <= 7u21) |
+| Java JNDI str | `${jndi:...}` | `dns://` / `ldap://` callback | remote class-load | Cfg (egress + lookup enabled) |
+| .NET BinaryFormatter | `AAEAAAD/////` | type-resolver differential | TypeConfuseDelegate | Self |
+| .NET ViewState | `__VIEWSTATE=` | MAC-failure vs accept diff | ViewState gadget | Cfg (MAC off / known machineKey) |
+| .NET Json.NET | `"$type":` | forced type-load / URI OOB | ObjectDataProvider | Cfg (TypeNameHandling != None) |
+| PHP object | `O:` / `a:` | SoapClient SSRF (HTTP) | phpggc framework chain | Lib (framework gadget present) |
+| PHP phar | `phar://` + file op | SoapClient metadata SSRF | phpggc chain | Lib + file-op sink |
+| Python pickle | `gASV` / `.pkl` / `.pt` | `__reduce__` socket DNS | `__reduce__` (built-in) | Self |
+| Python YAML | `!!python/` tag | `apply:socket.gethostbyname` | object/new / apply | Cfg (Full/Unsafe loader) |
+| Ruby Marshal | `\x04\x08` / `BAg` | egress on load | Gem:: universal chain | Self (stock interpreter) |
+| Node func-revival | `_$$ND_FUNC$$_`/`__js_function` | DNS-lookup IIFE | IIFE / proto-pollution | Self / Cfg (pollution sink) |

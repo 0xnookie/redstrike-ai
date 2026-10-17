@@ -53,3 +53,81 @@ email=tester@TEST            # a TEST mailbox you control
 - Cache impact: confirm cross-user via a second anonymous request → defer to `cache-poisoning`.
 - Routing/SSRF: use your OOB host; a bare DNS hit is reachability-only → defer to `ssrf`.
 - Never trigger resets for real users; benign markers only; redact any captured token to a fingerprint.
+
+---
+
+## Extended arsenal — header → sink/stack mapping
+
+| Header | Who commonly reads it | Typical sink it feeds |
+|---|---|---|
+| `Host` | app + framework (`HTTP_HOST`, `request.host`) | reset link, absolute URLs, vhost routing |
+| `X-Forwarded-Host` | reverse proxies / frameworks behind a proxy | reset link, redirects, cache key |
+| `X-Forwarded-Proto` / `X-Forwarded-Scheme` | link/scheme builders | `http://` downgrade in built URLs |
+| `X-Forwarded-For` / `X-Real-IP` / `True-Client-IP` / `CF-Connecting-IP` | IP-based ACL / rate-limit / geo / audit log | auth allow-list bypass, log forging, "trusted" source |
+| `X-Original-Host` / `X-Host` / `X-Forwarded-Server` | misc middleware | reset link, routing |
+| `X-Original-URL` / `X-Rewrite-URL` | IIS/ASP.NET, some gateways | path override → reach a gated path |
+| `Forwarded` (RFC 7239) | spec-compliant proxies | host/proto/for in one header |
+| absolute-URI request line | origin-server parsing | overrides `Host` on some stacks |
+
+Vary ONE header per request and diff against the real Host; the one that reaches the SINK is the finding.
+
+---
+
+## Extended arsenal — password-reset poisoning variants (TEST mailbox only)
+
+- **Resend / "didn't get it" endpoint** often lacks the host check the first request has — re-test it.
+- **Dual-host split**: front-end validates `Host` but the app builds the link from `X-Forwarded-Host`.
+- **Referer token leak** (sibling bug): the token in the reset URL leaks to third-party hosts via the
+  `Referer` header when the page loads attacker-controlled resources → report as token exposure.
+- **Dangling-markup capture**: if the token renders in an HTML email/page, an unclosed attribute can ship
+  the rest of the DOM (incl. the token) to an attacker host — prove with a TEST token only.
+- Confirm by reading the delivered link's host in YOUR test mailbox; redact the token to a fingerprint.
+
+---
+
+## Extended arsenal — Host as a web-cache key (unkeyed input)
+
+- If `Host`/`X-Forwarded-Host` feeds a cached response but is NOT part of the cache key, one poisoned
+  request serves the attacker host to every later visitor of that key.
+```
+GET /resource HTTP/1.1
+Host: TARGET
+X-Forwarded-Host: ATTACKER.oob.example      # reflected into a cached absolute URL / <script src>
+```
+- Scope the probe with a unique cache-buster (`?cb=<rand>`) so you never poison a real key.
+- Confirm cross-user: a SECOND request to the SAME buster (no injected header) returns the attacker host
+  → it was cached. Read `Age` / `X-Cache` / `CF-Cache-Status` / `Vary` to prove the hit.
+- A confirmed cross-user hit → hand to `cache-poisoning`; don't re-report the cache mechanics here.
+
+---
+
+## Extended arsenal — routing / internal-vhost / SSRF via Host
+
+- A front proxy that routes by `Host` may forward an attacker-chosen host to an app never meant to be
+  reachable from outside.
+```
+GET / HTTP/1.1
+Host: admin.internal          # or: localhost, 127.0.0.1, a metadata vhost, a neighbour tenant
+```
+- Split-routing: route on `Host` but build links on `X-Forwarded-Host` (or vice-versa) to reach an
+  internal app while keeping a valid session.
+- A bare DNS/SSRF hit via Host = reachability only → hand to `ssrf`; a cloud-metadata vhost → `ssrf-cloud`.
+
+---
+
+## Extended arsenal — request-line & duplicate-Host parser discrepancies
+
+- Front-end and back-end may disagree on which host value wins; the SINK consumes the back-end's choice.
+```
+# absolute-URI in the request line (overrides Host on some origins):
+GET https://ATTACKER.oob.example/reset HTTP/1.1
+Host: TARGET
+# duplicate Host (first vs second may win depending on the parser):
+Host: TARGET
+Host: ATTACKER.oob.example
+# line-folding / indented continuation (legacy parsers):
+Host: TARGET
+ X-Forwarded-Host: ATTACKER.oob.example
+```
+- Precedence to probe per stack: absolute-URI > duplicate Host > `X-Forwarded-Host` > `Host`. The value
+  that reaches the SINK (not the one merely echoed) is the finding; change ONE thing at a time to attribute it.

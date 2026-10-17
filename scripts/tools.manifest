@@ -1,0 +1,211 @@
+# Redstrike tool roster — single source of truth for scripts/doctor.sh + scripts/install.sh
+#
+# One tool per line, 5 pipe-separated fields:
+#   command | category | method | spec | note
+#
+#   command  the binary doctor.sh checks with `command -v`. Comma-separated = alternatives
+#            (present if ANY resolves). A leading @ means "path exists" instead (e.g. @/usr/share/seclists).
+#   category recon web password binary fuzzing ad cloud container mobile iot wireless
+#            llm aimodel crypto sca intercept glue wordlists
+#   method   apt pipx pip go gem npm cargo pdtm script git manual
+#   spec     the package / module path / url / tool-name the method consumes
+#   note     short free-text (NO pipe char); shown by doctor for manual items
+#
+# Platform: Kali / Debian / Parrot (Linux). `apt` assumes a Kali-like repo; on plain Debian/Parrot
+# some apt names are missing — run doctor.sh to see the gaps and install those by their listed method.
+# `manual` tools are GUI apps, Windows/.NET agents staged onto targets, or hardware/vendor installers
+# that can't be apt-dropped on the tester host; INSTALL.md documents each.
+
+# == glue (always needed: orchestration, parsing, language runtimes) ==
+jq|glue|apt|jq|
+rg|glue|apt|ripgrep|ripgrep binary is `rg`
+yq|glue|apt|yq|
+curl|glue|apt|curl|
+git|glue|apt|git|
+python3|glue|apt|python3|
+pip3,pip|glue|apt|python3-pip|
+pipx|glue|apt|pipx|run `pipx ensurepath` after install
+go|glue|apt|golang-go|needed for pdtm/go tools; Kali ships a current Go
+cargo|glue|apt|cargo|Rust toolchain, for cargo tools
+gem|glue|apt|ruby|Ruby, for gem tools
+npm,node|glue|apt|npm|Node + npm, for npm tools
+
+# == recon (network & reconnaissance) ==
+nmap|recon|apt|nmap|
+masscan|recon|apt|masscan|
+rustscan|recon|cargo|rustscan|also available as a .deb/snap release
+naabu|recon|pdtm|naabu|
+amass|recon|apt|amass|
+subfinder|recon|pdtm|subfinder|
+dnsx|recon|pdtm|dnsx|
+httpx|recon|pdtm|httpx|PD httpx; a Python lib shares the name — keep the PD binary first on PATH
+katana|recon|pdtm|katana|
+nuclei|recon|pdtm|nuclei|
+interactsh-client|recon|pdtm|interactsh-client|OOB collaborator client
+fierce|recon|apt|fierce|
+dnsenum|recon|apt|dnsenum|
+autorecon|recon|pipx|autorecon|
+theHarvester,theharvester|recon|apt|theharvester|
+responder|recon|apt|responder|
+netexec,nxc,crackmapexec,cme|recon|apt|netexec|pipx from git for newest: pipx install git+https://github.com/Pennyw0rth/NetExec
+enum4linux-ng|recon|pipx|enum4linux-ng|
+mitm6|recon|apt|mitm6|
+kerbrute|recon|apt|kerbrute|go alt: go install github.com/ropnop/kerbrute@latest
+
+# == web (application testing) ==
+gobuster|web|apt|gobuster|
+feroxbuster|web|apt|feroxbuster|
+dirsearch|web|apt|dirsearch|
+ffuf|web|apt|ffuf|
+dirb|web|apt|dirb|
+nikto|web|apt|nikto|
+sqlmap|web|apt|sqlmap|
+wpscan|web|apt|wpscan|
+arjun|web|pipx|arjun|
+paramspider|web|pipx|paramspider|
+dalfox|web|apt|dalfox|go alt: go install github.com/hahwul/dalfox/v2@latest
+wafw00f|web|apt|wafw00f|
+hakrawler|web|apt|hakrawler|go alt: go install github.com/hakluke/hakrawler@latest
+gau|web|go|github.com/lc/gau/v2/cmd/gau@latest|
+waymore|web|pipx|waymore|
+gospider|web|go|github.com/jaeles-project/gospider@latest|
+cewl|web|apt|cewl|
+x8|web|cargo|x8|parameter miner
+kxss|web|go|github.com/Emoe/kxss@latest|reflected-param finder
+Gxss|web|go|github.com/KathanP19/Gxss@latest|
+git-dumper|web|pipx|git-dumper|reconstruct an exposed .git
+graphw00f|web|pipx|graphw00f|GraphQL fingerprint
+clairvoyance|web|pipx|clairvoyance|GraphQL schema when introspection is off
+name-that-hash,nth|web|pipx|name-that-hash|
+semgrep|web|pipx|semgrep|static taint analysis
+testssl.sh,testssl|web|apt|testssl.sh|
+sslscan|web|apt|sslscan|
+sslyze|web|pipx|sslyze|
+jwt_tool,jwt_tool.py|web|git|https://github.com/ticarpi/jwt_tool|clone + pip install -r requirements
+nosqlmap|web|git|https://github.com/codingo/NoSQLMap|clone; confirm findings manually
+tplmap|web|git|https://github.com/epinna/tplmap|clone; SSTI aid, confirm manually
+smuggler,smuggler.py|web|git|https://github.com/defparam/smuggler|clone; request-smuggling probe
+h2csmuggler|web|git|https://github.com/BishopFox/h2csmuggler|clone
+identYwaf|web|git|https://github.com/stamparm/identYwaf|clone
+
+# == password & authentication ==
+hydra|password|apt|hydra|
+john|password|apt|john|
+hashcat|password|apt|hashcat|
+medusa|password|apt|medusa|
+patator|password|apt|patator|
+evil-winrm|password|apt|evil-winrm|gem alt: gem install evil-winrm
+hash-identifier|password|apt|hash-identifier|
+ophcrack|password|apt|ophcrack|
+
+# == binary analysis & reverse engineering ==
+gdb|binary|apt|gdb|
+pwndbg|binary|git|https://github.com/pwndbg/pwndbg|clone + ./setup.sh (gdb plugin)
+radare2,r2|binary|apt|radare2|
+binwalk|binary|apt|binwalk|
+ghidra|binary|apt|ghidra|GUI; large. Kali apt package `ghidra`
+checksec|binary|apt|checksec|
+strings|binary|apt|binutils|
+objdump|binary|apt|binutils|
+vol,volatility3|binary|pipx|volatility3|
+foremost|binary|apt|foremost|
+steghide|binary|apt|steghide|
+exiftool|binary|apt|libimage-exiftool-perl|
+pwn|binary|pipx|pwntools|exploit-dev toolkit (provides `pwn`)
+ROPgadget|binary|pipx|ROPgadget|
+ropper|binary|pipx|ropper|
+one_gadget|binary|gem|one_gadget|
+msfconsole|binary|apt|metasploit-framework|
+
+# == fuzzing ==
+afl-fuzz|fuzzing|apt|afl++|
+honggfuzz|fuzzing|apt|honggfuzz|
+boofuzz|fuzzing|pipx|boofuzz|
+clang|fuzzing|apt|clang|libFuzzer + ASAN/UBSAN sanitizers
+RESTler|fuzzing|manual|https://github.com/microsoft/restler-fuzzer|dotnet build; stateful REST API fuzzer
+
+# == active directory / windows post-exploitation ==
+impacket-secretsdump,secretsdump.py|ad|apt|impacket-scripts|pipx alt: pipx install impacket
+certipy,certipy-ad|ad|apt|certipy-ad|pipx certipy-ad gives a newer build; cmd may be `certipy-ad`
+bloodhound-python|ad|pipx|bloodhound|SharpHound is the Windows collector (manual)
+ldapdomaindump|ad|pipx|ldapdomaindump|
+bloodyAD|ad|pipx|bloodyAD|
+pywhisker|ad|pipx|pywhisker|shadow-credentials
+Coercer|ad|pipx|coercer|
+krbrelayx.py,krbrelayx|ad|git|https://github.com/dirkjanm/krbrelayx|clone; unconstrained-deleg + relay
+sccmhunter|ad|git|https://github.com/garrettfoster13/sccmhunter|clone + pip install -r requirements
+SharpHound|ad|manual|https://github.com/SpecterOps/SharpHound|Windows .NET BloodHound collector, staged on target
+rubeus|ad|manual|https://github.com/GhostPack/Rubeus|Windows .NET; compile or use a trusted build
+SharpSCCM|ad|manual|https://github.com/Mayyhem/SharpSCCM|Windows .NET
+SCCMSecrets|ad|git|https://github.com/synacktiv/SCCMSecrets|clone
+
+# == cloud ==
+aws|cloud|pipx|awscli|
+az|cloud|manual|https://learn.microsoft.com/cli/azure/install-azure-cli-linux|Microsoft vendor installer
+gcloud|cloud|manual|https://cloud.google.com/sdk/docs/install|Google Cloud SDK vendor installer
+pacu|cloud|pipx|pacu|AWS exploitation framework
+scout,scoutsuite|cloud|pipx|scoutsuite|read-only multi-cloud audit
+prowler|cloud|pipx|prowler|read-only audit
+cloud_enum|cloud|git|https://github.com/initstring/cloud_enum|clone + pip install -r requirements
+
+# == container & kubernetes ==
+kubectl|container|manual|https://kubernetes.io/docs/tasks/tools/|vendor install or `apt install kubectl` via the k8s apt repo
+kube-hunter|container|pipx|kube-hunter|
+kubeletctl|container|manual|https://github.com/cyberark/kubeletctl|download the release binary
+peirates|container|manual|https://github.com/inguardians/peirates|download the release binary
+amicontained|container|manual|https://github.com/genuinetools/amicontained|download the release binary
+deepce|container|git|https://github.com/stealthcopter/deepce|clone; shell script, staged in container
+
+# == mobile ==
+jadx|mobile|apt|jadx|
+apktool|mobile|apt|apktool|
+frida|mobile|pipx|frida-tools|
+objection|mobile|pipx|objection|
+mobsf,MobSF|mobile|manual|https://github.com/MobSF/Mobile-Security-Framework-MobSF|run via Docker
+
+# == iot / embedded ==
+unblob|iot|pipx|unblob|has system deps; see its docs
+firmwalker|iot|git|https://github.com/craigz28/firmwalker|clone; fs triage script
+firmware-mod-kit|iot|git|https://github.com/rampageX/firmware-mod-kit|clone
+flashrom|iot|apt|flashrom|SPI-flash dump (hardware)
+baudrate|iot|git|https://github.com/devttys0/baudrate|clone; UART baud finder
+
+# == wireless ==
+aircrack-ng,airmon-ng,airodump-ng|wireless|apt|aircrack-ng|
+hcxtools|wireless|apt|hcxtools|
+hcxdumptool|wireless|apt|hcxdumptool|
+bettercap|wireless|apt|bettercap|
+reaver|wireless|apt|reaver|
+bully|wireless|apt|bully|
+hostapd|wireless|apt|hostapd|
+hostapd-wpe|wireless|apt|hostapd-wpe|
+wifiphisher|wireless|pipx|wifiphisher|
+
+# == llm / ai red-teaming ==
+garak|llm|pipx|garak|LLM vulnerability scanner
+pyrit|llm|pipx|pyrit|AI red-teaming toolkit (Microsoft PyRIT)
+
+# == ai model-file scanners ==
+picklescan|aimodel|pipx|picklescan|
+modelscan|aimodel|pipx|modelscan|
+fickling|aimodel|pipx|fickling|
+
+# == crypto ==
+padbuster|crypto|apt|padbuster|
+hashpump|crypto|git|https://github.com/bwall/HashPump|clone + make; hash length-extension
+
+# == sca / sbom / secrets / cve-intel ==
+trufflehog|sca|script|https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh|
+osv-scanner|sca|go|github.com/google/osv-scanner/cmd/osv-scanner@latest|
+grype|sca|script|https://raw.githubusercontent.com/anchore/grype/main/install.sh|
+syft|sca|script|https://raw.githubusercontent.com/anchore/syft/main/install.sh|
+retire|sca|npm|retire|retire.js
+
+# == interceptors / browser drivers ==
+mitmproxy,mitmdump|intercept|pipx|mitmproxy|
+burpsuite|intercept|manual|https://portswigger.net/burp|GUI proxy; Community ships with Kali
+caido|intercept|manual|https://caido.io|GUI proxy
+
+# == wordlists (data, not a binary) ==
+@/usr/share/seclists|wordlists|apt|seclists|checked as a path, not a command
+@/usr/share/wordlists|wordlists|apt|wordlists|rockyou + more
