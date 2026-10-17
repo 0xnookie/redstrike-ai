@@ -7,7 +7,7 @@ must be on the host that runs the engagement.
 - **Platform:** Linux — **Kali** (recommended; ships most of these), Debian, or Parrot.
 - **Windows:** run inside **WSL2 with Kali** (`wsl --install -d kali-linux`), then follow the Linux steps
   below. The native Windows checkout is fine for *developing* the framework, but engagements run on Linux.
-- The roster is defined once in **`scripts/tools.manifest`** (158 tools across 18 categories) and consumed by
+- The roster is defined once in **`scripts/tools.manifest`** (166 tools across 19 categories) and consumed by
   both scripts below — add a tool there and both pick it up.
 
 ## Quickstart

@@ -6,7 +6,7 @@
 #   command  the binary doctor.sh checks with `command -v`. Comma-separated = alternatives
 #            (present if ANY resolves). A leading @ means "path exists" instead (e.g. @/usr/share/seclists).
 #   category recon web password binary fuzzing ad cloud container mobile iot wireless
-#            llm aimodel crypto sca intercept glue wordlists
+#            llm aimodel crypto web3 sca intercept glue wordlists
 #   method   apt pipx pip go gem npm cargo pdtm script git manual
 #   spec     the package / module path / url / tool-name the method consumes
 #   note     short free-text (NO pipe char); shown by doctor for manual items
@@ -189,6 +189,16 @@ pyrit|llm|pipx|pyrit|AI red-teaming toolkit (Microsoft PyRIT)
 picklescan|aimodel|pipx|picklescan|
 modelscan|aimodel|pipx|modelscan|
 fickling|aimodel|pipx|fickling|
+
+# == web3 / smart-contract ==
+forge,cast,anvil|web3|manual|https://getfoundry.sh|Foundry toolkit; install via the getfoundry.sh script then run foundryup
+slither|web3|pipx|slither-analyzer|static analysis (command: slither)
+myth,mythril|web3|pipx|mythril|symbolic execution
+crytic-compile|web3|pipx|crytic-compile|
+solc-select|web3|pipx|solc-select|manage solc versions
+aderyn|web3|cargo|aderyn|Rust static analyzer
+echidna|web3|manual|https://github.com/crytic/echidna|property fuzzer; release binary or brew install echidna
+medusa|web3|manual|https://github.com/crytic/medusa|parallel fuzzer; release binary
 
 # == crypto ==
 padbuster|crypto|apt|padbuster|
