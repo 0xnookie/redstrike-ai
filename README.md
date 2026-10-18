@@ -51,9 +51,9 @@ graph TD
     classDef t2 fill:#4a1111,stroke:#ef4444,color:#fee2e2;
     classDef t3 fill:#5b1414,stroke:#f87171,color:#fee2e2;
 
-    subgraph T1["Tier 1 — Global Recon"]
-        JS[js-analysis]:::t1
+    subgraph T1["Tier 1 — Global Recon (in order)"]
         HD[host / content discovery]:::t1
+        JS["js-analysis* (conditional)"]:::t1
     end
     subgraph T2["Tier 2 — Vuln Categories (findings)"]
         CTX[&lt;class&gt;-context feeders]:::t2
@@ -64,14 +64,15 @@ graph TD
         CAP[capability: CVE Intel · Exploit Gen · Attack Chain · Param Opt]:::t3
     end
 
-    JS --> CTX --> VAR
+    HD --> JS
     HD --> CTX
+    JS --> CTX --> VAR
     VAR --> MIS
     VAR --> CAP
     MIS --> REP[reporting]
 ```
 
-- **Tier 1 — Global recon** runs once and feeds everything (`js-analysis`: endpoints, params, secrets, DOM sinks, tech).
+- **Tier 1 — Global recon** runs once, in order (`osint → host → content → js-analysis`), and feeds everything. `js-analysis`\* (endpoints, params, secrets, DOM sinks, tech) is **downstream of host/content discovery and conditional** — skip it on JS-less / pure-API targets.
 - **Tier 2 — Vuln categories** are the finding producers. **Compound** classes (XSS, SQLi, SSRF, …) decompose into a `<class>-context` feeder + one agent per variant; **atomic** classes (CSRF, open-redirect, …) are a single agent. See [`skills/_contract/vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 - **Tier 3 — Mission & capability agents** (the "red team") orchestrate the lower tiers. See [`skills/_contract/agent-tiers.md`](skills/_contract/agent-tiers.md).
 
