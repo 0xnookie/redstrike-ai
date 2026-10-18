@@ -22,7 +22,7 @@
           "endpoint": { "type": "string" },
           "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
           "param": { "type": "string" },
-          "sink_type": { "enum": ["template", "os_command", "deserialize", "unknown"] },
+          "sink_type": { "enum": ["template", "os_command", "code", "deserialize", "unknown"] },
           "engine_hint": { "type": "string", "description": "jinja2 | twig | freemarker | velocity | java-ser | php-ser | python-pickle | …" },
           "reflects": { "type": "boolean" },
           "variant_hint": { "type": "array", "items": { "enum": ["ssti", "command-injection", "deserialization"] } },
