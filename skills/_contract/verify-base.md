@@ -48,12 +48,19 @@ A review emits this object per finding (schema: `finding.schema.json` → `revie
 
 ### Where the verdict is written (concurrency-safe)
 
-The orchestrator fans reviewers out in **parallel**, so a reviewer MUST NOT patch the shared `findings.json`
-directly (that races other reviewers). Instead:
+The orchestrator fans reviewers out in **parallel**. The race to avoid is two reviewers writing the **same**
+`findings.json`. In Redstrike each skill owns its **own** `findings.json`, reviewed by its **own** dedicated
+verifier — so a reviewer patching the `review{}` block + `status` of **its own skill's** `findings.json` is a
+single-owner write and is race-free. The rules:
 
-1. The reviewer writes **only** `reviews/<id>.verdict.json` (one file per finding) in the engagement dir.
-2. The **orchestrator merges** every `reviews/*.verdict.json` into each finding's `review{}` block and sets
-   `status` (accepted/blocked→verified, rejected→rejected, needs-evidence→open). This is the single writer.
+1. The reviewer ALWAYS writes `reviews/<id>.verdict.json` (one per finding) — the **canonical, authoritative**
+   verdict record and the tiebreaker on any discrepancy.
+2. The reviewer MAY also patch **its own skill's** `findings.json` (`review{}` + `status`) in the same pass
+   (single-owner → safe), which is what each `verify.md`'s "write into the review{} block" step means. It
+   MUST NOT write another skill's `findings.json` or any shared file.
+3. The **orchestrator reconciles** (single authority across the engagement): it confirms every finding's
+   `review{}`/`status` matches its verdict file (the verdict file wins), fills any the reviewer left
+   unpatched, and sets `status` (accepted/blocked→verified, rejected→rejected, needs-evidence→open).
 
 A reviewer MAY review **several findings in one pass** (e.g. all findings of a class) to cut cost — it still
 writes one `reviews/<id>.verdict.json` per finding, and when it independently re-runs a benign PoC it logs
