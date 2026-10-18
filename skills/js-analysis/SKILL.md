@@ -1,7 +1,8 @@
 # JS Analysis
 
-> RECON skill (no vuln-variant split). Upstream FEEDER for content-discovery and
-> the per-vuln (xss-*, etc.) skills. Read-only; honors `_contract/roe-gate.md` on fetches.
+> RECON skill (no vuln-variant split). CONDITIONAL — run only when the target serves client-side JS;
+> skip with an explicit N/A note for pure APIs / JS-less targets. DOWNSTREAM of host-discovery +
+> content-discovery; feeder for the per-vuln (xss-*, etc.) skills. Read-only; honors `_contract/roe-gate.md` on fetches.
 > Gold standard — pattern-match new skills against this one.
 
 ## Interview
@@ -9,7 +10,7 @@
 - **TOOLS:** see §Tools (modern-first, with the anti-automation ladder).
 - **GOAL:** Produce a complete intelligence picture of a target's client-side JS — every endpoint, param, API, secret, dangerous sink, and tech choice — as an MD report plus ready-to-run curl commands. Done = all checklist boxes checked AND review passes.
 - **OUTPUT:** `js_sources.txt`, `js/raw/`, `js/beautified/`, `endpoints_{live,historical,unauthed}.txt`, `params.txt`, `routes.md`, `apis.json`, `secrets.json`, `gadgets.md`, `libraries.json`, `tech.md`, `feature_map.md`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = scope roots + optional auth (cookies/headers for authed-vs-unauthed diff). `refs/` corpus = secret regexes, dangerous-sink list, retire.js vuln-lib signatures, param-mining wordlist. Chains FROM host discovery; chains TO content-discovery (feeds `custom_list.txt`) and the DOM-XSS agent (consumes `gadgets.md` + endpoints).
+- **DATA / RAG:** inputs = scope roots + optional auth (cookies/headers for authed-vs-unauthed diff). `refs/` corpus = secret regexes, dangerous-sink list, retire.js vuln-lib signatures, param-mining wordlist. Chains FROM host-discovery (live hosts) + content-discovery (crawled JS URLs); chains TO the per-vuln context feeders (esp. the DOM-XSS agent, consuming `gadgets.md` + endpoints). OPTIONAL: js-extracted endpoints/params may re-enrich content-discovery's `custom_wordlist.txt` on a second pass — an enrichment, not a precedence (recon stays acyclic).
 - **DECOMPOSITION:** n/a (recon, not a vuln class).
 
 ## Goal
