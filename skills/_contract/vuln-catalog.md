@@ -54,7 +54,9 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **File / path** | A01/A05 | family | `file-context` ✅ (path/file/upload params + upload endpoints) | `path-traversal-lfi` ✅ (+rfi/wrappers in refs) · `upload-rce` ✅ | ✅ |
 | **Auth & session** | A07 | family | `auth-context` ✅ (login/session/token flows) | `auth-bypass` ✅ (+ session/mfa/reset) · `jwt` ✅ · `oauth` ✅ | ✅ |
 | **API** | — (WSTG/API Top 10) | family | `api-context` ✅ (REST/GraphQL schema + authz) | `bola-bfla` ✅ (BOLA+BFLA+excessive-data+mass-assign) · `graphql` ✅ ; reuses `authz-*`/`injection-*` | ✅ |
-| **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `excessive-agency` ✅ (LLM06) · `llm-output-handling` ✅ (LLM05) | ✅ |
+| **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) · `agent-recon` ✅ (MCP/A2A/OpenAPI agent-protocol recon → agent_context.json) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `excessive-agency` ✅ (LLM06) · `llm-output-handling` ✅ (LLM05) | ✅ |
+| **AI agent protocols** | OWASP Agentic Top 10 (ASI01-10) | feeder | `agent-recon` ✅ (MCP/A2A/OpenAPI discovery + enum + posture → agent_context.json) | (feeds the AI/LLM executors) | ✅ |
+| **Web3 / smart contract** | OWASP Smart Contract Top 10 | family | `web3-context` ✅ (contracts/source/proxy/standards/surface + worth-it score → web3_context.json) | `sc-access-control` ✅ · `sc-upgradeability` ✅ · `sc-accounting` ✅ · `sc-oracle-mev` ✅ · `sc-reentrancy` ✅ · `sc-signature` ✅ — findings proven on a local Foundry fork | ✅ |
 | **Active Directory** *(internal / assumed-breach)* | MITRE ATT&CK | family | `ad-context` ✅ (BloodHound + principals/ACL/ADCS/paths) | `ad-kerberos` ✅ · `ad-acl-abuse` ✅ · `ad-adcs` ✅ (ESC1-8) · `ad-lateral-movement` ✅ | ✅ |
 | **CSRF** | — | single | — | `csrf` ✅ | ✅ |
 | **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
