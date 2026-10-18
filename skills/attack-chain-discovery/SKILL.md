@@ -28,7 +28,7 @@ Compose accepted findings into kill chains. Emit `chains.json` (schema `_contrac
 3. Compose chains (match output→precondition; ≥2 steps) · synth · `chains.json`
 4. Assess feasibility + combined impact/CVSS · synth · `chains.json`
 5. (Approval) demonstrate a high-value chain BENIGNLY end-to-end · Tier-2 agents · `poc/<id>/`
-6. Promote chains to composite findings · synth · `findings.json`
+6. Promote chains to composite findings — set `composite: true` on each so reporting treats them as non-additive (excluded from severity counts; listed under Attack Chains) · synth · `findings.json`
 7. Emit report · synth · `report.md`
 8. /REVIEW · `review.md` · 9. /VERIFY · `verify.md`
 

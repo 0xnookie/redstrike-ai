@@ -28,6 +28,7 @@ Build the passive OSINT picture + wordlist seed terms. DONE = `checklist.md` `- 
 3. Public leaks/secrets (GitHub dorks, paste sites, breach refs) — RECORD, do NOT use creds · GitHub search + dorks · (into osint)
 4. Cloud assets (buckets, apps) · `cloud_enum` (passive) · (into osint)
 5. Tech/stack + dork hits · Shodan/Google dorks · (into osint)
+5b. **Source-informed recon** — if the app is identifiable as OSS/known (title, banner, framework fingerprint, `/openapi`, a GitHub match) fetch and READ its upstream PUBLIC source to map planted/known bugs, default creds, parser configs and dangerous sinks; use it to seed the hunt (read-only, public — not target interaction) · GitHub/raw source · (into osint)
 6. Extract wordlist terms (products, paths, handles) · synth · `terms.txt`
 7. Consolidate · synth · `osint.json`
 8. Emit summary · synth · `summary.md`

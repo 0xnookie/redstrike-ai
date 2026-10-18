@@ -26,7 +26,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (report + consolidated JSO
 1. Collect all `<engagement>/*/findings.json` · `jq` · (in memory)
 2. Keep `review.verdict in {"accepted","blocked"}` (status `verified`); `blocked` is tagged for the caveat subsection · `jq` filter · (in memory)
 3. De-dupe across agents (same asset+class+root cause → merge, keep strongest evidence) · synth · `findings_consolidated.json`
-4. Normalize severity/CVSS; order Critical→Info · `refs/report_template.md` · `findings_consolidated.json`
+4. Normalize severity/CVSS; order Critical→Info. Findings with `composite: true` (kill chains) are listed under an **Attack Chains** section and EXCLUDED from the severity counts — non-additive, they re-state already-counted components · `refs/report_template.md` · `findings_consolidated.json`
 5. Write per-finding sections (template) + executive summary · synth · `report.md`
 6. Emit a short stats summary · synth · `summary.md`
 7. /REVIEW SKILL · `review.md`
