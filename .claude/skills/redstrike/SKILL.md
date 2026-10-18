@@ -22,7 +22,9 @@ This is a real offensive test. **Establish authorization before any active scann
 
 ## 1. Recon (Tier 1)  → into the engagement dir, each mechanical-gated
 `redstrike-osint` (passive) → `redstrike-host-discovery` → `redstrike-content-discovery`
-(builds the custom wordlist) → `redstrike-js-analysis`. Run `redstrike-cve-intelligence` to prioritize.
+(builds the custom wordlist) → `redstrike-js-analysis` *(CONDITIONAL — only if the target serves
+client-side JS; for a pure API / JS-less target, skip it with an explicit N/A note)*.
+Run `redstrike-cve-intelligence` to prioritize.
 
 ## 2. Vuln categories (Tier 2)  → route per `skills/_contract/vuln-catalog.md` from what recon found
 For each applicable class, run its `<class>-context` feeder then its variant/category agents. Routing hints:

@@ -20,11 +20,16 @@ Decision test: *do the variants confirm differently but recon the same?* → fam
 ## Two-tier recon
 
 ```
-GLOBAL surface recon            PER-CLASS context feeders         VARIANT / CATEGORY agents
-host-discovery ─┐
-content-discovery ├─▶  <class>-context  ─▶  <class>-<variant>  (findings: review.md + verify.md)
-js-analysis ─────┘      (recon: review.md only)
+GLOBAL surface recon (once/engagement, IN ORDER)          PER-CLASS context feeders    VARIANT / CATEGORY agents
+osint ─▶ host-discovery ─▶ content-discovery ─▶ js-analysis*  ─▶  <class>-context  ─▶  <class>-<variant>
+                                                                      (recon: review.md only) (findings: review.md + verify.md)
 ```
+
+\* **`js-analysis` is CONDITIONAL and DOWNSTREAM, not parallel.** Run it only when the target serves
+client-side JS; for a pure API / JS-less target, skip it with an explicit N/A note (as recon still covers
+the surface via host + content discovery). It consumes host-discovery (live hosts) and content-discovery
+(crawled JS URLs). Its extracted endpoints/params MAY re-enrich content-discovery's `custom_wordlist.txt`
+on an OPTIONAL second pass — an enrichment, **not** a precedence, so recon stays acyclic.
 
 Global recon runs once per engagement. Each `<class>-context` feeder specializes that surface for
 its class (injectable params, URL-fetching sinks, object references, XML endpoints, …). Variant
