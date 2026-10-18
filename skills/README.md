@@ -6,7 +6,7 @@ The contract, the two review altitudes, and how to build a new skill live in
 
 | Skill | Kind | Emits findings? | Gates | Chains from → to |
 |---|---|---|---|---|
-| [`js-analysis`](js-analysis/) | recon (gold standard) | no | `review.md` | host-discovery → content-discovery, xss-* |
+| [`js-analysis`](js-analysis/) | recon (gold standard; conditional — JS targets only) | no | `review.md` | host-discovery, content-discovery → xss-* |
 | [`xss-context`](xss-context/) | recon feeder (shared) | no | `review.md` | js-analysis → xss-reflected/stored/dom/blind |
 | [`xss-reflected`](xss-reflected/) | vuln variant (reflected) | yes | `review.md` + `verify.md` | js-analysis / xss-context → reporting |
 | [`xss-stored`](xss-stored/) | vuln variant (stored) | yes | `review.md` + `verify.md` | xss-context → reporting |

@@ -9,6 +9,7 @@ It makes **no** judgment about whether a finding is true — that is `verify.md`
 - All declared output is **non-zero bytes**.
 - Output matches the expected **format** (valid JSON parses; `.jsonl` lines parse) and a **plausible size**.
 - Structured files are well-formed. An **empty-but-valid** collection is a PASS when the step legitimately found nothing (declare `allow_empty_array` / `allow_empty` on that artifact).
+- **Not-applicable recon feeder (first-class outcome).** A recon FEEDER whose surface is genuinely absent (e.g. `js-analysis` on a JS-less API, `cve-intelligence` on synthetic/unversioned banners) may complete as **N/A**: emit `summary.md` stating N/A with a one-line justification (plus the manifest artifacts, which may be empty where `allow_empty*` permits), and the orchestrator records the skip in `audit.jsonl`. This is a valid recon outcome, **not** a gap — do NOT fabricate artifacts to force the gate. (Findings skills never self-declare N/A; "nothing found" is an empty, still-verified `findings.json`.)
 
 ## Shape of every `review.md`
 
