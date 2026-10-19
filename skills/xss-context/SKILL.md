@@ -11,7 +11,7 @@
 - **TOOLS:** see §Tools (ingest js-analysis, `arjun`/`x8`, `kxss`/`Gxss`, interceptor, `chrome-devtools-mcp`, `httpx`, modern-first + ladder).
 - **GOAL:** Produce the shared XSS context — every candidate injection point with its reflection/persistence behavior and context, the DOM source→sink flows, and the CSP posture — as `xss_context.json`, so the four variant agents start from one analysis instead of re-deriving it. Done = all checklist boxes checked AND review passes.
 - **OUTPUT:** `candidate_points.json`, `reflections.jsonl`, `csp.json`, `dom_flows.json`, `xss_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/` (`findings/endpoints.jsonl` [state live|unauthed], `findings/params.jsonl`, `findings/gadgets.jsonl`, `beautified/`) + optional `auth.env` + `scope.yaml` (incl. `oob.collaborator`). `refs/` = `injection_surface.md`, `context_rules.md`. Output contract = `_contract/xss_context.schema.json`. Chains FROM `js-analysis`; chains TO `xss-reflected`, `xss-stored`, `xss-dom`, `xss-blind`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/` (`findings/endpoints.jsonl` [state live|unauthed], `findings/params.jsonl`, `findings/gadgets.jsonl`, `beautified/`) + optional `auth.env` + `scope.yaml` (incl. `oob.collaborator`). `refs/` = `injection_surface.md`, `context_rules.md`, `hunt_flow.md` (family hunt methodology + targeting + escalation catalog). Output contract = `_contract/xss_context.schema.json`. Chains FROM `js-analysis`; chains TO `xss-reflected`, `xss-stored`, `xss-dom`, `xss-blind`.
 - **DECOMPOSITION:** n/a (shared feeder, not a vuln class).
 
 ## Goal
@@ -51,7 +51,7 @@ DONE = `checklist.md` all `- [x]` AND `review.md` PASS (artifacts exist, non-zer
 - `js-analysis/out/<site>/`: `findings/endpoints.jsonl` (state live|unauthed), `findings/params.jsonl`, `findings/gadgets.jsonl`, `beautified/`
 - optional `auth.env` (authed surface)
 - `scope.yaml` (RoE scope check per probe; `oob.collaborator` for blind routing)
-- `refs/`: `injection_surface.md`, `context_rules.md`
+- `refs/`: `injection_surface.md`, `context_rules.md`, `hunt_flow.md` (end-to-end hunt methodology, targeting, XSS escalation catalog)
 - output contract: `_contract/xss_context.schema.json`
 
 ## Outputs
