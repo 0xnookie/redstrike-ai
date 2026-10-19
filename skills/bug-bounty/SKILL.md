@@ -7,10 +7,10 @@
 
 ## Interview
 - **STEPS:** parse program scope + rules → recon → prioritize targets → run the matching vuln agents (gated + reviewed) → chain → triage/de-dupe → package submission-ready reports → review.
-- **TOOLS:** the Redstrike skill set (orchestrated) + `reporting`; `_contract/roe-gate.md` fed by the program scope.
+- **TOOLS:** the Redstrike skill set (orchestrated) + `reporting`; `refs/report_quality.md` (the submission-quality bar); `_contract/roe-gate.md` fed by the program scope.
 - **GOAL:** Run an authorized bug-bounty engagement end-to-end, strictly within the program's scope + rules, producing only VERIFIED, in-scope, non-duplicate findings packaged as submission-ready reports. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `program_scope.json`, `hunt_plan.md`, `submissions/`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = the program's scope/rules (link or text) → `scope.yaml`. Orchestrates Tier-1 (`js-analysis`), Tier-2 (all vuln agents), `cve-intelligence`, `attack-chain-discovery`, `reporting`.
+- **DATA / RAG:** inputs = the program's scope/rules (link or text) → `scope.yaml`. `refs/` = `report_quality.md` (per-submission quality bar). Orchestrates Tier-1 (`js-analysis`), Tier-2 (all vuln agents), `cve-intelligence`, `attack-chain-discovery`, `reporting`.
 - **DECOMPOSITION:** n/a (mission orchestrator).
 
 ## Goal
@@ -23,7 +23,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (scope parsed, plan + accepted
 3. **Hunt** — run the applicable `redstrike-<vuln>` skills, each gated (mechanical → its reviewer subagent). Only `accepted` findings advance.
 4. **Chain** — `redstrike-attack-chain-discovery` for higher-impact composites.
 5. **Triage/de-dupe** — drop duplicates (program's known issues / internal dupes); keep only `accepted`, in-scope, non-dup findings.
-6. **Package** — `redstrike-reporting` + per-finding submission drafts in `submissions/` (program's format: title, severity, steps, impact, remediation).
+6. **Package** — `redstrike-reporting` + per-finding submission drafts in `submissions/`, each meeting the submission-quality bar (`refs/report_quality.md`: specific title, complete reproduction, expected-vs-actual, earned impact/severity, proof, signal-only formatting). Program's format: title, severity, steps, impact, remediation.
 
 ## Inputs
 - program scope/rules (link/text), `scope.yaml`, `js-analysis` + vuln-agent outputs
