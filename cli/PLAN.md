@@ -47,8 +47,18 @@ cli/
       runs from the installed package); repo autodetect via cwd-walk with a clean error when run
       out-of-tree; version-floor assertion; UTF-8/ASCII-safe output; README + INSTALL.md WSL2 section;
       CI `cli` job runs the unit tests + packaging + a dry-run smoke on Python 3.10/3.11/3.12. Also
-      validated on WSL2 (python 3.12 tests green; POSIX hook command + argv confirmed). **Not yet:** a
-      live in-session `claude` launch (needs `claude` installed + authed on the run host).
+      validated on WSL2 (python 3.12 tests green; POSIX hook command + argv confirmed).
+      **MCP isolation:** `run` now passes `--strict-mcp-config --mcp-config runtime/mcp-none.json`
+      (a live probe showed the operator's claude.ai connectors otherwise leak into the session).
+
+### Live verification (real `claude -p` on an authed host)
+- Engine launches with our `--settings` + `--add-dir` + `--append-system-prompt-file`; the init event
+  shows **all 102 redstrike skills loaded** and `mcp_servers: []` (isolated).
+- RoE injection reaches the model: it echoed the engagement ID + in-scope domain, and self-refused an
+  out-of-scope request (defense layer 1).
+- The **scope-gate hook fires in-session** and blocks an out-of-scope Bash call before it runs, with our
+  reason surfaced (defense layer 2). Minor polish: Claude labels the block a "hook error" line (it still
+  blocks correctly) — could switch to exit-2 phrasing later.
 - [ ] **M5 — Autonomous `-n` (deferred).** `-p` + stream-json event loop, `defer`-based approval with
       resume, budget/turn caps, OAuth-token auth, run summary. The launcher is structured to add this
       without rework.
