@@ -42,7 +42,14 @@ def hook_script() -> Path:
     return Path(scope_gate.__file__).resolve()
 
 
-def prepare_runtime(engagement_dir: Path, repo_root: Path, python_exe: str) -> Prepared:
+def prepare_runtime(
+    engagement_dir: Path,
+    repo_root: Path,
+    python_exe: str,
+    *,
+    mode: str = "interactive",
+    extra_allow: list[str] | None = None,
+) -> Prepared:
     engagement_dir = engagement_dir.resolve()
     scope_yaml = engagement_dir / "scope.yaml"
     if not scope_yaml.is_file():
@@ -55,13 +62,16 @@ def prepare_runtime(engagement_dir: Path, repo_root: Path, python_exe: str) -> P
 
     settings_path = runtime / "settings.json"
     settings = settingsmod.render_settings(
-        python_exe=python_exe, hook_script=hook_script(), scope_json=scope_json
+        python_exe=python_exe, hook_script=hook_script(), scope_json=scope_json,
+        mode=mode, extra_allow=extra_allow,
     )
     settingsmod.write_settings(settings_path, settings)
 
     engagement_id = engagement_dir.name
     roe_path = runtime / "roe.md"
-    roe_path.write_text(roemod.render_roe(proj, engagement_id), encoding="utf-8")
+    roe_path.write_text(
+        roemod.render_roe(proj, engagement_id, autonomous=(mode == "autonomous")), encoding="utf-8"
+    )
 
     # Empty MCP config + --strict-mcp-config isolates the engagement from the operator's
     # claude.ai connectors / plugin MCP servers (observed leaking in without it).
@@ -120,6 +130,57 @@ def build_argv(
         "-n",
         prep.engagement_id,
     ]
+
+
+def autonomous_prompt(engagement_id: str) -> str:
+    return (
+        f"Autonomously run Redstrike engagement '{engagement_id}'. Authorization and scope are already "
+        f"recorded (RoE appended) — §0 is SATISFIED, do not re-ask. Invoke the redstrike orchestrator "
+        f"skill and work the recon phase and non-destructive analysis end to end, gating per the appended "
+        f"AUTONOMOUS rules: STOP and summarize at any approval-gated / destructive step instead of proceeding."
+    )
+
+
+def build_autonomous_argv(
+    claude_bin: str,
+    repo_root: Path,
+    prep: Prepared,
+    prompt: str,
+    allowed_tools: list[str],
+    *,
+    max_turns: int,
+    max_budget: float,
+    resume: bool = False,
+) -> list[str]:
+    argv = [
+        claude_bin,
+        "-p",
+        prompt,
+        "--add-dir",
+        str(repo_root.resolve()),
+        "--append-system-prompt-file",
+        str(prep.roe_path),
+        "--settings",
+        str(prep.settings_path),
+        "--setting-sources",
+        "project,local",
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(prep.mcp_config),
+        "--permission-mode",
+        "dontAsk",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--max-turns",
+        str(max_turns),
+        "--max-budget-usd",
+        str(max_budget),
+    ]
+    argv += ["--resume", prep.session_id] if resume else ["--session-id", prep.session_id, "-n", prep.engagement_id]
+    # --allowedTools consumes the rest of the line, so it goes LAST.
+    argv += ["--allowedTools", *allowed_tools]
+    return argv
 
 
 def gate(prep: Prepared, *, now=None) -> list[str]:
