@@ -29,6 +29,7 @@ Two kinds:
 | **Bug Bounty Agent** ✅ | program scope → recon → prioritized hunt → triage/de-dupe → report → assisted submit | program scope → report + submission |
 | **CTF Solver Agent** ✅ | challenge → identify class → drive the right vuln agents → capture flag | challenge → flag + write-up |
 | **Engagement Orchestrator / Red-Team Lead** ✅ (the `redstrike` skill) | PTES spine driver, phase-gated (scope → recon → vuln-analysis → exploitation* → post-ex* → reporting) | scope.yaml → engagement report |
+| **Single-class Hunters** ✅ (`xss-hunter`; the `<class>-hunter` pattern) | `bug-bounty` pinned to ONE class, depth-first — reuses the class feeder + executors + `*-verify` reviewers + packaging (thin wrapper over [`hunter-base.md`](hunter-base.md)) | target + program scope → class submissions |
 
 ### Capability agents (horizontal services any mission/vuln agent calls)
 | Agent | Does | Consumes → Produces |

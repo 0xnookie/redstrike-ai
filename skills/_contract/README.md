@@ -105,6 +105,10 @@ Skills chain through **files on disk**, declared in each `SKILL.md` (Inputs = ch
 
 When a skill's target is a vuln **class**, split it into one agent per variant (e.g. XSS → reflected / stored / dom / blind), each a full quad. Fan the variants out of a **shared context artifact** (e.g. `xss_context.json`, fed by `js-analysis/out/<site>/findings/gadgets.jsonl`) so they don't each re-derive injection points, sinks, and CSP.
 
+## Single-class hunters
+
+A **hunter** (`<class>-hunter`, e.g. `xss-hunter`) is a Tier-3 MISSION agent that drives the whole pipeline toward ONE vuln class, depth-first — `bug-bounty` pinned to a class. It **reuses** the class's `<class>-context` feeder, its executors + `*-verify` reviewers, and `reporting` packaging; it emits no findings of its own (`review.md` only, no `verify.md`). The shared 80% (scope, gated hunt, triage, packaging, safety) lives in [`hunter-base.md`](hunter-base.md); each per-class `SKILL.md` adds only the thin CLASS BLOCK (recon surface · feeder · executor set · escalation ref · chains), so a new hunter is a ~30-line clone. A hunter never duplicates an executor or reviewer — it is a thin wrapper, not a fork.
+
 ## Governance (active skills only)
 
 Recon is read-only. Any skill that sends a payload, exploits, or changes target state imports [`roe-gate.md`](roe-gate.md): hard scope allowlist check before acting, human approval gate for exploitation/post-exploitation, immutable audit log. The mechanical gate will NOT catch an out-of-scope action — that is the RoE gate's altitude.
