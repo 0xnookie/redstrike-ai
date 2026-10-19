@@ -9,7 +9,7 @@
 - **TOOLS:** `curl`/`httpx` (Origin header fuzzing), interceptor, `puppeteer` for a real credentialed cross-origin read; `jq`.
 - **GOAL:** Confirm an exploitable CORS misconfig — attacker origin reflected with `ACAC:true` over a sensitive endpoint (or sensitive data exposed to any origin) — with a cross-origin read PoC. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `cors_endpoints.json`, `origin_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/endpoints_*.txt` + `apis.json`, `auth.env`, `scope.yaml`. `refs/` = `cors_tests.md`. Chains FROM `js-analysis`; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{endpoints,apis}.jsonl`, `auth.env`, `scope.yaml`. `refs/` = `cors_tests.md`. Chains FROM `js-analysis`; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic). Overlaps CSRF (credentialed cross-origin) — CORS = *read*, CSRF = *write*.
 
 ## Goal
@@ -23,7 +23,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - A cross-origin PoC reading sensitive data with the victim's creds
 
 ## Steps  (action · tool · output)
-1. Enumerate endpoints emitting CORS headers · `httpx`/`curl` + `jq apis.json` · `cors_endpoints.json`
+1. Enumerate endpoints emitting CORS headers · `httpx`/`curl` + `jq` over `apis.jsonl` · `cors_endpoints.json`
 2. Probe origin-reflection logic (matrix of evil origins) · `refs/cors_tests.md` + `curl -H Origin` · `origin_tests.jsonl`
 3. Test credentialed (`ACAC:true` + reflected origin) on SENSITIVE endpoints · interceptor · (into findings)
 4. Confirm cross-origin read of sensitive data · `puppeteer` (victim session) · `poc/<id>/`
@@ -38,7 +38,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_*.txt`, `apis.json`
+- `js-analysis/out/<site>/findings/`: `endpoints.jsonl`, `apis.jsonl`
 - `auth.env` (victim session), `scope.yaml`, `refs/cors_tests.md`
 
 ## Outputs

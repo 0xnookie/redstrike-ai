@@ -10,7 +10,7 @@
 - **TOOLS:** `wafw00f`/`identYwaf`, interceptor, `curl --http2/--http3`, `openssl s_client`, `refs/waf_bypass.md`.
 - **GOAL:** Turn "blocked" into a working delivery path: identify the WAF and the specific transforms that let a BENIGN canary through, so the vuln agent (sqli/xss/ssrf/…) can confirm its bug. Produces guidance, not a finding. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `waf_profile.json`, `bypass_notes.md`, `logs/`.
-- **DATA / RAG:** inputs = the blocked request/agent + `tech.md` + `scope.yaml`. `refs/` = `waf_bypass.md`. Called BY any vuln agent / the orchestrator when a WAF blocks; feeds the tuned payloads back.
+- **DATA / RAG:** inputs = the blocked request/agent + `js-analysis/out/<site>/analysis/site-summary.md` (stack/WAF) + `scope.yaml`. `refs/` = `waf_bypass.md`. Called BY any vuln agent / the orchestrator when a WAF blocks; feeds the tuned payloads back.
 - **DECOMPOSITION:** n/a (capability).
 
 ## Goal
@@ -35,7 +35,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS. (No findings.json — the rea
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- the blocked request / calling agent, `tech.md`, `scope.yaml`
+- the blocked request / calling agent, `js-analysis/out/<site>/analysis/site-summary.md`, `scope.yaml`
 
 ## Outputs
 `waf_profile.json` · `bypass_notes.md` · `logs/`

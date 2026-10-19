@@ -11,7 +11,7 @@
 - **TOOLS:** see §Tools (ingest js-analysis, `arjun`/`x8`, `kxss`/`Gxss`, interceptor, `chrome-devtools-mcp`, `httpx`, modern-first + ladder).
 - **GOAL:** Produce the shared XSS context — every candidate injection point with its reflection/persistence behavior and context, the DOM source→sink flows, and the CSP posture — as `xss_context.json`, so the four variant agents start from one analysis instead of re-deriving it. Done = all checklist boxes checked AND review passes.
 - **OUTPUT:** `candidate_points.json`, `reflections.jsonl`, `csp.json`, `dom_flows.json`, `xss_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/` (`endpoints_{live,unauthed}.txt`, `params.txt`, `gadgets.md`, `js/beautified/`) + optional `auth.env` + `scope.yaml` (incl. `oob.collaborator`). `refs/` = `injection_surface.md`, `context_rules.md`. Output contract = `_contract/xss_context.schema.json`. Chains FROM `js-analysis`; chains TO `xss-reflected`, `xss-stored`, `xss-dom`, `xss-blind`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/` (`findings/endpoints.jsonl` [state live|unauthed], `findings/params.jsonl`, `findings/gadgets.jsonl`, `beautified/`) + optional `auth.env` + `scope.yaml` (incl. `oob.collaborator`). `refs/` = `injection_surface.md`, `context_rules.md`. Output contract = `_contract/xss_context.schema.json`. Chains FROM `js-analysis`; chains TO `xss-reflected`, `xss-stored`, `xss-dom`, `xss-blind`.
 - **DECOMPOSITION:** n/a (shared feeder, not a vuln class).
 
 ## Goal
@@ -33,7 +33,7 @@ DONE = `checklist.md` all `- [x]` AND `review.md` PASS (artifacts exist, non-zer
 4. Persistence check — does the marker resurface on another view/endpoint? (→ stored candidate) · re-fetch related views + interceptor · `reflections.jsonl` (persist flags)
 5. Classify reflection context per hit; canary-probe which breakout chars are encoded · `refs/context_rules.md` + DOM inspect · (into `injection_points`)
 6. Capture CSP + security headers; assess block-inline/eval + bypassable sources · `httpx -include` / `curl -I` + policy parse · `csp.json`
-7. Map DOM sources, sinks, and source→sink flows · `chrome-devtools-mcp` + `gadgets.md` · `dom_flows.json`
+7. Map DOM sources, sinks, and source→sink flows · `chrome-devtools-mcp` + `findings/gadgets.jsonl` · `dom_flows.json`
 8. Consolidate + validate against the schema · synth + schema check · `xss_context.json`
 9. Emit summary + per-point variant routing · synth · `summary.md`
 10. /REVIEW SKILL · `review.md`
@@ -44,11 +44,11 @@ DONE = `checklist.md` all `- [x]` AND `review.md` PASS (artifacts exist, non-zer
 - **Reflection:** `kxss`, `Gxss`, custom marker probe
 - **Persistence/context:** interceptor (Caido / mitmproxy), `chrome-devtools-mcp` (live DOM)
 - **CSP/headers:** `httpx -include`, `curl -I`, `nuclei` (`http/misconfiguration/http-missing-security-headers`)
-- **DOM flows:** `chrome-devtools-mcp`, `gadgets.md` (from js-analysis), `semgrep`
+- **DOM flows:** `chrome-devtools-mcp`, `findings/gadgets.jsonl` (from js-analysis), `semgrep`
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_live.txt`, `endpoints_unauthed.txt`, `params.txt`, `gadgets.md`, `js/beautified/`
+- `js-analysis/out/<site>/`: `findings/endpoints.jsonl` (state live|unauthed), `findings/params.jsonl`, `findings/gadgets.jsonl`, `beautified/`
 - optional `auth.env` (authed surface)
 - `scope.yaml` (RoE scope check per probe; `oob.collaborator` for blind routing)
 - `refs/`: `injection_surface.md`, `context_rules.md`

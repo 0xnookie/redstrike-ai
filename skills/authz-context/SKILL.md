@@ -10,7 +10,7 @@
 - **TOOLS:** interceptor with multi-session (`auth.env`), `jq` over `js-analysis`, request-diff across identities.
 - **GOAL:** Build the authorization map — object references, the identity/role × endpoint matrix, and mass-assignable params — into `authz_context.json`, so `idor` and `privesc` fan out from one analysis. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `objects.json`, `role_matrix.json`, `mass_assign.json`, `authz_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/{endpoints_*.txt,params.txt,apis.json}` + `auth.env` (**≥2 identities + roles**) + `scope.yaml`. Chains FROM `js-analysis`; chains TO `idor`, `privesc`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{endpoints,params,apis}.jsonl` + `auth.env` (**≥2 identities + roles**) + `scope.yaml`. Chains FROM `js-analysis`; chains TO `idor`, `privesc`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -36,7 +36,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`authz_context.json` validate
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_*.txt`, `params.txt`, `apis.json`
+- `js-analysis/out/<site>/findings/`: `endpoints.jsonl`, `params.jsonl`, `apis.jsonl`
 - `auth.env`: **≥2 identities + roles** (attacker low-priv + victim; +admin for vertical)
 - `scope.yaml`
 
