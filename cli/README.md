@@ -34,6 +34,7 @@ Stdlib-only (PyYAML used if present, else a bundled reader). Engagements run on 
 ## Quickstart
 ```bash
 redstrike doctor                       # engine + auth + platform + tool roster preflight
+redstrike install --core               # install the offensive tool roster (wraps scripts/install.sh; --all / cats)
 redstrike init "Acme Corp" \           # scaffold engagements/acme-corp-<date>/ + scope.yaml
   --authorized-by "sec@acme / auth-ref" \
   --domain '*.acme.com' --domain api.acme.com \

@@ -121,6 +121,17 @@ def run_doctor(repo_root: Path, args: list[str] | None = None) -> tuple[int, str
     return rc, (out + ("\n" + err if err else ""))
 
 
+def exec_live(cmd: list[str], cwd: str | None = None) -> int:
+    """Run a long-running / interactive command with INHERITED stdio (so the user sees live
+    progress and can answer sudo/apt prompts). Returns its exit code."""
+    try:
+        return subprocess.run(cmd, cwd=cwd, check=False).returncode
+    except KeyboardInterrupt:
+        return 130
+    except FileNotFoundError:
+        return 127
+
+
 def gather(repo_root: Path) -> list[Check]:
     checks: list[Check] = []
 
