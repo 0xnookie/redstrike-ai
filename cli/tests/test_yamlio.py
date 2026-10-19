@@ -6,14 +6,20 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # cli/
 
 from redstrike_cli import engagement, yamlio  # noqa: E402
 
+try:
+    import yaml  # PyYAML — optional; only the fallback-vs-PyYAML parity check needs it
+    HAVE_YAML = True
+except ImportError:
+    yaml = None
+    HAVE_YAML = False
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 TEMPLATE = REPO / "engagements" / "_template" / "scope.yaml"
 
 
 class TestMiniYaml(unittest.TestCase):
+    @unittest.skipUnless(HAVE_YAML, "PyYAML not installed")
     def test_matches_pyyaml_on_template(self):
-        import yaml
-
         text = TEMPLATE.read_text(encoding="utf-8")
         ref = yaml.safe_load(text)
         got = yamlio._mini_load(text)
@@ -51,12 +57,11 @@ class TestMiniYaml(unittest.TestCase):
         self.assertEqual(got["out_of_scope"]["domains"], ["admin.acme.com"])
         self.assertEqual(got["rules"]["approval_required_phases"], ["exploitation", "post-exploitation"])
         self.assertEqual(got["rules"]["rate_limit_rps"], 20)
-        # also valid for PyYAML
-        import yaml
-
-        y = yaml.safe_load(text)
-        self.assertEqual(y["authorized_by"], "sec@acme / auth-123")
-        self.assertEqual(y["oob"]["collaborator"], "oob.example.net")
+        # also valid for PyYAML, when it's installed
+        if HAVE_YAML:
+            y = yaml.safe_load(text)
+            self.assertEqual(y["authorized_by"], "sec@acme / auth-123")
+            self.assertEqual(y["oob"]["collaborator"], "oob.example.net")
 
 
 if __name__ == "__main__":
