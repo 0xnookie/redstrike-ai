@@ -90,6 +90,7 @@ scoped and human-gated (full docs: `cli/README.md`). It is separate from the too
 ./cli/install.sh            # one command (Linux/macOS/WSL) — installs the `redstrike` command, repo baked in
 #   (alt: pipx install ./cli, or run in place: PYTHONPATH=cli python3 -m redstrike_cli ...)
 redstrike doctor            # engine + auth + platform + tool-roster preflight
+redstrike install --core    # install the tool roster (wraps scripts/install.sh; --all or category names)
 redstrike init "Acme Corp" --authorized-by "sec@acme / auth-ref" --domain '*.acme.com' \
   --i-confirm-authorization
 redstrike run acme-corp-<date>        # launch Claude Code, scoped + gated (interactive)

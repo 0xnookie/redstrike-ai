@@ -180,9 +180,10 @@ Claude Code preloaded with the skills + subagents. Interactive and human-gated b
 opt-in autonomous (headless) mode.
 
 ```bash
-pipx install ./cli            # provides `redstrike`; needs the `claude` CLI on PATH (engagements: WSL2/Linux)
+./cli/install.sh              # one command (Linux/macOS/WSL) → global `redstrike`; needs `claude` on PATH
 
 redstrike doctor              # preflight: engine + auth + platform + tool roster
+redstrike install --core      # install the tool roster (wraps scripts/install.sh; --all or category names)
 redstrike init "Acme Corp" \  # scaffold engagements/acme-corp-<date>/ + scope.yaml + an authorization record
   --authorized-by "sec@acme / written-auth-ref" \
   --domain '*.acme.com' --domain api.acme.com \

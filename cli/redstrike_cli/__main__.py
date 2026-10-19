@@ -114,6 +114,36 @@ def cmd_doctor(args, repo: Path) -> int:
     return rc
 
 
+def cmd_install(args, repo: Path) -> int:
+    if not args.no_banner:
+        ui.print_banner("install the offensive tool roster")
+    script = repo / "scripts" / "install.sh"
+    bash = preflight.find_bash()
+    if not script.is_file():
+        print(ui.err(f"scripts/install.sh not found at {script}"))
+        return 2
+    if not bash:
+        print(ui.err("bash not found — run scripts/install.sh on a Linux/WSL2 host"))
+        return 127
+    forward: list[str] = []
+    if args.core:
+        forward.append("--core")
+    if args.all_cats:
+        forward.append("--all")
+    if args.dry_run:
+        forward.append("--dry-run")
+    if args.yes:
+        forward.append("--yes")
+    forward += args.categories
+    print(ui.info("scripts/install.sh " + (" ".join(forward) or "(default: --core)")))
+    print(ui.warn("installs via apt/pipx/go/… and may use sudo · Kali/Debian/Parrot (WSL2 on Windows)"))
+    print()
+    rc = preflight.exec_live([bash, str(script), *forward], cwd=str(repo))
+    print()
+    print(ui.info("re-check with: redstrike doctor"))
+    return rc
+
+
 def _collect_init_fields(args) -> dict:
     domains = list(args.domain or [])
     authorized_by = args.authorized_by
@@ -376,6 +406,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--missing", action="store_true", help="list only missing tools")
     d.add_argument("categories", nargs="*", help="specific tool categories (e.g. web recon ad)")
 
+    ins = sub.add_parser("install", help="install the offensive tool roster (wraps scripts/install.sh)")
+    ins.add_argument("--core", action="store_true", help="core set: glue+recon+web+password+intercept (default)")
+    ins.add_argument("--all", action="store_true", dest="all_cats", help="every category (large)")
+    ins.add_argument("--dry-run", action="store_true", help="print the plan; change nothing")
+    ins.add_argument("--yes", action="store_true", help="assume yes / non-interactive")
+    ins.add_argument("categories", nargs="*", help="specific categories (e.g. web recon ad cloud)")
+
     i = sub.add_parser("init", help="scaffold a new engagement + scope.yaml")
     i.add_argument("client")
     i.add_argument("--authorized-by")
@@ -424,6 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
 _DISPATCH = {
     "version": cmd_version,
     "doctor": cmd_doctor,
+    "install": cmd_install,
     "init": cmd_init,
     "run": cmd_run,
     "verify": cmd_verify,
