@@ -255,6 +255,28 @@ def evaluate(
             return _defer(f"shell command needs operator approval: {cmd.strip()[:90]}", fp)
         return _pass()
 
+    if tool_name.startswith("mcp__"):
+        # MCP tools (e.g. a browser/automation server) carry targets in free-form, per-server
+        # input we can't schema-validate — so stringify the whole input and scan it for hosts/URLs.
+        # BLIND SPOT: once a tab/session is already attached, follow-up actions (click/type on an
+        # element ref) carry no host and are invisible here — same limit as an opaque Bash command.
+        blob = json.dumps(tool_input, default=str)
+        offenders_out, offenders_unknown = [], []
+        for t in extract_targets(blob):
+            k = classify(t, scope)
+            if k == "out":
+                offenders_out.append(t)
+            elif k == "unknown" and not is_ignorable(t):
+                offenders_unknown.append(t)
+        if offenders_out:
+            return _deny(f"MCP call references OUT-of-scope host(s): {', '.join(offenders_out)}")
+        if offenders_unknown:
+            return _deny(
+                "MCP call references host(s) not in scope: "
+                f"{', '.join(offenders_unknown)} — add to scope.yaml or correct the target"
+            )
+        return _pass()
+
     return _pass()
 
 

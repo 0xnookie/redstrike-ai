@@ -21,7 +21,7 @@ _ALLOW = ["Read", "Grep", "Glob", "Skill", "Agent", "TodoWrite", "WebSearch"]
 # "allow Bash" here means "let the hook decide", not "run anything".
 _AUTONOMOUS_EXTRA = ["WebFetch", "Bash", "PowerShell"]
 
-_HOOK_MATCHER = "Bash|PowerShell|WebFetch|Edit|Write|MultiEdit|NotebookEdit"
+_HOOK_MATCHER = "Bash|PowerShell|WebFetch|Edit|Write|MultiEdit|NotebookEdit|mcp__.*"
 
 
 def _dedupe(items: list[str]) -> list[str]:

@@ -84,5 +84,26 @@ class TestEvaluateContract(unittest.TestCase):
         self.assertTrue(out["reason"])
 
 
+class TestMcpGate(unittest.TestCase):
+    """MCP tool calls are scanned for out-of-scope targets in their free-form input."""
+
+    def mdec(self, args):
+        return sg.evaluate("mcp__interceptor__browser", {"verb": "browser", "args": args},
+                           SCOPE, PROT, CWD)["decision"]
+
+    def test_in_scope_url(self):
+        self.assertEqual(self.mdec(["open", "https://app.acme.com/x"]), "pass")
+
+    def test_out_of_scope_url(self):
+        self.assertEqual(self.mdec(["open", "https://admin.acme.com/"]), "deny")
+
+    def test_unknown_external_url(self):
+        self.assertEqual(self.mdec(["open", "https://evil-attacker-xyz.com/"]), "deny")
+
+    def test_no_host_action_passes(self):
+        # already-attached-tab action carries no host → gate can't see it (documented blind spot)
+        self.assertEqual(self.mdec(["click", "role:button[name=Submit]"]), "pass")
+
+
 if __name__ == "__main__":
     unittest.main()
