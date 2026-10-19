@@ -15,11 +15,19 @@ gated, and resumed by reading/writing that directory.
 resume loop (M0–M5.1). See `PLAN.md`.
 
 ## Install
+One command — Linux (Kali/Ubuntu/Debian), macOS, or WSL. After it, **`redstrike` is a global command**
+you run from anywhere (the repo path is baked into the launcher):
 ```bash
-pipx install ./cli            # provides `redstrike`; requires `claude` on PATH
-# or, from a clone, run without installing:
-PYTHONPATH=cli python -m redstrike_cli --help
+git clone https://github.com/0xnookie/redstrike-ai.git
+cd redstrike-ai
+./cli/install.sh          # installs `redstrike` to ~/.local/bin (needs python3 + its venv module)
+redstrike doctor
 ```
+Debian/Ubuntu/WSL: if it asks, `sudo apt install -y python3-venv` first. Add `~/.local/bin` to `PATH` if the
+installer says so. Also needs the **`claude`** CLI (Claude Code) on `PATH` + `claude login`.
+
+Alternatives: `pipx install ./cli`, or run in place without installing: `PYTHONPATH=cli python3 -m redstrike_cli --help`.
+
 Stdlib-only (PyYAML used if present, else a bundled reader). Engagements run on **WSL2/Linux**
 (the OS sandbox the scope gate leans on is Linux-only; native Windows has no sandbox).
 

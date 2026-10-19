@@ -87,7 +87,8 @@ Override the clone dir with `REDSTRIKE_TOOLS_DIR`.
 scoped and human-gated (full docs: `cli/README.md`). It is separate from the tool roster above.
 
 ```bash
-pipx install ./cli          # or: pip install ./cli   — provides the `redstrike` command
+./cli/install.sh            # one command (Linux/macOS/WSL) — installs the `redstrike` command, repo baked in
+#   (alt: pipx install ./cli, or run in place: PYTHONPATH=cli python3 -m redstrike_cli ...)
 redstrike doctor            # engine + auth + platform + tool-roster preflight
 redstrike init "Acme Corp" --authorized-by "sec@acme / auth-ref" --domain '*.acme.com' \
   --i-confirm-authorization
