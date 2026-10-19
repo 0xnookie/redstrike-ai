@@ -9,7 +9,7 @@
 - **TOOLS:** `curl -I`/`httpx` (XFO + CSP `frame-ancestors`), `chrome-devtools-mcp`/`puppeteer` (render the frame), `jq`.
 - **GOAL:** Confirm clickjacking — a page carrying a security-sensitive, state-changing action lacks (or bypasses) framing protection and a UI-redress PoC can drive it. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `framing_tests.json`, `findings.json`, `poc/`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/endpoints_*.txt` (sensitive actions), `scope.yaml`. `refs/` = `framing_poc.md`. Chains FROM `js-analysis`; chains TO `reporting`. Pairs with `csrf` (framed CSRF).
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/endpoints.jsonl` (sensitive actions), `scope.yaml`. `refs/` = `framing_poc.md`. Chains FROM `js-analysis`; chains TO `reporting`. Pairs with `csrf` (framed CSRF).
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal

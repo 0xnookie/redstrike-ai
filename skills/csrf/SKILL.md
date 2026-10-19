@@ -9,7 +9,7 @@
 - **TOOLS:** `jq` over `js-analysis/` endpoints + forms; interceptor (Caido/mitmproxy) for token replay/removal; `puppeteer` for cross-origin PoC in a real logged-in session; ladder fetch.
 - **GOAL:** Confirm CSRF — a security-relevant state change triggered cross-origin without a valid anti-CSRF token, with a working PoC. Done = checklist all `- [x]`, review passes, every finding accepted.
 - **OUTPUT:** `state_changing_requests.json`, `defense_matrix.json`, `findings.json`, `poc/`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/endpoints_*.txt` + forms, `auth.env` (a logged-in session), `scope.yaml`. `refs/` = `poc_templates.md`. Chains FROM `js-analysis`; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/endpoints.jsonl` + forms, `auth.env` (a logged-in session), `scope.yaml`. `refs/` = `poc_templates.md`. Chains FROM `js-analysis`; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic). Note: overlaps CORS (credentialed cross-origin reads) and clickjacking (UI-driven CSRF) — de-dupe.
 
 ## Goal
@@ -40,7 +40,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_live.txt`, forms/routes
+- `js-analysis/out/<site>/findings/endpoints.jsonl` (state=live), forms/routes
 - `auth.env`: a valid victim session (cookies)
 - `scope.yaml` (RoE)
 - `refs/poc_templates.md`

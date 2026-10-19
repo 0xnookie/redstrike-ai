@@ -19,7 +19,7 @@
         "properties": {
           "name": { "type": "string" },
           "version": { "type": "string" },
-          "source": { "type": "string", "description": "libraries.json | tech.md | header | banner" }
+          "source": { "type": "string", "description": "libraries.jsonl | site-summary.md | header | banner" }
         }
       }
     },

@@ -10,7 +10,7 @@
 - **TOOLS:** reflection detection `kxss`/`Gxss` or custom marker probing; param confirm `arjun`/`x8`; scan/confirm `dalfox`, `nuclei` (`dast/vulnerabilities/xss`, `fuzzing/`); execution confirm `chrome-devtools-mcp` → `puppeteer` (real DOM exec); fetch via `_contract/anti-automation-ladder.md`; manual context via interceptor (Caido/mitmproxy).
 - **GOAL:** Confirm and evidence reflected XSS on in-scope endpoints — each with a reproducible PoC that demonstrates **script execution in a real browser**, not mere reflection. Done = all checklist boxes checked, `review.md` passes (liveness), AND `verify.md` accepts each finding (semantic).
 - **OUTPUT:** `injection_points.txt`, `reflections.txt`, `contexts.json`, `payloads_tried.jsonl`, `findings.json`, `poc/` (per-finding req/resp + screenshot + DOM), `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/` outputs (`endpoints_{live,unauthed}.txt`, `params.txt`, `gadgets.md`) + optional `xss_context.json` (shared XSS feeder) + `auth.env`. `refs/` = `payloads_by_context.md`, `waf_bypass_encodings.md`. Chains FROM `js-analysis` (+ `xss-context`); chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/` (`endpoints.jsonl` [state live|unauthed], `params.jsonl`, `gadgets.jsonl`) + optional `xss_context.json` (shared XSS feeder) + `auth.env`. `refs/` = `payloads_by_context.md`, `waf_bypass_encodings.md`. Chains FROM `js-analysis` (+ `xss-context`); chains TO `reporting`.
 - **DECOMPOSITION:** this IS the reflected variant. Shared feeder `xss-context` writes `xss_context.json` (injection points + sinks + CSP), consumed by all four variants so they don't each re-derive it.
 
 ## Goal
@@ -27,7 +27,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 - CVSS rating + remediation
 
 ## Steps  (action · tool · output)
-1. Ingest context (injection points, sinks, CSP) from feeder/js-analysis · read `xss_context.json` + `params.txt` + `endpoints_*.txt` · `injection_points.txt`
+1. Ingest context (injection points, sinks, CSP) from feeder/js-analysis · read `xss_context.json` + `findings/params.jsonl` + `findings/endpoints.jsonl` · `injection_points.txt`
 2. Confirm params actually reflect; mine extra params · `arjun`/`x8` + marker probe · `injection_points.txt` (refined)
 3. Reflection probe with a unique marker (e.g. `rs7f3q`) per point · `kxss`/`Gxss` + ladder fetch · `reflections.txt`
 4. Classify reflection context (where the marker landed) · analyze response + DOM · `contexts.json`
@@ -49,7 +49,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 
 ## Inputs
 - `xss_context.json` (from `xss-context` feeder; schema `_contract/xss_context.schema.json`) — preferred; else derive from:
-- `js-analysis/`: `endpoints_live.txt`, `endpoints_unauthed.txt`, `params.txt`, `gadgets.md`
+- `js-analysis/out/<site>/findings/`: `endpoints.jsonl` (state live|unauthed), `params.jsonl`, `gadgets.jsonl`
 - optional `auth.env` (authed reflection surface)
 - `scope.yaml` (RoE gate — every target checked before a payload is sent)
 - `refs/`: `payloads_by_context.md`, `waf_bypass_encodings.md`

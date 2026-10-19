@@ -7,7 +7,7 @@
 - **TOOLS:** interceptor, `refs/ldap_payloads.md`.
 - **GOAL:** Confirm LDAP injection — filter manipulation that bypasses authentication or enumerates directory data — benignly. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `ldap_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/params.txt` (login/search/filter params) + `tech.md` (LDAP/AD-backed) + `scope.yaml`. `refs/` = `ldap_payloads.md`. Chains FROM recon; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/params.jsonl` (login/search/filter params) + `js-analysis/out/<site>/analysis/site-summary.md` (LDAP/AD-backed) + `scope.yaml`. `refs/` = `ldap_payloads.md`. Chains FROM recon; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -20,7 +20,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 - A benign proof: auth bypass, or wildcard enumeration returning more entries than intended
 
 ## Steps  (action · tool · output)
-1. Ingest login/search params + LDAP fingerprint · `jq`/`grep` + `tech.md` · (into tests)
+1. Ingest login/search params + LDAP fingerprint · `jq`/`grep` + `site-summary.md` · (into tests)
 2. Auth-bypass filter injection (`*`, `*)(uid=*))(|(uid=*`, `admin)(&)`) · interceptor + refs · `ldap_tests.jsonl`
 3. Wildcard enumeration (`*` in search) · refs · `ldap_tests.jsonl`
 4. Blind boolean (attribute presence: `)(attr=value*)` true/false) · refs · `ldap_tests.jsonl`
@@ -34,7 +34,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/params.txt`, `tech.md`, `scope.yaml`
+- `js-analysis/out/<site>/findings/params.jsonl`, `js-analysis/out/<site>/analysis/site-summary.md`, `scope.yaml`
 
 ## Outputs
 `ldap_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

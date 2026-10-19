@@ -7,7 +7,7 @@
 - **TOOLS:** interceptor, `nosqlmap` (confirm manually), `refs/nosql_payloads.md`.
 - **GOAL:** Confirm NoSQL injection — operator/syntax injection that bypasses auth or manipulates a query to return unauthorized data — benignly. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `nosql_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/params.txt` + `content-discovery` + `tech.md` (Mongo/Couch/etc.) + `scope.yaml`. `refs/` = `nosql_payloads.md`. Chains FROM recon; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/params.jsonl` + `content-discovery` + `js-analysis/out/<site>/analysis/site-summary.md` (Mongo/Couch/etc.) + `scope.yaml`. `refs/` = `nosql_payloads.md`. Chains FROM recon; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -20,7 +20,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 - A benign proof: auth bypass (login without creds) or a controlled boolean/time differential / minimal data extraction
 
 ## Steps  (action · tool · output)
-1. Ingest params + NoSQL fingerprint · `jq`/`grep` + `tech.md` · (into tests)
+1. Ingest params + NoSQL fingerprint · `jq`/`grep` + `site-summary.md` · (into tests)
 2. Operator injection in auth: `user[$ne]=x&pass[$ne]=y` / `{"user":{"$ne":null},"pass":{"$ne":null}}` · interceptor · `nosql_tests.jsonl`
 3. Operator injection in queries (`$gt`/`$regex` to extract) · refs · `nosql_tests.jsonl`
 4. Syntax injection (`'"`\;{}` breakouts) + `$where` JS injection · refs · `nosql_tests.jsonl`
@@ -35,7 +35,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/params.txt`, `content-discovery`, `tech.md`, `scope.yaml`
+- `js-analysis/out/<site>/findings/params.jsonl`, `content-discovery`, `js-analysis/out/<site>/analysis/site-summary.md`, `scope.yaml`
 
 ## Outputs
 `nosql_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

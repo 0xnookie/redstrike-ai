@@ -9,7 +9,7 @@
 A target-specific list finds what generic lists miss. Combine:
 1. **OSINT terms** (`osint/terms.txt`) — product/feature names, employee handles, internal hostnames.
 2. **Crawled path segments** — split crawled URLs into path tokens (`/admin/users/export` → admin, users, export).
-3. **JS strings** — identifiers, routes, API paths from `js-analysis/js/beautified/` + `endpoints_*.txt`.
+3. **JS strings** — identifiers, routes, API paths from `js-analysis/out/<site>/beautified/` + `findings/endpoints.jsonl`.
 4. **A base list** — `seclists` (raft/dirb) as the backbone.
 5. **Mutations** — add extensions seen on the target (`.php`,`.json`,`.bak`), case variants.
 ```

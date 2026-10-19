@@ -1,6 +1,6 @@
 # DOM XSS taint catalog + gadgets (steps 2–3)
 # The feeder (xss_context.json dom.*) hands you candidate flows; this ref is for GATHERING the
-# gadgets it couldn't, by reading js/beautified/ + live DOM. Record flows in taint_flows.json:
+# gadgets it couldn't, by reading js-analysis/out/<site>/beautified/ + live DOM. Record flows in taint_flows.json:
 # {id, source, path:[fn,...], sink, controllable, origin_checked?, notes}.
 
 ## Sources (attacker-controllable)

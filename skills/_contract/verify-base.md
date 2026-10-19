@@ -13,9 +13,9 @@ its own blind spots — independence is the whole point). It consumes `findings.
 
 1. **Evidence sufficiency** — every finding cites a reproducible artifact in the vault (request/response, tool output, screenshot, DOM capture, PoC). No artifact ⇒ `verdict: rejected`. This single rule kills most hallucinations.
 2. **Reproducibility** — the reproduction steps are concrete and re-runnable; a working PoC exists for Medium+. When feasible, **re-execute** the PoC and confirm the claimed effect.
-3. **False-positive gauntlet** — domain-specific sanity checks (defined per skill in the inheriting `verify.md`). Is the effect real, or an inert reflection / benign error / honeypot / already-neutralized-by-a-filter case?
-4. **Severity / CVSS integrity** — recompute the vector from the evidence; do not trust the executor's number. Flag inflation.
-5. **Coverage audit** — cross-check against the executor's filled `OUT/checklist.md`: every item is `done`, or `skipped`/`blocked` **with a stated reason**. A silent gap is a finding against the executor. If `OUT/checklist.md` is absent, mark coverage `n/a` and flag that the executor didn't record it.
+3. **False-positive gauntlet** — domain-specific sanity checks (defined per skill in the inheriting `verify.md`) **plus the shared `counterevidence.md`**: a version/CVE match, "looks injectable", reflected metacharacters, a benign 500, or circular evidence are NOT proof. Is the effect real, or an inert reflection / benign error / honeypot / already-neutralized-by-a-filter case?
+4. **Severity / CVSS integrity** — recompute the vector from the evidence per `severity-calibration.md`; do not trust the executor's number. Flag inflation, and guard against deflation (lower confidence, not severity, for unconfirmed reachability).
+5. **Coverage audit** — cross-check against the executor's filled `OUT/checklist.md`: every item is `done`, or `skipped`/`blocked` **with a stated reason**. A silent gap is a finding against the executor. A candidate closed as "no issue" must be ruled out WITH evidence per `counterevidence.md` — the invalid-dismissal reasons there (a safe sibling, a too-late control, "internal-only", "couldn't build the PoC") do not count; missing information is not proof of safety. If `OUT/checklist.md` is absent, mark coverage `n/a` and flag that the executor didn't record it.
 6. **Scope & safety compliance** — `asset` ∈ engagement scope: read `scope.yaml` (typically `OUT/../scope.yaml`); the action that produced it was within RoE; no destructive action occurred without approval. Out-of-scope ⇒ hard fail + flag. If `scope.yaml` is absent, mark scope `n/a` and flag it — never silently assume in-scope.
 7. **Verdict + rework** — write a structured decision per finding.
 
@@ -75,9 +75,11 @@ Keep payloads benign and read-only; prefer the smallest deterministic proof over
 
 ### CVSS integrity
 
-Recompute the vector deterministically with `scripts/cvss.py` — do not eyeball the score. If the computed
-rating differs from the declared `severity`, that is either inflation (fix it) or a demonstrated-vs-potential
-gap (set `potential_severity`). The consolidated gate
-(`verify_completion.py --engagement <dir>`) surfaces this drift automatically.
+Recompute the vector deterministically with `scripts/cvss.py` — do not eyeball the score, and apply
+`severity-calibration.md` to the metric choices (the High/Critical acceptance checklist + the anti-inflation
+and deflation guards). If the computed rating differs from the declared `severity`, that is either inflation
+(fix the metrics and re-derive — never hand-override the score) or a demonstrated-vs-potential gap (set
+`potential_severity`). The consolidated gate (`verify_completion.py --engagement <dir>`) surfaces this drift
+automatically.
 
 Only `accepted` and `blocked` findings flow to the reporting skill (`blocked` strictly with its caveat).

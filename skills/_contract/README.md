@@ -41,7 +41,14 @@ These are different gates. Do not fuse them.
 | Catches | Execution false-**negatives** (silent failure, empty output) | Analytical false-**positives** (hallucinated vuln) + scope/safety violations |
 | Applies to | **every** skill | **only** findings-producing skills |
 
-`review.md` is a **liveness/coverage** gate — an empty-but-valid `secrets.json` is a PASS (the step ran; it found nothing). Whether a finding is *true* is `verify.md`'s job, at a different altitude.
+`review.md` is a **liveness/coverage** gate — an empty-but-valid `findings/secrets.jsonl` is a PASS (the step ran; it found nothing). Whether a finding is *true* is `verify.md`'s job, at a different altitude.
+
+**Executor-side rigor — front-load it ([`counterevidence.md`](counterevidence.md)).** Before an executor
+emits a finding, or marks a surface tested-and-clear, it argues the opposing case: re-trigger via a
+*different* path, state assumptions + the constraints actually hit, and close each candidate as
+**confirmed / ruled-out-with-evidence / open-proof-gap** (never silently drop one). This kills junk findings
+*before* the reviewer and stops a real candidate being dismissed for an invalid reason; the `verify.md`
+reviewer then re-checks it (base checks #3/#5). Rating follows [`severity-calibration.md`](severity-calibration.md).
 
 ---
 
@@ -92,11 +99,11 @@ extraction was environment-blocked), record a `potential_severity` so the gap is
 
 ## Chaining
 
-Skills chain through **files on disk**, declared in each `SKILL.md` (Inputs = chains FROM, Outputs = chains TO). Example: `js-analysis` writes `gadgets.md` + `endpoints_*.txt`; `xss-*` agents chain FROM them. Shared, reusable primitives (the fetch ladder, the finding schema, secret/sink corpora, the **tool roster + tool-first rule** in [`tooling.md`](tooling.md)) live here in `_contract/` — define once, import everywhere.
+Skills chain through **files on disk**, declared in each `SKILL.md` (Inputs = chains FROM, Outputs = chains TO). Example: `js-analysis` writes `findings/gadgets.jsonl` + `findings/endpoints.jsonl`; `xss-*` agents chain FROM them. Shared, reusable primitives (the fetch ladder, the finding schema, secret/sink corpora, the **tool roster + tool-first rule** in [`tooling.md`](tooling.md)) live here in `_contract/` — define once, import everywhere.
 
 ## Vuln-category decomposition
 
-When a skill's target is a vuln **class**, split it into one agent per variant (e.g. XSS → reflected / stored / dom / blind), each a full quad. Fan the variants out of a **shared context artifact** (e.g. `xss_context.json`, fed by `js-analysis/gadgets.md`) so they don't each re-derive injection points, sinks, and CSP.
+When a skill's target is a vuln **class**, split it into one agent per variant (e.g. XSS → reflected / stored / dom / blind), each a full quad. Fan the variants out of a **shared context artifact** (e.g. `xss_context.json`, fed by `js-analysis/out/<site>/findings/gadgets.jsonl`) so they don't each re-derive injection points, sinks, and CSP.
 
 ## Governance (active skills only)
 

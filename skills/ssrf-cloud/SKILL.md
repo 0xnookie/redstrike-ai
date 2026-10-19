@@ -10,7 +10,7 @@
 - **TOOLS:** `curl`/interceptor, `refs/metadata_endpoints.md`; provider identity check (benign).
 - **GOAL:** Confirm SSRF reaches the cloud metadata service AND yields sensitive instance credentials/tokens — redacted — proving a path to cloud compromise. Done = checklist `- [x]`, review passes, findings accepted + **approved**.
 - **OUTPUT:** `metadata_probes.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `ssrf_context.json` (cloud sinks, `internal_targets`) + `js-analysis/tech.md` (cloud provider) + `scope.yaml`. `refs/` = `metadata_endpoints.md` + the feeder's `ssrf-context/refs/`. Chains FROM `ssrf-context`; chains TO `reporting` + (tier-3 Exploit Generator).
+- **DATA / RAG:** inputs = `ssrf_context.json` (cloud sinks, `internal_targets`) + `js-analysis/out/<site>/analysis/site-summary.md` (cloud provider / stack) + `scope.yaml`. `refs/` = `metadata_endpoints.md` + the feeder's `ssrf-context/refs/`. Chains FROM `ssrf-context`; chains TO `reporting` + (tier-3 Exploit Generator).
 - **DECOMPOSITION:** this IS the cloud-metadata variant.
 
 ## Goal
@@ -23,7 +23,7 @@ Prove metadata-service reach + credential retrieval via an SSRF sink. Emit `find
 - Retrieved credentials/token (REDACTED) + the scope they grant
 
 ## Steps  (action · tool · output)
-1. Ingest cloud-capable sinks + detect provider (`js-analysis/tech.md`) · `jq` · (into probes)
+1. Ingest cloud-capable sinks + detect provider (`js-analysis/out/<site>/analysis/site-summary.md`) · `jq` · (into probes)
 2. Target the provider metadata endpoint via the sink (handle headers / IMDSv2 PUT) · `curl`/interceptor · `metadata_probes.jsonl`
 3. Retrieve role name → credentials / token (store REDACTED) · sink · `poc/<id>/`
 4. Assess cred scope (what the role/token grants) via a benign identity check · provider API · (into findings)
@@ -36,7 +36,7 @@ Prove metadata-service reach + credential retrieval via an SSRF sink. Emit `find
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `ssrf_context.json` (cloud sinks), `js-analysis/tech.md`, `scope.yaml`
+- `ssrf_context.json` (cloud sinks), `js-analysis/out/<site>/analysis/site-summary.md`, `scope.yaml`
 - `refs/metadata_endpoints.md`
 
 ## Outputs

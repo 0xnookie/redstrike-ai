@@ -45,6 +45,18 @@ Every command, tool invocation, and agent decision is appended (timestamped, wit
 
 A single command halts all agents and active actions. Honor it immediately.
 
+## 6. Framing a block (so the agent re-plans, not evades)
+
+When this gate STOPS an action, say so as **engagement/platform policy, NOT a target defense**: "this
+operation is outside the authorized scope / window / approval — re-plan within scope." An offensive agent
+that reads a denial like a WAF/403 will burn turns trying to *bypass* it (re-encode, swap payload, retry);
+the framing tells it to **pivot** instead. Two corollaries:
+
+- **Reading sensitive data is not a block reason.** Only scope, the window, destructive/DoS actions, and the
+  approval-gated phases gate — do not deny a read for being "sensitive."
+- **Approval-pending ≠ dangerous.** An action that needs sign-off is paused for *authorization*, not because
+  it is unsafe; summarize and wait — do not treat it as a hard deny or try to route around it.
+
 ---
 
 `verify.md` check #6 (scope & safety compliance) re-audits that every finding's `asset` was in scope and produced within RoE. The gate prevents; the verifier confirms.

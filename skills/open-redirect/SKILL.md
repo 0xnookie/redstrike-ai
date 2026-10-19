@@ -9,7 +9,7 @@
 - **TOOLS:** `curl -I`/`httpx` (follow + inspect `Location`), `chrome-devtools-mcp` for client-side redirects, interceptor; `jq`.
 - **GOAL:** Confirm open redirect — a param sends the browser to an attacker-chosen external origin (server 3xx or client-side) — and flag impact chains (SSO/OAuth token leak, SSRF, `javascript:`→XSS). Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `redirect_params.json`, `redirect_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/params.txt` + `endpoints_*.txt` (redirect-ish params), `scope.yaml`. `refs/` = `redirect_payloads.md`. Chains FROM `js-analysis`; chains TO `reporting` (and flags for SSRF/XSS agents).
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,endpoints}.jsonl` (redirect-ish params), `scope.yaml`. `refs/` = `redirect_payloads.md`. Chains FROM `js-analysis`; chains TO `reporting` (and flags for SSRF/XSS agents).
 - **DECOMPOSITION:** n/a (atomic). Often a *primitive* for other bugs — cross-reference SSRF, XSS (`javascript:`), and auth (token leak).
 
 ## Goal
