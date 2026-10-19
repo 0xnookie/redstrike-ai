@@ -33,7 +33,7 @@ Two kinds:
 ### Capability agents (horizontal services any mission/vuln agent calls)
 | Agent | Does | Consumes → Produces |
 |---|---|---|
-| **CVE Intelligence Agent** ✅ | map detected tech → known CVEs/exploits; prioritize | `js-analysis/libraries.json`+`tech.md` → cve_intel.json |
+| **CVE Intelligence Agent** ✅ | map detected tech → known CVEs/exploits; prioritize | `js-analysis/out/<site>/findings/libraries.jsonl`+`analysis/site-summary.md` → cve_intel.json |
 | **Exploit Generator Agent** ✅ | turn an accepted finding (+ CVE intel) into a scoped, working PoC/exploit | `findings.json` (accepted) → exploit/ + PoC |
 | **Attack Chain Discovery Agent** ✅ | compose individual accepted findings into higher-impact kill chains | findings corpus → chains.json |
 | **Parameter Optimization Agent** ✅ | tune payloads/params/WAF-bypass/throughput across agents | payloads_tried + WAF signals → optimized sets |

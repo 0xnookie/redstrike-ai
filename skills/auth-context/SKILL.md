@@ -9,7 +9,7 @@
 - **TOOLS:** interceptor, `jq` over `js-analysis`, JWT decoder; `refs/auth_techniques.md`.
 - **GOAL:** Map the auth attack surface — session mechanism, flows, token type, OAuth config — into `auth_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `surfaces.json`, `session.json`, `auth_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/{endpoints_*.txt,apis.json}` + `auth.env` (a session to inspect) + `scope.yaml`. `refs/` = `auth_techniques.md`. Chains FROM `js-analysis`; chains TO `auth-bypass`, `jwt`, `oauth`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{endpoints,apis}.jsonl` + `auth.env` (a session to inspect) + `scope.yaml`. `refs/` = `auth_techniques.md`. Chains FROM `js-analysis`; chains TO `auth-bypass`, `jwt`, `oauth`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -35,7 +35,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`auth_context.json` validates
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_*.txt`, `apis.json`
+- `js-analysis/out/<site>/findings/`: `endpoints.jsonl`, `apis.jsonl`
 - `auth.env` (a valid session to inspect), `scope.yaml`, `refs/auth_techniques.md`
 
 ## Outputs

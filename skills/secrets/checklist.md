@@ -2,7 +2,7 @@
 # `- [ ]` = NOT done, MUST be re-run · `- [x]` = done.
 
 ## Ingest
-- [ ] Candidates ingested (js-analysis/secrets.json + other sources)
+- [ ] Candidates ingested (js-analysis/out/<site>/findings/secrets.jsonl + other sources)
 - [ ] Deduped
 - [ ] Classified by type
 

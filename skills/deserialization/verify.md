@@ -10,7 +10,7 @@ attacker-controlled data, proven by a BENIGN gadget's OOB callback. Re-run the b
       A 500 on malformed input is NOT proof.
 - [ ] **Attributable + server-side.** The callback token maps to the sink, from the target egress.
 - [ ] **RCE (if claimed) benignly proven + feasible.** Any RCE claim rests on a BENIGN OOB command
-      gadget (approved) AND a plausible gadget chain given the libs (`libraries.json`) — not an
+      gadget (approved) AND a plausible gadget chain given the libs (`libraries.jsonl`) — not an
       assumption. Without exec evidence, report "deserialization of untrusted data (RCE-feasible)".
 - [ ] **Benign only.** No destructive/file-writing/shell gadget was run. Flag any non-benign gadget.
 - [ ] **Scope + approval.**

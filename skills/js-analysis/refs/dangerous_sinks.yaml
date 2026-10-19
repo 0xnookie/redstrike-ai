@@ -1,5 +1,5 @@
 # DOM / client-side dangerous sinks for the gadget-mapping pass (step 10).
-# Feeds semgrep + grep; output -> gadgets.md. Consumed downstream by xss-dom.
+# Feeds semgrep + grep; output -> findings/gadgets.jsonl. Consumed downstream by xss-dom.
 # Grouping mirrors how a DOM-XSS agent reasons about source -> sink flows.
 
 sinks:

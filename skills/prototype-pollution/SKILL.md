@@ -7,7 +7,7 @@
 - **TOOLS:** interceptor, browser console, `refs/prototype_pollution_payloads.md`, ppmap/pphound (confirm manually).
 - **GOAL:** Confirm prototype pollution — an attacker-controlled key reaches `Object.prototype` — AND, where present, a gadget that turns it into concrete impact (DoS, XSS, or RCE). Benign. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `pp_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/params.txt` + `js-analysis/` sources/sinks (merge/clone/setValue funcs) + `content-discovery` (JSON APIs) + `scope.yaml`. `refs/` = `prototype_pollution_payloads.md`. Chains FROM recon; chains TO `xss-*` / `ssti`/`command-injection` (gadget) and `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,gadgets}.jsonl` (merge/clone/setValue sinks) + `js-analysis/out/<site>/beautified/` (sources/sinks) + `content-discovery` (JSON APIs) + `scope.yaml`. `refs/` = `prototype_pollution_payloads.md`. Chains FROM recon; chains TO `xss-*` / `ssti`/`command-injection` (gadget) and `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -35,7 +35,7 @@ Emit `findings.json` (`_contract/finding.schema.json`). DONE = `checklist.md` `-
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/params.txt`, `js-analysis/` sources+sinks, `content-discovery`, `scope.yaml`
+- `js-analysis/out/<site>/findings/{params,gadgets}.jsonl`, `js-analysis/out/<site>/beautified/` (sources+sinks), `content-discovery`, `scope.yaml`
 
 ## Outputs
 `pp_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

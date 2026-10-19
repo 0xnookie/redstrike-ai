@@ -8,7 +8,7 @@
 - **TOOLS:** interceptor, Param Miner (hidden params), `refs/hpp_techniques.md` (parser-precedence table).
 - **GOAL:** Confirm HTTP Parameter Pollution with impact — a duplicated/polluted parameter changes a security-relevant decision because a front layer and the backend disagree on which value wins. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `hpp_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/params.txt` + `content-discovery` + `tech.md` (stack → parser behaviour) + `scope.yaml`. `refs/` = `hpp_techniques.md`. Chains FROM recon; feeds/overlaps `access-control`, `ssrf`, `request-smuggling`, `oauth`, `waf-bypass`; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/params.jsonl` + `content-discovery` + `js-analysis/out/<site>/analysis/site-summary.md` (stack → parser behaviour) + `scope.yaml`. `refs/` = `hpp_techniques.md`. Chains FROM recon; feeds/overlaps `access-control`, `ssrf`, `request-smuggling`, `oauth`, `waf-bypass`; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -21,7 +21,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 - A benign proof: the duplicated/polluted value flips the decision (e.g. `admin=false&admin=true` grants, a WAF-inspected first value passes while the backend uses the malicious second)
 
 ## Steps  (action · tool · output)
-1. Ingest params + fingerprint stack (parser precedence) · `jq` + `tech.md` · (into tests)
+1. Ingest params + fingerprint stack (parser precedence) · `jq` + `site-summary.md` · (into tests)
 2. Inject duplicates per source: URL `?p=a&p=b`, body, JSON `{"p":"a","p":"b"}`, cookie, header · interceptor + refs · `hpp_tests.jsonl`
 3. Array/notation variants (`p[]=`, `p[0]=`) + cloaking (`par%61m`, case, `%00`, double-encode) · refs · `hpp_tests.jsonl`
 4. Determine precedence (which value the response reflects/acts on) per layer · interceptor · `hpp_tests.jsonl`
@@ -36,7 +36,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/params.txt`, `content-discovery`, `tech.md`, `scope.yaml`
+- `js-analysis/out/<site>/findings/params.jsonl`, `content-discovery`, `js-analysis/out/<site>/analysis/site-summary.md`, `scope.yaml`
 
 ## Outputs
 `hpp_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

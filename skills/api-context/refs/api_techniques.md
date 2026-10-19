@@ -2,7 +2,7 @@
 # Use TEST accounts. No DoS (no deep-nesting / batching bombs). Overlaps access-control (idor/privesc).
 
 ## Enumeration
-- OpenAPI/Swagger (`/swagger.json`, `/openapi.json`, `/api-docs`), GraphQL introspection, `apis.json`
+- OpenAPI/Swagger (`/swagger.json`, `/openapi.json`, `/api-docs`), GraphQL introspection, `apis.jsonl`
   from js-analysis, old API versions (`/v1`,`/v2`), hidden methods (OPTIONS, PATCH).
 
 ## BOLA (API1 — object-level, = IDOR for APIs)

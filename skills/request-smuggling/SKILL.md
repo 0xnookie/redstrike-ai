@@ -10,7 +10,7 @@
 - **TOOLS:** Burp Repeater (disable auto content-length), `smuggler.py`, `h2csmuggler`, turbo-intruder; timing-based detection.
 - **GOAL:** Confirm an HTTP desync with a SAFE, self-contained PoC (timing differential + a canary that poisons only your own follow-up request) — never by poisoning real users. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `chain_fingerprint.json`, `desync_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `cleanup.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/tech.md` (front-end/CDN fingerprint), target endpoints, `scope.yaml`. `refs/` = `smuggling_techniques.md`. Chains TO `cache-poisoning` (desync→cache) + `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/analysis/site-summary.md` (front-end/CDN fingerprint), target endpoints, `scope.yaml`. `refs/` = `smuggling_techniques.md`. Chains TO `cache-poisoning` (desync→cache) + `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -24,7 +24,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted 
 - A SAFE PoC (timing + self-canary), plus the impact path — WITHOUT poisoning real users
 
 ## Steps  (action · tool · output)
-1. Fingerprint the chain (front-end/CDN, back-end) · `js-analysis/tech.md` + `httpx` · `chain_fingerprint.json`
+1. Fingerprint the chain (front-end/CDN, back-end) · `js-analysis/out/<site>/analysis/site-summary.md` + `httpx` · `chain_fingerprint.json`
 2. Probe desync classes with timing detection (safe: no victim capture) · `smuggler.py` / Burp · `desync_tests.jsonl`
 3. Confirm the desync with a SELF-canary (your own next request on the socket) · Burp/turbo-intruder · `poc/<id>/`
 4. Assess impact path (cache, auth, cred capture) — describe, do NOT weaponize against users · synth · (into findings)
@@ -38,7 +38,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted 
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `tech.md` (front-end/CDN), endpoints
+- `js-analysis/out/<site>/analysis/site-summary.md` (front-end/CDN), endpoints
 - `scope.yaml` (RoE — **approval gate** before confirmation)
 - `refs/smuggling_techniques.md`
 

@@ -10,7 +10,7 @@
 - **TOOLS:** `jq` over `js-analysis` (params like `url`,`uri`,`src`,`callback`,`webhook`,`dest`,`feed`,`import`), interceptor, `curl` + an OOB host (`interactsh`); `refs/ssrf_surface.md`.
 - **GOAL:** Map every server-side URL-fetching sink, its fetch behavior, and whether it reflects the response, into `ssrf_context.json` — so the variant agents start from one analysis. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `fetch_sinks.json`, `behavior_probes.jsonl`, `ssrf_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/{params.txt,endpoints_*.txt,apis.json}`, `scope.yaml` (`oob.collaborator` + in-scope internal ranges). `refs/` = `ssrf_surface.md`, `ssrf_payloads.md`. Chains FROM `js-analysis`; chains TO `ssrf-inband|blind|cloud`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,endpoints,apis}.jsonl`, `scope.yaml` (`oob.collaborator` + in-scope internal ranges). `refs/` = `ssrf_surface.md`, `ssrf_payloads.md`. Chains FROM `js-analysis`; chains TO `ssrf-inband|blind|cloud`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -37,7 +37,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (artifacts non-zero, valid
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `params.txt`, `endpoints_*.txt`, `apis.json`
+- `js-analysis/out/<site>/findings/`: `params.jsonl`, `endpoints.jsonl`, `apis.jsonl`
 - `scope.yaml`: `oob.collaborator`, in-scope internal ranges
 - `refs/`: `ssrf_surface.md`, `ssrf_payloads.md`
 

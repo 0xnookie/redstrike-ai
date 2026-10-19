@@ -13,7 +13,7 @@
 - **TOOLS:** `ffuf`/`feroxbuster`/`gobuster`/`dirsearch` (dir/file fuzz), `nuclei` (`http/exposures`,`http/misconfiguration`,`http/exposed-panels`,`http/backups`), `wafw00f`+`httpx -td` (fingerprint), `arjun`/`paramspider`/`x8` (params), `katana` (fallback crawl), `git-dumper` (VCS reconstructability — benign), `jq`/`curl`. See §Tools + `_contract/tooling.md`.
 - **GOAL:** Confirm unauthenticated exposure of sensitive content — VCS (`/.git`), backups, `.env`/config, data dumps, directory listings, debug/actuator panels, nuclei-class info leaks — each proven by a response-body signature, de-duped against `secrets`/`security-headers`/`privesc`, benign. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `targets.txt`, `fingerprint.json`, `fuzz_raw.jsonl`, `nuclei.jsonl`, `params_found.txt`, `confirmed.jsonl`, `findings.json`, `evidence/`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `content-discovery/{endpoints.txt,params.txt,custom_wordlist.txt,crawl.txt}` + `host-discovery/host_discovery.json` + `js-analysis/endpoints_*.txt`/`routes.md` + `scope.yaml`. `refs/` = `sensitive_paths.txt` (fuzz wordlist) + `exposure_signatures.md` (confirmation signatures + severity + de-dup routing). Chains FROM `content-discovery`, `host-discovery`, `js-analysis`; chains TO `secrets` (secret validation), `reporting`.
+- **DATA / RAG:** inputs = `content-discovery/{endpoints.txt,params.txt,custom_wordlist.txt,crawl.txt}` + `host-discovery/host_discovery.json` + `js-analysis/out/<site>/findings/endpoints.jsonl` + `scope.yaml`. `refs/` = `sensitive_paths.txt` (fuzz wordlist) + `exposure_signatures.md` (confirmation signatures + severity + de-dup routing). Chains FROM `content-discovery`, `host-discovery`, `js-analysis`; chains TO `secrets` (secret validation), `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -50,7 +50,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - **Tool-first rule + roster:** `_contract/tooling.md`. **Fetch ladder:** `_contract/anti-automation-ladder.md`.
 
 ## Inputs
-- `content-discovery/{endpoints.txt,params.txt,custom_wordlist.txt,crawl.txt}`, `host-discovery/host_discovery.json`, `js-analysis/endpoints_*.txt`/`routes.md`
+- `content-discovery/{endpoints.txt,params.txt,custom_wordlist.txt,crawl.txt}`, `host-discovery/host_discovery.json`, `js-analysis/out/<site>/findings/endpoints.jsonl`
 - `scope.yaml`, `refs/sensitive_paths.txt`, `refs/exposure_signatures.md`
 
 ## Outputs

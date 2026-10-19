@@ -10,7 +10,7 @@
 - **TOOLS:** Param Miner (Burp), `curl` with cache-busters, cache-header analysis; `jq`.
 - **GOAL:** Confirm web cache poisoning — an unkeyed header/param that lands in a cached response another user receives (cache HIT), with impact (XSS/redirect/DoS via cache) — using a benign payload on a cache key you control. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `cache_map.json`, `poison_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `cleanup.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/endpoints_*.txt`, `scope.yaml`. `refs/` = `cache_techniques.md`. Chains FROM `js-analysis`, `host-header`, `request-smuggling`; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/endpoints.jsonl`, `scope.yaml`. `refs/` = `cache_techniques.md`. Chains FROM `js-analysis`, `host-header`, `request-smuggling`; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic). Includes cache DECEPTION (path confusion caching sensitive pages).
 
 ## Goal
@@ -40,7 +40,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_*.txt`, `tech.md` (CDN/cache)
+- `js-analysis/out/<site>/`: `findings/endpoints.jsonl`, `analysis/site-summary.md` (CDN/cache)
 - `scope.yaml`, `refs/cache_techniques.md`
 
 ## Outputs
