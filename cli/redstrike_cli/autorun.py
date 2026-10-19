@@ -5,12 +5,14 @@ the pipe. Every raw event is teed to runtime/autorun.jsonl as the run's audit tr
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import approvals as approvalsmod
 from . import ui
 
 
@@ -92,17 +94,22 @@ def _print_summary(s: RunSummary, rc: int, stream) -> None:
     if s.deferred:
         print(ui.warn(f"{len(s.deferred)} action(s) deferred for approval", stream=stream), file=stream)
         for d in s.deferred[:5]:
-            print(f"    • {(d or {}).get('name', '?')}  id={(d or {}).get('id', '?')}", file=stream)
-        print(ui.info("approve + continue: redstrike run <eng> --autonomous --resume", stream=stream), file=stream)
+            inp = (d or {}).get("input") or {}
+            what = inp.get("command") or inp.get("url") or (d or {}).get("name", "?")
+            print(f"    • {str(what)[:90]}", file=stream)
+        print(ui.info("review + approve: `redstrike approve <eng>`  →  `redstrike run <eng> --autonomous --resume`", stream=stream), file=stream)
     if s.result_text.strip():
         print(ui.kv("note", s.result_text.strip().splitlines()[0][:120], stream=stream), file=stream)
 
 
-def run_autonomous(claude_bin: str, argv: list[str], cwd: Path, audit_path: Path, stream=None) -> tuple[int, RunSummary]:
+def run_autonomous(
+    claude_bin: str, argv: list[str], cwd: Path, audit_path: Path, pending_path: Path | None = None, stream=None
+) -> tuple[int, RunSummary]:
     stream = stream or sys.stdout
     s = RunSummary()
     try:
-        audit = open(audit_path, "w", encoding="utf-8")
+        audit = open(audit_path, "a", encoding="utf-8")  # append: keep the chain of custody across resumes
+        audit.write(f"# --- redstrike autonomous run {_dt.datetime.now(_dt.timezone.utc).isoformat()} ---\n")
     except Exception:
         audit = None
     try:
@@ -134,5 +141,7 @@ def run_autonomous(claude_bin: str, argv: list[str], cwd: Path, audit_path: Path
     rc = proc.wait()
     if audit:
         audit.close()
+    if s.deferred and pending_path is not None:
+        approvalsmod.record_deferred(pending_path, s.deferred)
     _print_summary(s, rc, stream)
     return rc, s

@@ -20,14 +20,14 @@ def render_roe(scope: dict, engagement_id: str, *, autonomous: bool = False) -> 
 
     autonomous_note = (
         """
-## AUTONOMOUS run — no human is watching
-You are running headless with no interactive approval available. Do recon and
-non-destructive analysis, drive the recon/context skills and their reviewer subagents,
-and record findings. When you reach an **approval-gated phase** ({phases}) or ANY
-destructive / RCE-class / data-modifying action, **STOP and summarize** what you would
-do next and why it needs sign-off — do NOT proceed. Shell/offensive tools are not
-pre-approved; a tool the operator did not allow will simply be denied, so note it and
-move on rather than retrying.
+## AUTONOMOUS run
+You are running headless. Do recon and non-destructive analysis, drive the recon/context
+skills and their reviewer subagents, and record findings. Shell commands you were not
+pre-allowed to run are **deferred for operator approval** — the run pauses, the operator
+signs off, then resumes. So when you genuinely need an approval-gated / offensive step
+({phases}), attempt it plainly and briefly say why; if it is deferred, that is the intended
+gate, not an error — do not retry it or try to route around the gate. Anything out of scope,
+or outside the window, is a HARD STOP.
 """.format(phases=phases)
         if autonomous
         else ""
