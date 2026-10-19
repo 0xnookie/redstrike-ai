@@ -8,6 +8,14 @@ Drive the whole engagement through the gates — never skip a gate, never scan w
 
 ## 0. Authorization & scope intake — MANDATORY, before anything active
 This is a real offensive test. **Establish authorization before any active scanning.**
+
+**Launched by the `redstrike` CLI?** If this engagement dir already holds a filled `scope.yaml`
+and `runtime/authorization.json` (and the appended RoE states §0 is satisfied), the operator
+recorded authorization + scope + the go-ahead at launcher init — treat steps 3–4 as **DONE**:
+read `scope.yaml`, confirm the window is open, and proceed. Do **not** re-ask for a go-ahead
+(interactive prompts aren't available in every launch context). STOP only if `scope.yaml` is
+missing/incomplete, the window is closed, or a target falls outside scope.
+
 1. **Target** — extract the website(s) from the request.
 2. **Authorization** — the user must OWN the target or hold written authorization. If the request states
    it (e.g. "my company owns <site>"), record that as `authorized_by`. If authorization is unclear,
