@@ -40,9 +40,22 @@ EOF
 chmod +x "$BIN/redstrike"
 
 echo ":: installed  ->  $BIN/redstrike   (repo: $REPO)"
+
+# Put BIN on PATH so `redstrike` is callable. Append (idempotently, with a marker) to the
+# shell rc files that apply, then tell the user how to activate it in the current shell.
 case ":${PATH:-}:" in
-  *":$BIN:"*) : ;;
-  *) echo ":: NOTE  add $BIN to PATH:  echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.bashrc && . ~/.bashrc" ;;
+  *":$BIN:"*) : ;;   # already on PATH — nothing to do
+  *)
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+      # always seed ~/.bashrc (create if absent); touch the others only if they already exist
+      [ "$rc" = "$HOME/.bashrc" ] || [ -e "$rc" ] || continue
+      grep -qsF "added by redstrike installer" "$rc" 2>/dev/null && continue
+      printf '\n# added by redstrike installer\nexport PATH="%s:$PATH"\n' "$BIN" >> "$rc" \
+        && echo ":: added $BIN to PATH in $rc"
+    done
+    echo ":: open a NEW shell (or: . ~/.bashrc) to pick it up."
+    echo ":: for THIS shell right now:  export PATH=\"$BIN:\$PATH\""
+    ;;
 esac
 command -v claude >/dev/null 2>&1 || \
   echo ":: NOTE  install Claude Code (the engine) and run 'claude login' — https://claude.ai/install.sh"
