@@ -11,8 +11,9 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, engagement, gate, launch, preflight, ui
+from . import __version__, autorun, engagement, gate, launch, preflight, ui
 from . import scope as scopemod
+from . import settings as settingsmod
 
 
 def _is_repo(p: Path) -> bool:
@@ -180,7 +181,10 @@ def cmd_run(args, repo: Path) -> int:
         print(ui.err(f"engagement '{args.engagement}' not found under {repo / 'engagements'}"))
         return 1
     if not args.no_banner:
-        ui.print_banner(f"engagement {eng_dir.name}")
+        ui.print_banner(f"engagement {eng_dir.name}" + ("  ·  AUTONOMOUS" if args.autonomous else ""))
+
+    if args.autonomous:
+        return _run_autonomous(args, repo, eng_dir)
 
     try:
         prep = launch.prepare_runtime(eng_dir, repo, sys.executable)
@@ -227,6 +231,57 @@ def cmd_run(args, repo: Path) -> int:
     print(ui.ok("scope gate armed · launching Claude Code engine (interactive, gated)…"))
     print()
     return launch.exec_claude(argv, cwd=eng_dir)
+
+
+def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
+    extra_allow = args.allow or []
+    try:
+        prep = launch.prepare_runtime(
+            eng_dir, repo, sys.executable, mode="autonomous", extra_allow=extra_allow
+        )
+    except FileNotFoundError as e:
+        print(ui.err(str(e)))
+        return 1
+
+    for line in scopemod.summary_lines(prep.scope):
+        print(f"  {line}")
+    problems = launch.gate(prep)
+    if problems:
+        print()
+        for p in problems:
+            print(ui.err(p))
+        print(ui.err("launch blocked (fail-closed). Fix scope.yaml / window and re-run."))
+        return 2
+
+    claude_bin = preflight.find_claude()
+    allowed = settingsmod.autonomous_allowlist(extra_allow)
+    prompt = args.prompt or launch.autonomous_prompt(prep.engagement_id)
+    argv = launch.build_autonomous_argv(
+        claude_bin or "claude", repo, prep, prompt, allowed,
+        max_turns=args.max_turns, max_budget=args.max_budget_usd, resume=args.resume,
+    )
+
+    if args.dry_run or not claude_bin:
+        print()
+        print(ui.rule("DRY RUN — autonomous argv"))
+        print(ui.kv("allowlist", " ".join(allowed)))
+        print(ui.kv("caps", f"max_turns={args.max_turns}  budget=${args.max_budget_usd}"))
+        print("  " + " ".join(shlex.quote(a) for a in argv))
+        if not claude_bin and not args.dry_run:
+            print(ui.err("`claude` not on PATH — printed the plan instead of launching."))
+            return 127
+        return 0
+
+    authed, detail = preflight.claude_auth(claude_bin)
+    if authed is False:
+        print(ui.err(f"claude not authenticated: {detail}"))
+        return 1
+    print()
+    print(ui.ok(f"scope gate armed · autonomous headless run (dontAsk, max_turns={args.max_turns}, budget=${args.max_budget_usd})…"))
+    print()
+    audit = eng_dir / "runtime" / "autorun.jsonl"
+    rc, _summary = autorun.run_autonomous(claude_bin, argv, eng_dir, audit)
+    return rc
 
 
 def cmd_verify(args, repo: Path) -> int:
@@ -278,11 +333,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="assert written authorization is on file (required non-interactively)")
     i.add_argument("--force", action="store_true", help="overwrite an existing scope.yaml")
 
-    r = sub.add_parser("run", help="launch the engagement (interactive, gated)")
+    r = sub.add_parser("run", help="launch the engagement (interactive gated, or --autonomous)")
     r.add_argument("engagement", help="engagement id or path")
     r.add_argument("--dry-run", action="store_true", help="prepare + print the argv; do not launch")
     r.add_argument("--permission-mode", default="default", choices=["default", "plan", "acceptEdits"])
     r.add_argument("--prompt", help="override the initial prompt")
+    r.add_argument("--autonomous", "-n", action="store_true",
+                   help="headless unattended run (claude -p, dontAsk + allowlist, budget/turn capped)")
+    r.add_argument("--allow", action="append", metavar="RULE",
+                   help="autonomous: add an allowlist entry, e.g. --allow 'Bash(nmap *)' or --allow Bash")
+    r.add_argument("--max-turns", type=int, default=200, help="autonomous: hard turn cap (default 200)")
+    r.add_argument("--max-budget-usd", type=float, default=20.0, help="autonomous: USD budget cap (default 20)")
+    r.add_argument("--resume", action="store_true", help="autonomous: resume the engagement's stored session")
 
     v = sub.add_parser("verify", help="run the mechanical gate (verify_completion.py)")
     v.add_argument("engagement")

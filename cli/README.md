@@ -11,8 +11,7 @@ coordinates through files in the engagement directory, so a run can be bootstrap
 gated, and resumed by reading/writing that directory.
 
 ## Status
-`v0.1.0` — **interactive, gated** (M0–M3). Autonomous headless (`-p`) is a later milestone;
-see `PLAN.md`.
+`v0.1.0` — **interactive, gated**, plus an opt-in **autonomous headless** mode (M0–M5 v1). See `PLAN.md`.
 
 ## Install
 ```bash
@@ -34,9 +33,20 @@ redstrike init "Acme Corp" \           # scaffold engagements/acme-corp-<date>/ 
 # review the generated scope.yaml, then:
 redstrike run acme-corp-<date>         # launch Claude Code, scoped + gated (interactive)
 redstrike run acme-corp-<date> --dry-run   # inspect the exact argv + generated runtime/ files
+redstrike run acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20 --allow 'Bash(nmap *)'
 redstrike status acme-corp-<date>      # findings-by-severity/status + scope summary
 redstrike verify acme-corp-<date>      # run the deterministic gate (verify_completion.py)
 ```
+
+## Autonomous mode (`--autonomous`)
+Runs headless via `claude -p` with a streamed progress view and a run summary, **deny-by-default**:
+`--permission-mode dontAsk` + an allowlist that is read-only recon by default (`Read`, `Grep`, `Glob`,
+`Skill`, `Agent`, `WebSearch`, `WebFetch`). Shell and offensive tools are **opt-in** — add them per run
+with `--allow` (e.g. `--allow 'Bash(nmap *)'` or, broadly, `--allow Bash`). Every run is bounded by
+`--max-turns` and `--max-budget-usd`, isolates MCP (`--strict-mcp-config`), and the injected RoE tells the
+model to **stop and summarize** at any approval-gated / destructive step rather than proceed. Out-of-scope
+calls are still denied by the scope-gate hook, and every event is teed to `runtime/autorun.jsonl` as an
+audit trail. Resume a capped/stopped run with `--resume`.
 
 ## How it works
 `redstrike run` materializes a per-engagement `runtime/` and execs:

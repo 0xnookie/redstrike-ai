@@ -59,9 +59,14 @@ cli/
 - The **scope-gate hook fires in-session** and blocks an out-of-scope Bash call before it runs, with our
   reason surfaced (defense layer 2). Minor polish: Claude labels the block a "hook error" line (it still
   blocks correctly) — could switch to exit-2 phrasing later.
-- [ ] **M5 — Autonomous `-n` (deferred).** `-p` + stream-json event loop, `defer`-based approval with
-      resume, budget/turn caps, OAuth-token auth, run summary. The launcher is structured to add this
-      without rework.
+- [x] **M5 — Autonomous headless (v1).** `run --autonomous`: `claude -p` with a streamed progress view +
+      run summary, `dontAsk` + a deny-by-default allowlist (read-only recon by default; shell/offensive
+      opt-in via `--allow 'Bash(nmap *)'`), `--max-turns` / `--max-budget-usd` caps, MCP isolation, an
+      autonomous-aware RoE (model stops + summarizes at approval-gated / destructive steps), and a
+      `runtime/autorun.jsonl` audit trail. `--resume` continues the stored session. Live-verified end to
+      end (a capped run fetched an in-scope target, scope gate enforced, summary + audit produced).
+      **M5.1 (next):** per-action `defer` → operator-approve → `--resume` loop, and a `claude setup-token`
+      / `CLAUDE_CODE_OAUTH_TOKEN` path for fully unattended hosts.
 
 ## Branding / UI
 The launcher owns its terminal, so it carries the REDSTRIKE identity on its own surfaces
@@ -71,5 +76,7 @@ touch), not a full reskin. `ui.py` degrades to ASCII on a legacy console and hon
 
 ## Open items / notes
 - `scope_gate.py` is a safety net over the OS sandbox, not a replacement for it (see README).
-- Autonomous mode needs the non-interactive scope record (already written at `init`) plus a
-  `defer`/resume loop and a responder — tracked under M5.
+- Autonomous v1 gates by allowlist + the model's self-stop; the richer per-action `defer` →
+  operator-approve → `--resume` loop is M5.1 (the runtime scope record is already written at `init`).
+- The in-session hook deny surfaces as a "hook error" line in Claude's output (it still blocks) — could
+  switch the hook to exit-2 phrasing for a cleaner "blocked by policy" message.
