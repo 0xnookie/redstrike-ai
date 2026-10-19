@@ -31,6 +31,12 @@
 - [ ] Framework & tech analysis
 - [ ] Feature map
 - [ ] Secrets (known-regex vs high-entropy strings)
+- [ ] AST produced for every external file (ast/external/{name}.ast.json)
+- [ ] symbols.json built (globals, exports, definition sites)
+- [ ] Per-file note for every inline block (analysis/inline/)
+- [ ] Per-file note for every external file (analysis/external/)
+- [ ] site-summary.md written
+- [ ] Findings emitted as JSONL (endpoints, params, apis, secrets, gadgets, libraries)
 
 ## Emit
 - [ ] report.md
