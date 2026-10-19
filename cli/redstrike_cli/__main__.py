@@ -15,14 +15,27 @@ from . import __version__, engagement, gate, launch, preflight, ui
 from . import scope as scopemod
 
 
-def repo_root(override: str | None = None) -> Path:
+def _is_repo(p: Path) -> bool:
+    return (p / "skills" / "_contract" / "verify_completion.py").is_file()
+
+
+def repo_root(override: str | None = None) -> Path | None:
+    """Locate the redstrike-ai repo: explicit flag > env > cwd-walk > in-repo package.
+
+    Returns None when installed out-of-tree and none of those resolve (the caller then
+    asks for --repo / REDSTRIKE_REPO) — never a bogus venv/site-packages path.
+    """
     if override:
         return Path(override).resolve()
     env = os.environ.get("REDSTRIKE_REPO")
     if env:
         return Path(env).resolve()
-    # cli/redstrike_cli/__main__.py -> repo root is two levels up from the package dir.
-    return Path(__file__).resolve().parents[2]
+    here = Path.cwd().resolve()
+    for p in [here, *here.parents]:
+        if _is_repo(p):
+            return p
+    cand = Path(__file__).resolve().parents[2]  # editable / in-repo (PYTHONPATH=cli)
+    return cand if _is_repo(cand) else None
 
 
 def _operator() -> str:
@@ -63,7 +76,7 @@ def cmd_version(args, repo: Path) -> int:
     v = preflight.claude_version(cb) if cb else None
     print(ui.kv("redstrike", __version__))
     print(ui.kv("claude", (".".join(map(str, v)) if v else "not found")))
-    print(ui.kv("repo", str(repo)))
+    print(ui.kv("repo", str(repo) if repo else "not located (pass --repo / set REDSTRIKE_REPO)"))
     return 0
 
 
@@ -304,6 +317,9 @@ def main(argv: list[str] | None = None) -> int:
             ui.print_banner(f"authorized offensive security  ·  engine: Claude Code  ·  v{__version__}")
         ap.print_help()
         return 0
+    if args.command != "version" and repo is None:
+        print(ui.err("could not locate the redstrike-ai repo — pass --repo <path> or set REDSTRIKE_REPO"))
+        return 2
     return _DISPATCH[args.command](args, repo)
 
 
