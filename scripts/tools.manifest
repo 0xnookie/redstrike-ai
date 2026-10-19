@@ -78,6 +78,8 @@ graphw00f|web|pipx|graphw00f|GraphQL fingerprint
 clairvoyance|web|pipx|clairvoyance|GraphQL schema when introspection is off
 name-that-hash,nth|web|pipx|name-that-hash|
 semgrep|web|pipx|semgrep|static taint analysis
+ast-grep,sg|web|npm|@ast-grep/cli|structural/AST code search (js-analysis AST alt; also cargo install ast-grep)
+tree-sitter|web|npm|tree-sitter-cli|multi-language AST parser CLI (js-analysis AST alt; also cargo install tree-sitter-cli)
 testssl.sh,testssl|web|apt|testssl.sh|
 sslscan|web|apt|sslscan|
 sslyze|web|pipx|sslyze|

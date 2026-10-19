@@ -41,7 +41,7 @@ confirm a signature. Even then prefer a library/tool primitive (`turbo-intruder`
 
 ## Install
 
-The complete roster (166 tools / 19 categories — the lists above plus every domain tool the skills call)
+The complete roster (168 tools / 19 categories — the lists above plus every domain tool the skills call)
 lives in **`scripts/tools.manifest`** and is installed by script. Full guide: **`INSTALL.md`**.
 
 ```bash
