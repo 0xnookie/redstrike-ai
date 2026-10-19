@@ -18,7 +18,7 @@ Redstrike AI
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20WSTG%20%7C%20LLM%20Top%2010%20%7C%20ATT%26CK-informational)]()
 [![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-68-brightgreen)]()
 [![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-71-blueviolet)]()
-[![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-6%20agents-8A2BE2)]()
+[![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-7%20agents-8A2BE2)]()
 [![Families](https://img.shields.io/badge/Vuln%20Families-11-red)]()
 [![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20AD%20%7C%20PostEx-red)]()
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)]()
@@ -60,7 +60,7 @@ graph TD
         VAR[variant / category agents<br/>xss-* · sqli-* · ssrf-* · …]:::t2
     end
     subgraph T3["Tier 3 — Red Team (roadmap)"]
-        MIS[mission: Bug Bounty · CTF Solver]:::t3
+        MIS[mission: Bug Bounty · CTF Solver · class Hunters]:::t3
         CAP[capability: CVE Intel · Exploit Gen · Attack Chain · Param Opt]:::t3
     end
 
@@ -132,6 +132,8 @@ Each findings-producing agent is a full quint with its own independent reviewer 
 **Post-exploitation** ✅ — `linux-privesc` (linpeas-first enumeration) · `windows-privesc` (winPEAS-first) — playbook-driven; benign-proof + cleanup
 
 **Reporting** — `reporting` aggregates every skill's *accepted* findings into the client report (CVSS, evidence, exec summary).
+
+**Single-class hunters** — `xss-hunter`, the first **`<class>-hunter`**: a depth-first entry point that drives one vuln family end-to-end — `bug-bounty` pinned to a single class. It *reuses* the class's `<class>-context` feeder + variants + their reviewers + packaging (a thin wrapper, never a fork), so new hunters (`sqli-hunter`, `ssrf-hunter`, …) are ~30-line clones over [`hunter-base.md`](skills/_contract/hunter-base.md).
 
 Under **Claude Code** these are wired as runnable primitives in [`.claude/`](.claude/): executor **skills** (`redstrike-*`) + reviewer **subagents** (`*-verify`) + the **`redstrike`** orchestrator. See [`.claude/README.md`](.claude/README.md).
 
@@ -253,6 +255,7 @@ The roster (168 tools across 19 categories) is defined once in
 
 - ✅ **All 9 vuln families complete** (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + 11 atomic agents + the `reporting` aggregator
 - ✅ **Tier-3 red team built**: Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization (the mission + capability agents that orchestrate the lower tiers)
+- ✅ **Single-class hunters** — the `<class>-hunter` pattern (`hunter-base` + `xss-hunter`): `bug-bounty` pinned to one class, depth-first; future hunters are ~30-line clones of the class block
 - ✅ `host-discovery` + `content-discovery` recon feeders
 - ✅ **Tooling setup**: `scripts/doctor.sh` (presence check) + `scripts/install.sh` (category-scoped installer) driven by `scripts/tools.manifest` — see [`INSTALL.md`](INSTALL.md)
 
