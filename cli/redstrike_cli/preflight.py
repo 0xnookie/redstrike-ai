@@ -61,16 +61,19 @@ def version_ok(v: tuple[int, int, int] | None, minimum=MIN_CLAUDE_VERSION) -> bo
 def claude_auth(claude_bin: str) -> tuple[bool | None, str]:
     """Best-effort: `claude auth status` exit 0 == logged in. Unknown on older builds."""
     rc, out, err = _run([claude_bin, "auth", "status"], timeout=25)
+    s = (out or err or "").strip()
+    # Recent builds emit JSON (loggedIn / authMethod), on both exit 0 and nonzero.
+    if s.startswith("{"):
+        try:
+            j = json.loads(s)
+            if j.get("loggedIn") is True:
+                m = j.get("authMethod")
+                return True, "logged in" + (f" ({m})" if m and m != "none" else "")
+            if j.get("loggedIn") is False:
+                return False, "not logged in — run `claude login` (or set CLAUDE_CODE_OAUTH_TOKEN)"
+        except Exception:
+            pass
     if rc == 0:
-        s = out.strip()
-        if s.startswith("{"):
-            try:
-                j = json.loads(s)
-                method = j.get("authMethod") or j.get("method") or j.get("type")
-                who = j.get("email") or j.get("account") or j.get("organization") or ""
-                return True, "logged in" + (f" ({method})" if method else "") + (f" · {who}" if who else "")
-            except Exception:
-                pass
         return True, (s.splitlines()[0] if s else "logged in")
     if rc in (124, 127):
         return None, "could not determine (auth status unavailable)"
@@ -78,7 +81,7 @@ def claude_auth(claude_bin: str) -> tuple[bool | None, str]:
         return True, "ANTHROPIC_API_KEY set (will be billed to the key)"
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return True, "CLAUDE_CODE_OAUTH_TOKEN set"
-    return False, (out or err or "not logged in — run `claude auth login`")
+    return False, (s.splitlines()[0] if s else "not logged in — run `claude auth login`")
 
 
 def is_windows() -> bool:

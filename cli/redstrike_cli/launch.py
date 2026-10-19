@@ -20,6 +20,7 @@ class Prepared:
     scope_json: Path
     settings_path: Path
     roe_path: Path
+    mcp_config: Path
     session_id: str
     scope: dict
 
@@ -62,6 +63,11 @@ def prepare_runtime(engagement_dir: Path, repo_root: Path, python_exe: str) -> P
     roe_path = runtime / "roe.md"
     roe_path.write_text(roemod.render_roe(proj, engagement_id), encoding="utf-8")
 
+    # Empty MCP config + --strict-mcp-config isolates the engagement from the operator's
+    # claude.ai connectors / plugin MCP servers (observed leaking in without it).
+    mcp_config = runtime / "mcp-none.json"
+    mcp_config.write_text(json.dumps({"mcpServers": {}}, indent=2) + "\n", encoding="utf-8")
+
     session_file = runtime / "session.json"
     if session_file.is_file():
         session_id = json.loads(session_file.read_text(encoding="utf-8")).get("session_id") or str(uuid.uuid4())
@@ -75,7 +81,15 @@ def prepare_runtime(engagement_dir: Path, repo_root: Path, python_exe: str) -> P
             + "\n",
             encoding="utf-8",
         )
-    return Prepared(engagement_id, scope_json, settings_path, roe_path, session_id, proj)
+    return Prepared(
+        engagement_id=engagement_id,
+        scope_json=scope_json,
+        settings_path=settings_path,
+        roe_path=roe_path,
+        mcp_config=mcp_config,
+        session_id=session_id,
+        scope=proj,
+    )
 
 
 def build_argv(
@@ -96,6 +110,9 @@ def build_argv(
         str(prep.settings_path),
         "--setting-sources",
         "project,local",
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(prep.mcp_config),
         "--permission-mode",
         permission_mode,
         "--session-id",
