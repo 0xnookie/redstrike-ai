@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import approvals as approvalsmod
 from . import roe as roemod
 from . import scope as scopemod
 from . import settings as settingsmod
@@ -21,6 +22,8 @@ class Prepared:
     settings_path: Path
     roe_path: Path
     mcp_config: Path
+    approvals_path: Path
+    pending_path: Path
     session_id: str
     scope: dict
 
@@ -60,10 +63,24 @@ def prepare_runtime(
     scope_json = runtime / "scope.json"
     proj = scopemod.derive_scope_json(scope_yaml, scope_json)  # re-derive from canonical YAML
 
+    gate_policy = runtime / "gate-policy.json"
+    approvals_path = runtime / "approvals.json"
+    pending_path = runtime / "approvals_pending.json"
+    if mode == "autonomous":
+        gate_policy.write_text(
+            json.dumps(
+                {"mode": "autonomous", "bash_allow": settingsmod.bash_allow_globs(extra_allow)}, indent=2
+            ) + "\n",
+            encoding="utf-8",
+        )
+        approvalsmod.ensure_files(approvals_path, pending_path)  # keeps existing approvals
+
     settings_path = runtime / "settings.json"
     settings = settingsmod.render_settings(
         python_exe=python_exe, hook_script=hook_script(), scope_json=scope_json,
         mode=mode, extra_allow=extra_allow,
+        gate_policy=(gate_policy if mode == "autonomous" else None),
+        approvals=(approvals_path if mode == "autonomous" else None),
     )
     settingsmod.write_settings(settings_path, settings)
 
@@ -97,6 +114,8 @@ def prepare_runtime(
         settings_path=settings_path,
         roe_path=roe_path,
         mcp_config=mcp_config,
+        approvals_path=approvals_path,
+        pending_path=pending_path,
         session_id=session_id,
         scope=proj,
     )

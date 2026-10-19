@@ -192,7 +192,8 @@ redstrike init "Acme Corp" \  # scaffold engagements/acme-corp-<date>/ + scope.y
 redstrike run  acme-corp-<date>              # interactive, gated (you approve exploitation)
 redstrike run  acme-corp-<date> --dry-run    # print the exact argv + generated runtime/ files
 redstrike run  acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20 \
-               --allow 'Bash(nmap *)'        # headless recon; shell/offensive tools are opt-in
+               --allow 'Bash(nmap *)'        # headless recon; un-allowed shell defers for approval
+redstrike approve acme-corp-<date>           # review/approve deferred commands, then run … --resume
 redstrike status acme-corp-<date>            # findings by severity/status + scope
 redstrike verify acme-corp-<date>            # the deterministic completion gate
 ```
@@ -200,9 +201,9 @@ redstrike verify acme-corp-<date>            # the deterministic completion gate
 **How it's enforced** — a generated `runtime/settings.json` wires a **PreToolUse scope-gate hook** that
 denies any tool call reaching an out-of-scope asset and blocks writes to the launcher-owned governance
 files; `scope.yaml` is the signed record, `runtime/scope.json` its machine projection. Autonomous mode
-runs `dontAsk` + an allowlist (deny-by-default), budget/turn-capped, MCP-isolated, with the model told to
-**stop and summarize** at any approval-gated or destructive step. The hook is a safety net over the OS
-sandbox (WSL2/Linux), not a replacement. Full docs: [`cli/README.md`](cli/README.md).
+runs `dontAsk` + an allowlist (deny-by-default), budget/turn-capped, MCP-isolated; shell the operator
+didn't pre-allow is **deferred for approval** (`redstrike approve` → `--resume`) rather than run. The hook
+is a safety net over the OS sandbox (WSL2/Linux), not a replacement. Full docs: [`cli/README.md`](cli/README.md).
 
 ---
 

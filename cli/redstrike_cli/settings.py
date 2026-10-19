@@ -15,10 +15,11 @@ from pathlib import Path
 # every step. WebFetch, Bash and the write tools are intentionally absent.
 _ALLOW = ["Read", "Grep", "Glob", "Skill", "Agent", "TodoWrite", "WebSearch"]
 
-# Autonomous runs additionally pre-approve WebFetch (in-scope still enforced by the
-# scope-gate hook). Bash / write / exploitation tools are deliberately NOT here — the
-# operator opts them in per run with `--allow` (e.g. --allow 'Bash(nmap *)' or --allow Bash).
-_AUTONOMOUS_EXTRA = ["WebFetch"]
+# Autonomous runs pre-approve WebFetch (in-scope enforced by the hook) and allow Bash /
+# PowerShell at the permission layer — but the hook is the real shell gate: it DEFERS any
+# shell command the operator didn't pre-allow (`--allow 'Bash(nmap *)'`) or approve, so
+# "allow Bash" here means "let the hook decide", not "run anything".
+_AUTONOMOUS_EXTRA = ["WebFetch", "Bash", "PowerShell"]
 
 _HOOK_MATCHER = "Bash|PowerShell|WebFetch|Edit|Write|MultiEdit|NotebookEdit"
 
@@ -32,10 +33,24 @@ def autonomous_allowlist(extra: list[str] | None = None) -> list[str]:
     return _dedupe(list(_ALLOW) + list(_AUTONOMOUS_EXTRA) + list(extra or []))
 
 
-def build_hook_command(python_exe: str, hook_script: Path, scope_json: Path) -> str:
-    return " ".join(
-        shlex.quote(str(x)) for x in [python_exe, str(hook_script), "--scope", str(scope_json)]
-    )
+def bash_allow_globs(extra: list[str] | None = None) -> list[str]:
+    """Extract the shell pass-globs from --allow entries (the patterns the hook runs
+    WITHOUT deferring). `Bash` → `*` (all); `Bash(nmap *)` → `nmap *`."""
+    globs: list[str] = []
+    for a in extra or []:
+        a = a.strip()
+        if a in ("Bash", "PowerShell"):
+            globs.append("*")
+        elif (a.startswith("Bash(") or a.startswith("PowerShell(")) and a.endswith(")"):
+            globs.append(a[a.index("(") + 1:-1].strip())
+    return _dedupe(globs)
+
+
+def build_hook_command(
+    python_exe: str, hook_script: Path, scope_json: Path, extra_args: list[str] | None = None
+) -> str:
+    parts = [python_exe, str(hook_script), "--scope", str(scope_json)] + list(extra_args or [])
+    return " ".join(shlex.quote(str(x)) for x in parts)
 
 
 def render_settings(
@@ -46,8 +61,17 @@ def render_settings(
     mode: str = "interactive",
     extra_allow: list[str] | None = None,
     extra_deny: list[str] | None = None,
+    gate_policy: Path | None = None,
+    approvals: Path | None = None,
 ) -> dict:
     allow = autonomous_allowlist(extra_allow) if mode == "autonomous" else list(_ALLOW)
+    hook_extra: list[str] = []
+    if mode == "autonomous":
+        hook_extra = ["--defer"]
+        if gate_policy:
+            hook_extra += ["--policy", str(gate_policy)]
+        if approvals:
+            hook_extra += ["--approvals", str(approvals)]
     deny = [
         "Write(runtime/**)",
         "Edit(runtime/**)",
@@ -71,7 +95,7 @@ def render_settings(
                     "hooks": [
                         {
                             "type": "command",
-                            "command": build_hook_command(python_exe, hook_script, scope_json),
+                            "command": build_hook_command(python_exe, hook_script, scope_json, hook_extra),
                         }
                     ],
                 }

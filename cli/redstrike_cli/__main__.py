@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from . import __version__, autorun, engagement, gate, launch, preflight, ui
+from . import approvals as approvalsmod
 from . import scope as scopemod
 from . import settings as settingsmod
 
@@ -255,7 +256,20 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
 
     claude_bin = preflight.find_claude()
     allowed = settingsmod.autonomous_allowlist(extra_allow)
-    prompt = args.prompt or launch.autonomous_prompt(prep.engagement_id)
+    prompt = args.prompt
+    if args.resume and not prompt:
+        queue = approvalsmod.take_resume_queue(prep.approvals_path)
+        if queue:
+            cmds = "\n".join(f"- {e.get('command') or e.get('summary')}" for e in queue)
+            prompt = (
+                "The operator has APPROVED these previously-deferred actions. Re-issue each one now, "
+                "exactly as written, using the appropriate tool, then continue the engagement:\n"
+                f"{cmds}"
+            )
+        else:
+            prompt = "Continue the engagement from where it was paused."
+    if not prompt:
+        prompt = launch.autonomous_prompt(prep.engagement_id)
     argv = launch.build_autonomous_argv(
         claude_bin or "claude", repo, prep, prompt, allowed,
         max_turns=args.max_turns, max_budget=args.max_budget_usd, resume=args.resume,
@@ -280,8 +294,53 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
     print(ui.ok(f"scope gate armed · autonomous headless run (dontAsk, max_turns={args.max_turns}, budget=${args.max_budget_usd})…"))
     print()
     audit = eng_dir / "runtime" / "autorun.jsonl"
-    rc, _summary = autorun.run_autonomous(claude_bin, argv, eng_dir, audit)
+    rc, _summary = autorun.run_autonomous(claude_bin, argv, eng_dir, audit, pending_path=prep.pending_path)
     return rc
+
+
+def cmd_approve(args, repo: Path) -> int:
+    eng_dir = resolve_engagement(repo, args.engagement)
+    if not eng_dir:
+        print(ui.err(f"engagement '{args.engagement}' not found"))
+        return 1
+    if not args.no_banner:
+        ui.print_banner(f"approvals · {eng_dir.name}")
+    pending_path = eng_dir / "runtime" / "approvals_pending.json"
+    approvals_path = eng_dir / "runtime" / "approvals.json"
+    pending = approvalsmod.list_pending(pending_path)
+    if not pending:
+        print(ui.info("no pending deferrals — nothing to approve"))
+        return 0
+
+    print(ui.rule("pending deferrals (autonomous)"))
+    for p in pending:
+        print(f"  {ui.style(p['fingerprint'][:12], ui.YELLOW)}  {p.get('summary', '')[:100]}")
+    if args.list:
+        return 0
+
+    chosen: set[str] = set()
+    if args.all:
+        chosen = {p["fingerprint"] for p in pending}
+    elif args.id:
+        for want in args.id:
+            chosen |= {p["fingerprint"] for p in pending if p["fingerprint"].startswith(want)}
+    elif sys.stdin.isatty():
+        print()
+        for p in pending:
+            ans = _ask(f"  approve [{p['fingerprint'][:12]}] {p.get('summary', '')[:70]} ? [y/N] ").lower()
+            if ans in ("y", "yes"):
+                chosen.add(p["fingerprint"])
+    else:
+        print(ui.err("non-interactive: pass --all, --id <fingerprint>, or --list"))
+        return 2
+
+    if not chosen:
+        print(ui.warn("nothing approved"))
+        return 0
+    moved = approvalsmod.approve(approvals_path, pending_path, chosen)
+    print(ui.ok(f"approved {len(moved)} action(s) — the scope gate will let them run on resume"))
+    print(ui.info(f"continue: redstrike run {eng_dir.name} --autonomous --resume"))
+    return 0
 
 
 def cmd_verify(args, repo: Path) -> int:
@@ -353,6 +412,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("status", help="summarize findings + scope")
     s.add_argument("engagement")
+
+    ap_ = sub.add_parser("approve", help="review/approve autonomous deferrals, then --resume")
+    ap_.add_argument("engagement")
+    ap_.add_argument("--list", action="store_true", help="just list pending deferrals")
+    ap_.add_argument("--all", action="store_true", help="approve all pending")
+    ap_.add_argument("--id", action="append", metavar="FP", help="approve by fingerprint (prefix ok)")
     return ap
 
 
@@ -363,6 +428,7 @@ _DISPATCH = {
     "run": cmd_run,
     "verify": cmd_verify,
     "status": cmd_status,
+    "approve": cmd_approve,
 }
 
 
