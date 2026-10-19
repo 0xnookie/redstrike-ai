@@ -172,6 +172,41 @@ python scripts/validate.py
 
 ---
 
+## 🖥️ The `redstrike` CLI
+
+Prefer a command you launch over an in-chat prompt? The **`redstrike` CLI** (in [`cli/`](cli/)) runs
+**Claude Code as the engine** — it bootstraps an engagement, enforces a scope/RoE gate, and starts
+Claude Code preloaded with the skills + subagents. Interactive and human-gated by default, with an
+opt-in autonomous (headless) mode.
+
+```bash
+pipx install ./cli            # provides `redstrike`; needs the `claude` CLI on PATH (engagements: WSL2/Linux)
+
+redstrike doctor              # preflight: engine + auth + platform + tool roster
+redstrike init "Acme Corp" \  # scaffold engagements/acme-corp-<date>/ + scope.yaml + an authorization record
+  --authorized-by "sec@acme / written-auth-ref" \
+  --domain '*.acme.com' --domain api.acme.com \
+  --exclude-domain admin.acme.com \
+  --i-confirm-authorization
+# review the generated scope.yaml, then:
+redstrike run  acme-corp-<date>              # interactive, gated (you approve exploitation)
+redstrike run  acme-corp-<date> --dry-run    # print the exact argv + generated runtime/ files
+redstrike run  acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20 \
+               --allow 'Bash(nmap *)'        # headless recon; un-allowed shell defers for approval
+redstrike approve acme-corp-<date>           # review/approve deferred commands, then run … --resume
+redstrike status acme-corp-<date>            # findings by severity/status + scope
+redstrike verify acme-corp-<date>            # the deterministic completion gate
+```
+
+**How it's enforced** — a generated `runtime/settings.json` wires a **PreToolUse scope-gate hook** that
+denies any tool call reaching an out-of-scope asset and blocks writes to the launcher-owned governance
+files; `scope.yaml` is the signed record, `runtime/scope.json` its machine projection. Autonomous mode
+runs `dontAsk` + an allowlist (deny-by-default), budget/turn-capped, MCP-isolated; shell the operator
+didn't pre-allow is **deferred for approval** (`redstrike approve` → `--resume`) rather than run. The hook
+is a safety net over the OS sandbox (WSL2/Linux), not a replacement. Full docs: [`cli/README.md`](cli/README.md).
+
+---
+
 ## 🛰️ Running an Engagement
 
 1. **Scope** — copy [`engagements/_template/scope.yaml`](engagements/_template/scope.yaml), fill authorization + in/out scope + window + RoE. Nothing active runs until scope is set.
@@ -208,7 +243,7 @@ scripts/doctor.sh          # read-only: present / missing / manual, per category
 scripts/install.sh         # core set; or --all for every domain; or name categories (e.g. ad cloud)
 ```
 
-The roster (166 tools across 19 categories) is defined once in
+The roster (168 tools across 19 categories) is defined once in
 [`scripts/tools.manifest`](scripts/tools.manifest) and shared by `doctor.sh` + `install.sh`.
 
 ---

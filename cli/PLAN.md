@@ -43,12 +43,37 @@ cli/
 - [x] **M2 — Scope-gate hook.** `hooks/scope_gate.py` denies out-of-scope WebFetch/Bash and blocks
       writes to the governance files; fails closed on a missing scope record. Unit + stdin-level tested.
 - [x] **M3 — Gate + status glue.** `redstrike verify` (consolidated + per-skill modes); `redstrike status`.
-- [~] **M4 — Hardening + packaging.** Done: pyproject/console-script, stdlib tests, version-floor
-      assertion, UTF-8/ASCII-safe output, README. **Next:** verify pipx end-to-end on WSL2, add a CI
-      job for the CLI tests, add an INSTALL.md WSL2 section.
-- [ ] **M5 — Autonomous `-n` (deferred).** `-p` + stream-json event loop, `defer`-based approval with
-      resume, budget/turn caps, OAuth-token auth, run summary. The launcher is structured to add this
-      without rework.
+- [x] **M4 — Hardening + packaging.** pyproject + console script (pip-install verified; `redstrike`
+      runs from the installed package); repo autodetect via cwd-walk with a clean error when run
+      out-of-tree; version-floor assertion; UTF-8/ASCII-safe output; README + INSTALL.md WSL2 section;
+      CI `cli` job runs the unit tests + packaging + a dry-run smoke on Python 3.10/3.11/3.12. Also
+      validated on WSL2 (python 3.12 tests green; POSIX hook command + argv confirmed).
+      **MCP isolation:** `run` now passes `--strict-mcp-config --mcp-config runtime/mcp-none.json`
+      (a live probe showed the operator's claude.ai connectors otherwise leak into the session).
+
+### Live verification (real `claude -p` on an authed host)
+- Engine launches with our `--settings` + `--add-dir` + `--append-system-prompt-file`; the init event
+  shows **all 102 redstrike skills loaded** and `mcp_servers: []` (isolated).
+- RoE injection reaches the model: it echoed the engagement ID + in-scope domain, and self-refused an
+  out-of-scope request (defense layer 1).
+- The **scope-gate hook fires in-session** and blocks an out-of-scope Bash call before it runs, with our
+  reason surfaced (defense layer 2). Minor polish: Claude labels the block a "hook error" line (it still
+  blocks correctly) — could switch to exit-2 phrasing later.
+- [x] **M5 — Autonomous headless (v1).** `run --autonomous`: `claude -p` with a streamed progress view +
+      run summary, `dontAsk` + a deny-by-default allowlist (read-only recon by default; shell/offensive
+      opt-in via `--allow 'Bash(nmap *)'`), `--max-turns` / `--max-budget-usd` caps, MCP isolation, an
+      autonomous-aware RoE (model stops + summarizes at approval-gated / destructive steps), and a
+      `runtime/autorun.jsonl` audit trail. `--resume` continues the stored session. Live-verified end to
+      end (a capped run fetched an in-scope target, scope gate enforced, summary + audit produced).
+- [x] **M5.1 — Defer → approve → resume.** In autonomous mode the scope-gate hook returns a `defer`
+      decision for any shell command the operator hasn't pre-allowed (`--allow`) or approved; the run
+      pauses (`stop: tool_deferred`) and the deferral is recorded (keyed by a fingerprint that survives the
+      resume round-trip). `redstrike approve <eng>` (interactive / `--all` / `--id`) moves it into the
+      approvals store and queues the command; `run --autonomous --resume` re-issues the approved command
+      (the hook passes it) and continues, deferring any new un-approved action again. approvals + pending
+      live in `runtime/` (agent-denied-write); the audit trail appends across resumes. Unattended-auth path
+      documented (`claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`, inherited by the launcher). Live-verified
+      end to end (defer → approve → resume ran the approved command; a new recon command re-deferred).
 
 ## Branding / UI
 The launcher owns its terminal, so it carries the REDSTRIKE identity on its own surfaces
@@ -58,5 +83,8 @@ touch), not a full reskin. `ui.py` degrades to ASCII on a legacy console and hon
 
 ## Open items / notes
 - `scope_gate.py` is a safety net over the OS sandbox, not a replacement for it (see README).
-- Autonomous mode needs the non-interactive scope record (already written at `init`) plus a
-  `defer`/resume loop and a responder — tracked under M5.
+- The in-session hook deny/defer surfaces as a "hook error"-labelled line in Claude's output (it still
+  blocks/defers correctly) — could switch the hook to exit-2 phrasing for cleaner wording.
+- Resume emits the `system/init` event twice in the progress view (cosmetic).
+- Approval fingerprints key on the command/url, so a semantically-identical but re-worded command would
+  re-defer (safe: re-approve). The resume-queue prompt re-issues the exact approved text.
