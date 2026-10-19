@@ -282,11 +282,14 @@ def _emit(decision: str, reason: str) -> None:
 
 
 def _emit_deny(reason: str) -> None:
-    _emit("deny", reason)
+    # Frame as engagement policy, not a target defense, so the agent re-plans instead
+    # of burning turns trying to re-encode / retry around its own gate.
+    _emit("deny", f"engagement policy (NOT a target defense) — {reason}. Re-plan within scope; "
+                  f"do not retry or re-encode around this gate.")
 
 
 def _emit_defer(reason: str) -> None:
-    _emit("defer", reason)
+    _emit("defer", f"pending operator approval — {reason}. Summarize and stop; do not route around the gate.")
 
 
 def _load_bash_allow(policy_path: str) -> list:

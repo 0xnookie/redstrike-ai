@@ -10,7 +10,7 @@
 - **TOOLS:** interceptor (chat API), `garak`/`PyRIT` (recon modes), endpoint fuzzing (`ffuf`), benign probes.
 - **GOAL:** Map the LLM app's surface — model, API, guardrails, tools (agency), data sources, and output sinks — into `llm_context.json`, so the variants fan out. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `api_map.json`, `surface_probes.jsonl`, `llm_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/{endpoints_*.txt,apis.json}` + `content-discovery` + `scope.yaml` (`oob.collaborator`). `refs/` = `llm_testing_guide.md` (OWASP LLM Top 10 + techniques). Chains FROM web recon; chains TO the 4 LLM variants.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{endpoints,apis}.jsonl` + `content-discovery` + `scope.yaml` (`oob.collaborator`). `refs/` = `llm_testing_guide.md` (OWASP LLM Top 10 + techniques). Chains FROM web recon; chains TO the 4 LLM variants.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -41,7 +41,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`llm_context.json` validates 
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_*.txt`, `apis.json`; `content-discovery` endpoints
+- `js-analysis/out/<site>/findings/`: `endpoints.jsonl`, `apis.jsonl`; `content-discovery` endpoints
 - `scope.yaml` (`oob.collaborator`), `refs/llm_testing_guide.md`
 
 ## Outputs

@@ -10,7 +10,7 @@
 - **TOOLS:** `httpx`/`curl -I`, `nuclei -t http/misconfiguration`, cookie inspector; `jq`.
 - **GOAL:** Produce an accurate security-header assessment where each reported item has a real, contextual impact (not "missing header = vuln"). Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `headers.json`, `assessment.json`, `findings.json`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/endpoints_*.txt` (key pages), `scope.yaml`. Chains FROM `js-analysis`; cross-refs `clickjacking` (XFO), `cors` (ACAO), `xss-*` (CSP). Chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/endpoints.jsonl` (key pages), `scope.yaml`. Chains FROM `js-analysis`; cross-refs `clickjacking` (XFO), `cors` (ACAO), `xss-*` (CSP). Chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal

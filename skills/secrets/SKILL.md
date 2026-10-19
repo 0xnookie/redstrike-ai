@@ -7,10 +7,10 @@
 
 ## Interview
 - **STEPS:** ingest candidate secrets → classify + dedupe → validate liveness (benign, where authorized) → assess scope/impact → rate → emit → review → verify.
-- **TOOLS:** `jq` (ingest `js-analysis/secrets.json`), provider-specific benign validation calls (read-only, minimal), `trufflehog --only-verified` (where applicable); entropy/classifier.
+- **TOOLS:** `jq` (ingest `js-analysis/out/<site>/findings/secrets.jsonl`), provider-specific benign validation calls (read-only, minimal), `trufflehog --only-verified` (where applicable); entropy/classifier.
 - **GOAL:** Produce a validated secret inventory — each reported secret confirmed real + live (or strong evidence) + scoped for impact — with false positives filtered. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `secret_candidates.json`, `validations.jsonl`, `findings.json`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/secrets.json` (+ other sources), `js-analysis/refs/secret_regexes.yaml`, `scope.yaml`. Chains FROM `js-analysis`; chains TO `reporting` + (CVE/exploit tier-3).
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/secrets.jsonl` (+ other sources), `js-analysis/refs/secret_regexes.yaml`, `scope.yaml`. Chains FROM `js-analysis`; chains TO `reporting` + (CVE/exploit tier-3).
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -24,7 +24,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - Scope + impact (what the live secret grants)
 
 ## Steps  (action · tool · output)
-1. Ingest candidates (`js-analysis/secrets.json` + others); dedupe · `jq` · `secret_candidates.json`
+1. Ingest candidates (`js-analysis/out/<site>/findings/secrets.jsonl` + others); dedupe · `jq` · `secret_candidates.json`
 2. Classify type + filter obvious noise (example/test/placeholder, low entropy) · classifier · `secret_candidates.json`
 3. Validate liveness with a MINIMAL, benign, read-only probe (where authorized) · provider API · `validations.jsonl`
 4. Assess scope/impact of each live secret (what it can do) · synth · (into findings)
@@ -38,7 +38,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/secrets.json`, `js-analysis/refs/secret_regexes.yaml`
+- `js-analysis/out/<site>/findings/secrets.jsonl`, `js-analysis/refs/secret_regexes.yaml`
 - `scope.yaml`
 
 ## Outputs

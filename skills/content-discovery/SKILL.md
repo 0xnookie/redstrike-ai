@@ -9,7 +9,7 @@
 - **TOOLS:** `katana`/`hakrawler`/`gospider` (crawl), `gau`/`waymore` (historical), `cewl` + synth (wordlist), `ffuf`/`feroxbuster`/`gobuster`/`dirsearch` (brute-force), `arjun`/`paramspider`/`x8` (params), `wafw00f` (WAF fingerprint). Tool-first — `_contract/tooling.md`.
 - **GOAL:** Produce the content map per host — crawled + brute-forced endpoints, discovered params, and a **custom wordlist** — feeding js-analysis and the vuln agents. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `crawl.txt`, `endpoints.txt`, `params.txt`, `custom_wordlist.txt`, `content.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `<engagement>/host-discovery/host_discovery.json` (live hosts) + `<engagement>/osint/terms.txt` + `js-analysis/endpoints_*.txt`/`params.txt` (if run) + `scope.yaml`. `refs/` = `content_discovery_refs.md`. Chains FROM `host-discovery`, `osint`; chains TO `js-analysis` + every vuln feeder (endpoints/params/wordlist). Canonical order: content-discovery PRECEDES js-analysis; the `js-analysis/*` inputs above are consumed ONLY on an OPTIONAL second enrichment pass, so recon stays acyclic.
+- **DATA / RAG:** inputs = `<engagement>/host-discovery/host_discovery.json` (live hosts) + `<engagement>/osint/terms.txt` + `js-analysis/out/<site>/findings/{endpoints,params}.jsonl` (if run) + `scope.yaml`. `refs/` = `content_discovery_refs.md`. Chains FROM `host-discovery`, `osint`; chains TO `js-analysis` + every vuln feeder (endpoints/params/wordlist). Canonical order: content-discovery PRECEDES js-analysis; the `js-analysis/*` inputs above are consumed ONLY on an OPTIONAL second enrichment pass, so recon stays acyclic.
 - **DECOMPOSITION:** n/a (recon feeder). Includes wordlist building.
 
 ## Goal
@@ -39,7 +39,7 @@ Produce the content map + a target-specific wordlist. DONE = `checklist.md` `- [
 
 ## Inputs
 - `<engagement>/host-discovery/host_discovery.json` (live hosts), `<engagement>/osint/terms.txt`
-- `js-analysis/endpoints_*.txt`/`params.txt` (if already run), `scope.yaml`
+- `js-analysis/out/<site>/findings/{endpoints,params}.jsonl` (if already run), `scope.yaml`
 - `refs/content_discovery_refs.md`
 
 ## Outputs

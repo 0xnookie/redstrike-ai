@@ -12,7 +12,7 @@
 - **TOOLS:** ingest `xss_context.json` (`jq`); crawl render surfaces (`katana`, `chrome-devtools-mcp`); multi-identity (two sessions via `auth.env`, `puppeteer` profiles); store↔render tracing (interceptor Caido/mitmproxy, tracer markers); execution confirm (`chrome-devtools-mcp` → `puppeteer`); sanitizer bypass (custom + `dalfox`); OOB for unseen surfaces. Fetch via `_contract/anti-automation-ladder.md`.
 - **GOAL:** Confirm and evidence stored (persistent) XSS — input stored via one request that EXECUTES when a (preferably different) user views the render surface — with PoC captured at BOTH the store and render ends. Done = all checklist boxes checked, `review.md` passes, every finding `review.verdict = accepted`.
 - **OUTPUT:** `stored_candidates.json`, `render_map.json`, `tracers.jsonl`, `payloads_tried.jsonl`, `findings.json`, `poc/`, `cleanup.md`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `xss_context.json` (`persists`/`persist_surface`) + `js-analysis/endpoints_*.txt` + `auth.env` (**multi-identity**: ≥2 accounts, or an authorized admin view) + `scope.yaml` (`oob.collaborator`). `refs/` = `render_surfaces.md`, `stored_payloads.md`. Chains FROM `xss-context`; chains TO `reporting`.
+- **DATA / RAG:** inputs = `xss_context.json` (`persists`/`persist_surface`) + `js-analysis/out/<site>/findings/endpoints.jsonl` + `auth.env` (**multi-identity**: ≥2 accounts, or an authorized admin view) + `scope.yaml` (`oob.collaborator`). `refs/` = `render_surfaces.md`, `stored_payloads.md`. Chains FROM `xss-context`; chains TO `reporting`.
 - **DECOMPOSITION:** this IS the stored variant. Boundary: if the render surface is unreachable by the tester (admin-only) → hand off to `xss-blind` (OOB). De-dupe with `xss-reflected` when a param is both.
 
 ## Goal
@@ -57,7 +57,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 
 ## Inputs
 - `xss_context.json` (points with `persists: true`, `persist_surface`) — schema `_contract/xss_context.schema.json`
-- `js-analysis/`: `endpoints_live.txt`, `endpoints_unauthed.txt`
+- `js-analysis/out/<site>/findings/endpoints.jsonl` (state live|unauthed)
 - `auth.env` — **two identities minimum** (attacker + victim), ideally incl. an admin view if authorized
 - `scope.yaml` (RoE gate; `oob.collaborator`)
 - `refs/`: `render_surfaces.md`, `stored_payloads.md`

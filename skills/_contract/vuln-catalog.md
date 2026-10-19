@@ -72,7 +72,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **Web cache poisoning/deception** | — | single | — | `cache-poisoning` ✅ | ✅ |
 | **Subdomain takeover** | — | single | — | `subdomain-takeover` ✅ | ✅ |
 | **Security misconfig / headers** | A05 | single (recon-ish) | — | `security-headers` ✅ | ✅ |
-| **Secrets / sensitive data** | A02 | single | — | `secrets` ✅ (consumes `js-analysis/secrets.json`) | ✅ |
+| **Secrets / sensitive data** | A02 | single | — | `secrets` ✅ (consumes `js-analysis/out/<site>/findings/secrets.jsonl`) | ✅ |
 | **Business logic** | — | single (bespoke) | — | `business-logic` ✅ | ✅ |
 | **NoSQL injection** | A03 Injection | single | — | `nosql-injection` ✅ (operator `$ne`/`$gt`/`$regex`/`$where` + syntax; auth bypass + query manipulation) | ✅ |
 | **LDAP injection** | A03 Injection | single | — | `ldap-injection` ✅ (filter breakout `*)(uid=*))(|(uid=*`; auth bypass + directory enum) | ✅ |

@@ -27,7 +27,7 @@ It makes **no** judgment about whether a finding is true — that is `verify.md`
     { "id": "D.1", "path": "data.json",         "type": "json" },
     { "id": "E.1", "path": "maybe_empty.json",  "type": "json", "allow_empty_array": true },
     { "id": "F.1", "path": "records.jsonl",     "type": "jsonl", "min_items": 1 },
-    { "id": "G.1", "path": "js/raw/*.js",       "type": "glob", "min_matches": 1 },
+    { "id": "G.1", "path": "raw/external/*.js",  "type": "glob", "min_matches": 1 },
     { "id": "H.1", "path": "poc/",              "type": "dir",  "required": false }
   ]
 }

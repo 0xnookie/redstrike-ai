@@ -9,7 +9,7 @@
 - **TOOLS:** `curl`/interceptor (override Host + forwarding headers), password-reset flow driver, `jq`. Headers to try: `Host`, `X-Forwarded-Host`, `X-Host`, `X-Forwarded-Server`, duplicate `Host`, absolute-URI request line.
 - **GOAL:** Confirm host header injection — the app uses an attacker-controlled host in a security-relevant sink (most impactfully a password-reset link that then points to the attacker). Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `host_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/endpoints_*.txt` (password-reset, email, redirect flows), `scope.yaml`, `oob.collaborator` (routing/SSRF checks). `refs/` = `host_header_payloads.md` (override headers + sinks). Chains FROM `js-analysis`; chains TO `reporting` (and SSRF/cache-poisoning agents).
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/endpoints.jsonl` (password-reset, email, redirect flows), `scope.yaml`, `oob.collaborator` (routing/SSRF checks). `refs/` = `host_header_payloads.md` (override headers + sinks). Chains FROM `js-analysis`; chains TO `reporting` (and SSRF/cache-poisoning agents).
 - **DECOMPOSITION:** n/a (atomic). Overlaps `cache-poisoning` (host as cache key) and `ssrf` (routing).
 
 ## Goal

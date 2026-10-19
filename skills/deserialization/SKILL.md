@@ -20,7 +20,7 @@ Prove the sink deserializes attacker data (benign OOB gadget) + assess RCE feasi
 1. Ingest deserialize sinks + identify format · `jq` + markers · (into tests)
 2. Send a BENIGN gadget (URLDNS / DNS-only) that only triggers an OOB callback · `ysoserial`/`phpggc` + OOB · `deser_tests.jsonl`
 3. Correlate callback (proves deserialization) · OOB poller · `callbacks.jsonl`
-4. Assess gadget-chain feasibility (available libs from `libraries.json`) · refs · `deser_tests.jsonl`
+4. Assess gadget-chain feasibility (available libs from `findings/libraries.jsonl`) · refs · `deser_tests.jsonl`
 5. (Approval) benign RCE proof via an OOB command gadget · refs · `poc/<id>/`
 6. Rate (CVSS) + write finding · synth · `findings.json`
 7. Emit report + curl · synth · `report.md`, `curl_commands.sh`
@@ -31,7 +31,7 @@ Prove the sink deserializes attacker data (benign OOB gadget) + assess RCE feasi
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `injection_context.json` (deserialize sinks), `js-analysis/libraries.json` (gadget libs), `scope.yaml`
+- `injection_context.json` (deserialize sinks), `js-analysis/out/<site>/findings/libraries.jsonl` (gadget libs), `scope.yaml`
 
 ## Outputs
 `deser_tests.jsonl` · `callbacks.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

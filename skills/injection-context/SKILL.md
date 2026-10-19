@@ -6,10 +6,10 @@
 
 ## Interview
 - **STEPS:** enumerate reflective/processing params → benign-probe for interpreter sinks (template math, command metachars, serialized markers) → fingerprint engine/tech → classify sink type → route → emit → review.
-- **TOOLS:** `jq` over `js-analysis`, interceptor, `refs/injection_payloads.md`; `js-analysis/tech.md`.
+- **TOOLS:** `jq` over `js-analysis/out/<site>/findings/`, interceptor, `refs/injection_payloads.md`; `js-analysis/out/<site>/analysis/site-summary.md` (stack).
 - **GOAL:** Map injection points that reach an interpreter (template / OS command / deserializer), fingerprint the engine, and route to a variant, into `injection_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `candidates.json`, `probes.jsonl`, `injection_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/{params.txt,apis.json,tech.md}` + `scope.yaml` (`oob.collaborator`). `refs/` = `injection_payloads.md`. Chains FROM `js-analysis`; chains TO `ssti`, `command-injection`, `deserialization`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,apis}.jsonl` + `js-analysis/out/<site>/analysis/site-summary.md` (stack) + `scope.yaml` (`oob.collaborator`). `refs/` = `injection_payloads.md`. Chains FROM `js-analysis`; chains TO `ssti`, `command-injection`, `deserialization`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -25,7 +25,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`injection_context.json` vali
 ## Steps  (action · tool · output)
 1. Enumerate reflective/processing params · `jq`/`grep` js-analysis · `candidates.json`
 2. Benign-probe interpreter sinks (`{{7*7}}`,`${7*7}`,`#{7*7}`; `;`,`|`,`` ` ``; base64 serialized marker) · interceptor · `probes.jsonl`
-3. Fingerprint engine (reaction patterns + `tech.md`) · `refs/injection_payloads.md` · `probes.jsonl`
+3. Fingerprint engine (reaction patterns + `site-summary.md` stack) · `refs/injection_payloads.md` · `probes.jsonl`
 4. Classify sink type + route (`variant_hint`) · synth · (into context)
 5. Consolidate + validate vs schema · synth · `injection_context.json`
 6. Emit summary · synth · `summary.md`
@@ -36,7 +36,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`injection_context.json` vali
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `params.txt`, `apis.json`, `tech.md`
+- `js-analysis/out/<site>/`: `findings/params.jsonl`, `findings/apis.jsonl`, `analysis/site-summary.md`
 - `scope.yaml` (`oob.collaborator`), `refs/injection_payloads.md`
 
 ## Outputs

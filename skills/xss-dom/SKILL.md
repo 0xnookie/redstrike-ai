@@ -2,16 +2,16 @@
 
 > ONE variant agent of the XSS class (siblings: `xss-reflected`, `xss-stored`, `xss-blind`).
 > Consumes `xss_context.json` `dom.source_sink_flows` + `dom.sources`/`sinks`, and does its own
-> taint analysis over `js-analysis/js/beautified/`. Includes GADGET GATHERING (per the class spec).
+> taint analysis over `js-analysis/out/<site>/beautified/`. Includes GADGET GATHERING (per the class spec).
 > ACTIVE + findings-producing → imports `_contract/roe-gate.md`; carries BOTH `review.md` + `verify.md`.
 > Confirms entirely CLIENT-SIDE (no server round-trip) → lowest blast radius of the variants.
 
 ## Interview
 - **STEPS:** ingest DOM candidates → gather gadgets (source→sink chains, postMessage handlers, prototype-pollution sinks) → taint-trace each flow → craft source delivery → probe sink filters / Trusted Types → confirm execution in a real browser → capture client-only PoC → rate → emit findings → review → verify.
-- **TOOLS:** ingest `xss_context.json` (`jq`); taint analysis `semgrep` + `chrome-devtools-mcp` (DOM/event breakpoints) + custom; gadget discovery over `js/beautified/` + `gadgets.md`; postMessage harness; confirm `chrome-devtools-mcp` → `puppeteer`; `Burp DOM Invader` (alt). Fetch via `_contract/anti-automation-ladder.md`.
+- **TOOLS:** ingest `xss_context.json` (`jq`); taint analysis `semgrep` + `chrome-devtools-mcp` (DOM/event breakpoints) + custom; gadget discovery over `js-analysis/out/<site>/beautified/` + `findings/gadgets.jsonl`; postMessage harness; confirm `chrome-devtools-mcp` → `puppeteer`; `Burp DOM Invader` (alt). Fetch via `_contract/anti-automation-ladder.md`.
 - **GOAL:** Confirm DOM-based XSS where an attacker-controllable client-side source flows to a dangerous sink and executes ENTIRELY in the browser (no server reflection), with a reproducible crafted-URL / `postMessage` PoC. Done = all checklist boxes checked, `review.md` passes, every finding `review.verdict = accepted`.
 - **OUTPUT:** `dom_candidates.json`, `gadgets.md`, `taint_flows.json`, `payloads_tried.jsonl`, `findings.json`, `poc/`, `poc_urls.txt`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `xss_context.json` (`dom.*`) + `js-analysis/` (`js/beautified/`, `gadgets.md`) + `scope.yaml`. `refs/` = `dom_sources_sinks.md`, `dom_payloads.md`. Chains FROM `xss-context` (+ js-analysis beautified JS); chains TO `reporting`.
+- **DATA / RAG:** inputs = `xss_context.json` (`dom.*`) + `js-analysis/out/<site>/` (`beautified/`, `findings/gadgets.jsonl`) + `scope.yaml`. `refs/` = `dom_sources_sinks.md`, `dom_payloads.md`. Chains FROM `xss-context` (+ js-analysis beautified JS); chains TO `reporting`.
 - **DECOMPOSITION:** this IS the DOM variant; includes gadget gathering. Boundary: if the sink value actually originates from a server response → that is `xss-reflected`/`xss-stored`, reclassify. De-dupe across siblings.
 
 ## Goal
@@ -29,7 +29,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 
 ## Steps  (action · tool · output)
 1. Ingest DOM candidates (flows + sources + sinks) from the feeder · `jq xss_context.json` · `dom_candidates.json`
-2. Gather gadgets: scan beautified JS for source→sink chains, `postMessage` handlers w/o origin check, prototype-pollution sinks · `semgrep` + `grep gadgets.md` + custom · `gadgets.md`
+2. Gather gadgets: scan beautified JS for source→sink chains, `postMessage` handlers w/o origin check, prototype-pollution sinks · `semgrep` + `grep` over `findings/gadgets.jsonl` + custom · `gadgets.md`
 3. Taint-trace each candidate flow (source → … → sink) · `chrome-devtools-mcp` DOM/event breakpoints + manual · `taint_flows.json`
 4. Craft source delivery (hash / search / `window.name` / `postMessage` / storage) · `refs/dom_payloads.md` · (into attempts)
 5. Probe sink filters / encoding / Trusted Types · `refs/` + devtools · `payloads_tried.jsonl`
@@ -43,13 +43,13 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 ## Tools
 - **Ingest:** `jq` over `xss_context.json`
 - **Taint / confirm:** `chrome-devtools-mcp` (DOM, event-listener, and XHR breakpoints), `puppeteer`/`playwright`, `Burp DOM Invader` (alt)
-- **Gadgets:** `semgrep` + `ripgrep` over `js/beautified/`, `gadgets.md` (from js-analysis), prototype-pollution + `postMessage` scanners
+- **Gadgets:** `semgrep` + `ripgrep` over `js-analysis/out/<site>/beautified/`, `findings/gadgets.jsonl` (from js-analysis), prototype-pollution + `postMessage` scanners
 - **Delivery:** crafted URL (hash/search), `window.name`, `document.referrer` (attacker page), `postMessage` harness
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
 - `xss_context.json`: `dom.sources`, `dom.sinks`, `dom.source_sink_flows` — schema `_contract/xss_context.schema.json`
-- `js-analysis/`: `js/beautified/`, `gadgets.md`
+- `js-analysis/out/<site>/`: `beautified/`, `findings/gadgets.jsonl`
 - `scope.yaml` (RoE — scope-gate page loads)
 - `refs/`: `dom_sources_sinks.md`, `dom_payloads.md`
 

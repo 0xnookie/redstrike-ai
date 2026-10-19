@@ -9,7 +9,7 @@
 - **TOOLS:** interceptor, `jq` over `js-analysis`, `refs/xxe_payloads.md`.
 - **GOAL:** Map endpoints that parse XML (SOAP, XML APIs, SVG/DOCX/XLSX uploads, SAML, RSS) and whether the parser resolves external entities, into `xxe_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `xml_sinks.json`, `entity_probes.jsonl`, `xxe_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/{endpoints_*.txt,apis.json}` (XML content-types, upload features) + `scope.yaml` (`oob.collaborator`). `refs/` = `xxe_payloads.md`. Chains FROM `js-analysis`; chains TO `xxe-inband`, `xxe-blind`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{endpoints,apis}.jsonl` (XML content-types, upload features) + `scope.yaml` (`oob.collaborator`). `refs/` = `xxe_payloads.md`. Chains FROM `js-analysis`; chains TO `xxe-inband`, `xxe-blind`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -35,7 +35,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`xxe_context.json` validates 
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/`: `endpoints_*.txt`, `apis.json`
+- `js-analysis/out/<site>/findings/`: `endpoints.jsonl`, `apis.jsonl`
 - `scope.yaml` (`oob.collaborator`), `refs/xxe_payloads.md`
 
 ## Outputs

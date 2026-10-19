@@ -1,6 +1,6 @@
 # Business-logic flaw patterns (step 2–3)
 # Not payloads — INVARIANTS to test. Derive the actual tests from THIS app's workflows
-# (js-analysis/feature_map.md). Record in abuse_tests.jsonl: {workflow, invariant, test, result, impact}.
+# (js-analysis/out/<site>/analysis/site-summary.md). Record in abuse_tests.jsonl: {workflow, invariant, test, result, impact}.
 
 ## Value / price integrity
 - Tamper price/amount/currency in the request (client-trusted price).
