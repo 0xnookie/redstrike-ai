@@ -11,8 +11,8 @@ coordinates through files in the engagement directory, so a run can be bootstrap
 gated, and resumed by reading/writing that directory.
 
 ## Status
-`v0.1.0` — **interactive, gated** (M0–M3). Autonomous headless (`-p`) is a later milestone;
-see `PLAN.md`.
+`v0.1.0` — **interactive, gated**, plus an opt-in **autonomous headless** mode with a defer → approve →
+resume loop (M0–M5.1). See `PLAN.md`.
 
 ## Install
 ```bash
@@ -34,9 +34,34 @@ redstrike init "Acme Corp" \           # scaffold engagements/acme-corp-<date>/ 
 # review the generated scope.yaml, then:
 redstrike run acme-corp-<date>         # launch Claude Code, scoped + gated (interactive)
 redstrike run acme-corp-<date> --dry-run   # inspect the exact argv + generated runtime/ files
+redstrike run acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20 --allow 'Bash(nmap *)'
 redstrike status acme-corp-<date>      # findings-by-severity/status + scope summary
 redstrike verify acme-corp-<date>      # run the deterministic gate (verify_completion.py)
 ```
+
+## Autonomous mode (`--autonomous`)
+Runs headless via `claude -p` with a streamed progress view + run summary, **deny-by-default**
+(`--permission-mode dontAsk`), bounded by `--max-turns` / `--max-budget-usd`, MCP-isolated
+(`--strict-mcp-config`), with every event teed to `runtime/autorun.jsonl` as an audit trail.
+
+Read-only recon (`Read`/`Grep`/`Glob`/`Skill`/`Agent`/`WebSearch`/`WebFetch`, in-scope) runs on its own.
+**Shell is gated by the scope-gate hook**: a command you pre-allowed with `--allow` (e.g.
+`--allow 'Bash(nmap *)'`, or broadly `--allow Bash`) runs; anything else is **deferred for your approval**
+rather than run; out-of-scope is denied outright.
+
+### Approve → resume loop
+When a command is deferred the run pauses (`stop: tool_deferred`) and records it. Review, approve, resume —
+the gate then lets the approved command run and the engagement continues (new un-approved actions defer again):
+
+```bash
+redstrike approve <eng> --list                # see pending deferrals (by fingerprint)
+redstrike approve <eng>                        # interactive y/N per item  (or --all / --id <fp>)
+redstrike run <eng> --autonomous --resume      # approved commands re-run; new ones defer again
+```
+
+Approvals and the pending queue live in `runtime/approvals.json` + `runtime/approvals_pending.json`
+(launcher-owned; the agent is denied writing `runtime/`). For a fully unattended host, authenticate with a
+long-lived token: `claude setup-token` → `export CLAUDE_CODE_OAUTH_TOKEN=…` (the launcher inherits it).
 
 ## How it works
 `redstrike run` materializes a per-engagement `runtime/` and execs:

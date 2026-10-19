@@ -7,8 +7,10 @@ must be on the host that runs the engagement.
 - **Platform:** Linux — **Kali** (recommended; ships most of these), Debian, or Parrot.
 - **Windows:** run inside **WSL2 with Kali** (`wsl --install -d kali-linux`), then follow the Linux steps
   below. The native Windows checkout is fine for *developing* the framework, but engagements run on Linux.
-- The roster is defined once in **`scripts/tools.manifest`** (166 tools across 19 categories) and consumed by
+- The roster is defined once in **`scripts/tools.manifest`** (168 tools across 19 categories) and consumed by
   both scripts below — add a tool there and both pick it up.
+- To run engagements through the **`redstrike` CLI launcher** (Claude Code as the engine), see
+  *The `redstrike` CLI* at the bottom of this file.
 
 ## Quickstart
 
@@ -78,3 +80,36 @@ Override the clone dir with `REDSTRIKE_TOOLS_DIR`.
   installed together via `pdtm -ia`. If a Python `httpx` library shadows the PD binary, keep `~/go/bin` ahead
   of it on `PATH`.
 - `REDSTRIKE_MANIFEST=/path/to/tools.manifest` points either script at an alternate roster.
+
+## The `redstrike` CLI (launcher)
+
+`cli/` provides **`redstrike`** — the launcher that runs **Claude Code as the engagement engine**,
+scoped and human-gated (full docs: `cli/README.md`). It is separate from the tool roster above.
+
+```bash
+pipx install ./cli          # or: pip install ./cli   — provides the `redstrike` command
+redstrike doctor            # engine + auth + platform + tool-roster preflight
+redstrike init "Acme Corp" --authorized-by "sec@acme / auth-ref" --domain '*.acme.com' \
+  --i-confirm-authorization
+redstrike run acme-corp-<date>        # launch Claude Code, scoped + gated (interactive)
+```
+
+- Requires the **`claude`** CLI (Claude Code) on `PATH` and **Python 3.10+**. Stdlib-only (PyYAML
+  used if present).
+- Installed out-of-tree, point it at this repo with `--repo <path>` or `export REDSTRIKE_REPO=<path>`
+  (running it from inside the repo also works).
+- **Auth:** `claude login` (subscription) or `CLAUDE_CODE_OAUTH_TOKEN` for unattended use.
+
+### WSL2 specifics
+
+Engagements run on **WSL2/Linux** (native Windows has no OS sandbox, so the scope gate leans on the
+PreToolUse hook only there). On a fresh WSL2 Ubuntu you also want:
+
+```bash
+sudo apt install -y python3-venv       # ensurepip, needed by pipx / venv
+sudo apt install -y bubblewrap socat   # the Bash sandbox (bwrap + socat) the network boundary uses
+```
+
+Install `claude` (Claude Code) **inside** WSL and run `claude login` there — a Windows login does not
+carry into WSL.
+

@@ -22,6 +22,8 @@ Usage (wired by the launcher into settings.json):
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import ipaddress
 import json
 import os
@@ -35,6 +37,28 @@ _IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
 _IGNORABLE_TLDS = (".localhost", ".test", ".example", ".invalid")
 _WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 _PATH_KEYS = ("file_path", "notebook_path", "path")
+_SHELL_TOOLS = ("Bash", "PowerShell")
+
+
+def fingerprint(tool_name: str, tool_input: dict) -> str:
+    """Stable id for an approval. Keyed on the semantic payload (command/url) so it
+    survives a defer→resume round-trip (verified: the input is identical on resume)."""
+    ti = tool_input or {}
+    if tool_name in _SHELL_TOOLS:
+        key = str(ti.get("command", ""))
+    elif tool_name == "WebFetch":
+        key = str(ti.get("url", ""))
+    else:
+        key = json.dumps(ti, sort_keys=True, default=str)
+    return hashlib.sha256((tool_name + "\x00" + key).encode("utf-8")).hexdigest()
+
+
+def _bash_allowed(cmd: str, globs) -> bool:
+    cmd = cmd.strip()
+    for g in globs or []:
+        if g == "*" or fnmatch.fnmatch(cmd, g):
+            return True
+    return False
 
 
 # --- host / scope matching --------------------------------------------------
@@ -168,8 +192,22 @@ def _targets_protected(raw_path: str, protected: list[Path], cwd: Path) -> bool:
 
 
 # --- decision ---------------------------------------------------------------
-def evaluate(tool_name: str, tool_input: dict, scope: dict, protected: list[Path], cwd: Path) -> dict:
-    """Return {'decision': 'deny'|'pass', 'reason': str}."""
+def evaluate(
+    tool_name: str,
+    tool_input: dict,
+    scope: dict,
+    protected: list[Path],
+    cwd: Path,
+    *,
+    defer: bool = False,
+    bash_allow=(),
+    approvals=frozenset(),
+) -> dict:
+    """Return {'decision': 'deny'|'defer'|'pass', 'reason': str, ['fingerprint': str]}.
+
+    In `defer` mode (autonomous runs) an in-scope shell command that the operator has
+    not pre-allowed (`--allow`) or approved is DEFERRED for sign-off instead of run.
+    """
     tool_input = tool_input or {}
 
     if tool_name in _WRITE_TOOLS:
@@ -208,6 +246,13 @@ def evaluate(tool_name: str, tool_input: dict, scope: dict, protected: list[Path
                 "command references host(s) not in scope: "
                 f"{', '.join(offenders_unknown)} — add to scope.yaml or correct the target"
             )
+        if defer:
+            fp = fingerprint(tool_name, tool_input)
+            if fp in approvals:
+                return _pass()  # operator approved this exact command earlier
+            if _bash_allowed(cmd, bash_allow):
+                return _pass()  # operator pre-allowed this pattern via --allow
+            return _defer(f"shell command needs operator approval: {cmd.strip()[:90]}", fp)
         return _pass()
 
     return _pass()
@@ -217,25 +262,57 @@ def _deny(reason: str) -> dict:
     return {"decision": "deny", "reason": reason}
 
 
+def _defer(reason: str, fp: str) -> dict:
+    return {"decision": "defer", "reason": reason, "fingerprint": fp}
+
+
 def _pass() -> dict:
     return {"decision": "pass", "reason": ""}
 
 
 # --- hook I/O ---------------------------------------------------------------
-def _emit_deny(reason: str) -> None:
-    out = {
+def _emit(decision: str, reason: str) -> None:
+    print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
+            "permissionDecision": decision,
             "permissionDecisionReason": f"[redstrike scope-gate] {reason}",
         }
-    }
-    print(json.dumps(out))
+    }))
+
+
+def _emit_deny(reason: str) -> None:
+    _emit("deny", reason)
+
+
+def _emit_defer(reason: str) -> None:
+    _emit("defer", reason)
+
+
+def _load_bash_allow(policy_path: str) -> list:
+    if not policy_path:
+        return []
+    try:
+        return list(json.loads(Path(policy_path).read_text(encoding="utf-8")).get("bash_allow", []) or [])
+    except Exception:
+        return []
+
+
+def _load_approvals(approvals_path: str) -> frozenset:
+    if not approvals_path:
+        return frozenset()
+    try:
+        return frozenset(json.loads(Path(approvals_path).read_text(encoding="utf-8")).get("approved", []) or [])
+    except Exception:
+        return frozenset()
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Redstrike PreToolUse scope gate.")
     ap.add_argument("--scope", default=os.environ.get("REDSTRIKE_SCOPE_FILE", ""))
+    ap.add_argument("--defer", action="store_true", help="autonomous: defer un-approved shell for sign-off")
+    ap.add_argument("--policy", default="", help="gate-policy.json (bash_allow globs)")
+    ap.add_argument("--approvals", default="", help="approvals.json (approved fingerprints)")
     args = ap.parse_args(argv)
 
     try:
@@ -254,13 +331,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         scope = json.loads(scope_file.read_text(encoding="utf-8"))
-        decision = evaluate(tool_name, tool_input, scope, protected_paths(scope_file), cwd)
+        decision = evaluate(
+            tool_name, tool_input, scope, protected_paths(scope_file), cwd,
+            defer=args.defer,
+            bash_allow=_load_bash_allow(args.policy),
+            approvals=_load_approvals(args.approvals),
+        )
     except Exception as e:  # fail closed on any internal error
         _emit_deny(f"scope-gate internal error ({type(e).__name__}) — failing closed")
         return 0
 
     if decision["decision"] == "deny":
         _emit_deny(decision["reason"])
+    elif decision["decision"] == "defer":
+        _emit_defer(decision["reason"])
     return 0
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from . import scope as scopemod
 
 
-def render_roe(scope: dict, engagement_id: str) -> str:
+def render_roe(scope: dict, engagement_id: str, *, autonomous: bool = False) -> str:
     rules = scope.get("rules", {}) or {}
     ins = scope.get("in_scope", {}) or {}
     out = scope.get("out_of_scope", {}) or {}
@@ -18,8 +18,24 @@ def render_roe(scope: dict, engagement_id: str) -> str:
     def _lines(items):
         return "\n".join(f"  - {i}" for i in items) if items else "  - (none)"
 
+    autonomous_note = (
+        """
+## AUTONOMOUS run
+You are running headless. Do recon and non-destructive analysis, drive the recon/context
+skills and their reviewer subagents, and record findings. Shell commands you were not
+pre-allowed to run are **deferred for operator approval** — the run pauses, the operator
+signs off, then resumes. So when you genuinely need an approval-gated / offensive step
+({phases}), attempt it plainly and briefly say why; if it is deferred, that is the intended
+gate, not an error — do not retry it or try to route around the gate. Anything out of scope,
+or outside the window, is a HARD STOP.
+""".format(phases=phases)
+        if autonomous
+        else ""
+    )
+
     win = scope.get("window", {})
     return f"""# Redstrike engagement — operating context (launcher-injected)
+{autonomous_note}
 
 You are running under the **redstrike CLI** for engagement `{engagement_id}`. This is a
 real, authorized offensive security test. The canonical scope + authorization record is
