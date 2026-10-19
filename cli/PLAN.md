@@ -43,9 +43,12 @@ cli/
 - [x] **M2 — Scope-gate hook.** `hooks/scope_gate.py` denies out-of-scope WebFetch/Bash and blocks
       writes to the governance files; fails closed on a missing scope record. Unit + stdin-level tested.
 - [x] **M3 — Gate + status glue.** `redstrike verify` (consolidated + per-skill modes); `redstrike status`.
-- [~] **M4 — Hardening + packaging.** Done: pyproject/console-script, stdlib tests, version-floor
-      assertion, UTF-8/ASCII-safe output, README. **Next:** verify pipx end-to-end on WSL2, add a CI
-      job for the CLI tests, add an INSTALL.md WSL2 section.
+- [x] **M4 — Hardening + packaging.** pyproject + console script (pip-install verified; `redstrike`
+      runs from the installed package); repo autodetect via cwd-walk with a clean error when run
+      out-of-tree; version-floor assertion; UTF-8/ASCII-safe output; README + INSTALL.md WSL2 section;
+      CI `cli` job runs the unit tests + packaging + a dry-run smoke on Python 3.10/3.11/3.12. Also
+      validated on WSL2 (python 3.12 tests green; POSIX hook command + argv confirmed). **Not yet:** a
+      live in-session `claude` launch (needs `claude` installed + authed on the run host).
 - [ ] **M5 — Autonomous `-n` (deferred).** `-p` + stream-json event loop, `defer`-based approval with
       resume, budget/turn caps, OAuth-token auth, run summary. The launcher is structured to add this
       without rework.
