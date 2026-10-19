@@ -17,5 +17,6 @@
 ## Package
 - [ ] Only accepted, in-scope, non-duplicate findings kept
 - [ ] reporting run; per-finding submission drafts in submissions/
+  - [ ] each submission meets the report-quality bar (refs/report_quality.md): specific title · complete repro · expected-vs-actual · earned impact/severity · proof (req/resp, screenshot, benign PoC) · clean formatting · signal-only
 - [ ] summary.md
 - [ ] /REVIEW SKILL passes  (submissions are DRAFTS — a human sends them)
