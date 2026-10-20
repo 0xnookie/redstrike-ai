@@ -34,13 +34,26 @@ kill-chains are excluded from severity counts, matching the reporting skill.
 
 ## Run
 
+**Dev (demo data):**
+
 ```sh
-cd console
-npm install
-npm run dev          # http://localhost:3000  (starts on demo data)
+cd console && npm install && npm run dev        # http://localhost:3000
 ```
 
-Build for production: `npm run build && npm run start`.
+**Against a live engagement** — the console is a static build; `scripts/console.py` serves it and
+feeds it the JSON a real engagement produces, so the same UI renders *your* results:
+
+```sh
+npm run build                                    # once → console/out/
+python ../scripts/console.py <engagement-dir>    # e.g. engagements/<client>-<date>/
+python ../scripts/console.py ../samples/acme-demo   # or the bundled sample
+#  → http://localhost:8787   (badge flips to "Live engagement")
+```
+
+It searches the engagement dir (recursively) for `findings_consolidated.json`, `host_discovery.json`,
+`scope.json` and `attack_chains.json`, serves each at the site root, and the console **auto-loads**
+them on open. Missing files just stay on demo data; no Node is needed to serve. `npm run serve` is a
+shortcut for the bundled sample.
 
 ## Loading real engagement data
 

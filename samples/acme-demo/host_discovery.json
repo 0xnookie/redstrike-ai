@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-10-12T08:15:00Z",
+  "scope_ref": "scope.yaml",
+  "hosts": [
+    { "host": "www.example.com", "ip": "203.0.113.10", "live": true, "title": "Acme Corp", "cdn": false, "ports": [
+      { "port": 80, "proto": "tcp", "service": "http", "product": "nginx", "version": "1.25.3", "state": "open" },
+      { "port": 443, "proto": "tcp", "service": "https", "product": "nginx", "version": "1.25.3", "state": "open", "tls": "TLS 1.3" }
+    ] },
+    { "host": "api.example.com", "ip": "203.0.113.11", "live": true, "title": "Acme API v2", "ports": [
+      { "port": 80, "proto": "tcp", "service": "http", "product": "nginx", "version": "1.25.3", "state": "open" },
+      { "port": 443, "proto": "tcp", "service": "https", "product": "Express", "version": "4.17.1", "state": "open", "tls": "TLS 1.3", "flagged": "outdated" }
+    ] },
+    { "host": "app.example.com", "ip": "203.0.113.12", "live": true, "title": "Acme App", "ports": [
+      { "port": 443, "proto": "tcp", "service": "https", "product": "Apache Tomcat", "version": "9.0.71", "state": "open", "tls": "TLS 1.2" },
+      { "port": 8080, "proto": "tcp", "service": "http-proxy", "product": "Apache Tomcat", "version": "9.0.71", "state": "open", "title": "Manager console", "flagged": "exposed" }
+    ] },
+    { "host": "shop.example.com", "ip": "203.0.113.13", "live": true, "title": "Acme Shop", "ports": [
+      { "port": 443, "proto": "tcp", "service": "https", "product": "Apache httpd", "version": "2.4.57", "state": "open", "tls": "TLS 1.3" }
+    ] },
+    { "host": "203.0.113.24", "ip": "203.0.113.24", "live": true, "ports": [
+      { "port": 22, "proto": "tcp", "service": "ssh", "product": "OpenSSH", "version": "8.9p1", "state": "open", "flagged": "exposed" },
+      { "port": 3306, "proto": "tcp", "service": "mysql", "product": "MySQL", "version": "8.0.34", "state": "filtered" }
+    ] },
+    { "host": "vpn.example.com", "ip": "203.0.113.25", "live": true, "title": "VPN login", "ports": [
+      { "port": 443, "proto": "tcp", "service": "https", "product": "SSL-VPN portal", "state": "open", "tls": "TLS 1.2", "flagged": "edge" },
+      { "port": 500, "proto": "udp", "service": "isakmp", "product": "IKE", "state": "open", "flagged": "edge" }
+    ] },
+    { "host": "mail.example.com", "ip": "203.0.113.14", "live": true, "ports": [
+      { "port": 25, "proto": "tcp", "service": "smtp", "product": "Postfix", "version": "3.7.4", "state": "open" },
+      { "port": 993, "proto": "tcp", "service": "imaps", "product": "Dovecot", "state": "open", "tls": "TLS 1.3" }
+    ] },
+    { "host": "admin.example.com", "ip": "203.0.113.205", "live": true, "title": "Admin", "ports": [
+      { "port": 443, "proto": "tcp", "service": "https", "product": "Element-UI", "state": "open", "tls": "TLS 1.2", "flagged": "out-of-scope" }
+    ] }
+  ]
+}

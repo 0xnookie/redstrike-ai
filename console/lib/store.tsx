@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConsoleData, Engagement, Finding, AttackChain, Service } from "./types";
 import { sampleData } from "./data";
 
@@ -80,6 +80,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
               state: p?.state ?? "open",
               tls: p?.tls,
               title: h?.title,
+              flagged: p?.flagged,
               findings: 0,
             }));
           });
@@ -145,6 +146,25 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     setActiveId(sampleData.activeEngagementId);
     setMode("demo");
   }, []);
+
+  // Auto-load a live engagement when the console is served next to its output
+  // (the `redstrike console` launcher). Harmless 404s otherwise → demo stays.
+  const booted = useRef(false);
+  useEffect(() => {
+    if (booted.current) return;
+    booted.current = true;
+    (async () => {
+      for (const url of ["/findings_consolidated.json", "/scope.json", "/host_discovery.json", "/attack_chains.json"]) {
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) continue;
+          classify(JSON.parse(await res.text()), url);
+        } catch {
+          /* missing / not JSON — ignore */
+        }
+      }
+    })();
+  }, [classify]);
 
   const value: ConsoleCtx = {
     mode,
