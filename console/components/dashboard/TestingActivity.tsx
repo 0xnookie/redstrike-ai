@@ -28,7 +28,7 @@ function mondayOf(d: Date) {
  * Jan → today of the most recent year in the data. Empty data → a faint grid.
  */
 export function TestingActivity({ tests, activity }: { tests: TestRun[]; activity: ActivityEvent[] }) {
-  const { weeks, monthLabels, max, total } = useMemo(() => {
+  const { weeks, monthLabels, max, total, activeDays, busiest } = useMemo(() => {
     const counts = new Map<string, number>();
     const bump = (iso?: string) => {
       if (!iso) return;
@@ -70,19 +70,26 @@ export function TestingActivity({ tests, activity }: { tests: TestRun[]; activit
       weeks.push(week);
     }
     const vals = [...counts.values()];
-    return { weeks, monthLabels, max: Math.max(1, ...vals), total: vals.reduce((a, b) => a + b, 0) };
+    return {
+      weeks,
+      monthLabels,
+      max: Math.max(1, ...vals),
+      total: vals.reduce((a, b) => a + b, 0),
+      activeDays: counts.size,
+      busiest: vals.length ? Math.max(...vals) : 0,
+    };
   }, [tests, activity]);
 
   const level = (c: number) => (c <= 0 ? 0 : Math.min(4, 1 + Math.floor((c / max) * 3.999)));
 
   return (
-    <Card className="p-4">
+    <Card className="flex h-full flex-col p-4">
       <div className="mb-3">
         <h2 className="text-sm font-semibold">Testing Activity</h2>
-        <p className="text-xs text-muted">{total} runs this year · tests + agent actions by day</p>
+        <p className="text-xs text-muted">Tests + agent actions, by day</p>
       </div>
 
-      <div className="overflow-x-auto scroll-thin">
+      <div className="my-auto overflow-x-auto scroll-thin">
         <div className="inline-block">
           {/* month labels */}
           <div className="relative mb-1 ml-8 h-4 text-[10px] text-muted" style={{ width: weeks.length * PITCH }}>
@@ -130,6 +137,21 @@ export function TestingActivity({ tests, activity }: { tests: TestRun[]; activit
           </div>
         </div>
       </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3">
+        <Stat label="Runs" value={total} />
+        <Stat label="Active days" value={activeDays} />
+        <Stat label="Busiest day" value={busiest} />
+      </div>
     </Card>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <div className="text-lg font-semibold leading-none tabular-nums">{value.toLocaleString("en-US")}</div>
+      <div className="mt-1 text-[11px] text-muted">{label}</div>
+    </div>
   );
 }
