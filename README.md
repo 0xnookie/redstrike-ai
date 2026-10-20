@@ -1,6 +1,7 @@
+
 <div align="center">
 
-<img src="assets/redstrike-ai.png" alt="Redstrike AI Logo" width="300" />
+<img src="assets/redstrike-logo.png" alt="Redstrike AI — AI-Powered offensive security framework" width="100%" />
 
 Redstrike AI
 ============
