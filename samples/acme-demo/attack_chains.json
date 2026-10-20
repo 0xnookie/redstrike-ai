@@ -1,0 +1,32 @@
+{
+  "target": "example.com",
+  "generated_at": "2026-10-19T09:00:00Z",
+  "scope_ref": "scope.yaml",
+  "chains": [
+    {
+      "id": "chain-001",
+      "title": "Unauthenticated → cloud account compromise",
+      "feasibility": "demonstrated",
+      "steps": [
+        { "finding_id": "RS-2026-003", "role": "entry", "enables": "reach cloud metadata via SSRF" },
+        { "finding_id": "RS-2026-011", "role": "escalation", "enables": "use leaked role for cloud access" }
+      ],
+      "preconditions": ["app IAM role has metadata-reachable permissions"],
+      "impact": "An external attacker with no credentials reaches the cloud control plane via the fetch feature.",
+      "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+    },
+    {
+      "id": "chain-002",
+      "title": "SQLi → admin takeover → console execution",
+      "feasibility": "plausible",
+      "steps": [
+        { "finding_id": "RS-2026-001", "role": "entry", "enables": "read admin password hashes" },
+        { "finding_id": "RS-2026-002", "role": "pivot", "enables": "assume an admin session" },
+        { "finding_id": "RS-2026-004", "role": "escalation", "enables": "execute in agent/admin console" }
+      ],
+      "preconditions": ["admin hashes are crackable or session forgeable"],
+      "impact": "Database read via SQLi feeds the auth bypass, culminating in full admin console control.",
+      "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+    }
+  ]
+}
