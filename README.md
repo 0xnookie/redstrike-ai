@@ -228,13 +228,17 @@ redstrike init "Acme Corp" \  # scaffold engagements/acme-corp-<date>/ + scope.y
   --i-confirm-authorization
 # review the generated scope.yaml, then:
 redstrike run  acme-corp-<date>              # interactive, gated (you approve exploitation)
+redstrike run  acme-corp-<date> --console    # …and bring up the web console when the run finishes
 redstrike run  acme-corp-<date> --dry-run    # print the exact argv + generated runtime/ files
 redstrike run  acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20 \
                --allow 'Bash(nmap *)'        # headless recon; un-allowed shell defers for approval
 redstrike approve acme-corp-<date>           # review/approve deferred commands, then run … --resume
 redstrike status acme-corp-<date>            # findings by severity/status + scope
 redstrike verify acme-corp-<date>            # the deterministic completion gate
+redstrike console                            # open the web console over ALL engagements (idempotent)
 ```
+
+> `--console` (or `REDSTRIKE_CONSOLE=1`) auto-opens the console when a run finishes; it's idempotent, so it reuses an already-running console rather than stacking servers, and the console re-scans `engagements/` live so a just-finished scan shows up on refresh.
 
 **How it's enforced** — a generated `runtime/settings.json` wires a **PreToolUse scope-gate hook** that
 denies any tool call reaching an out-of-scope asset and blocks writes to the launcher-owned governance
