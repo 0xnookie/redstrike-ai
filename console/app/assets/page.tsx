@@ -58,7 +58,7 @@ export default function AssetsPage() {
 
       {/* asset coverage map */}
       <div className="mb-3">
-        <AssetMap assets={assets} orgName={eng.target} />
+        <AssetMap assets={assets} orgName={eng.target} services={services} />
       </div>
 
       {/* ports & services (from host discovery) */}
