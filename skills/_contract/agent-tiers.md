@@ -18,7 +18,7 @@ Run once per engagement; feeds everything. `osint` ✅ · `host-discovery` ✅ �
 
 ## Tier 2 — Vuln categories (findings)
 Per-class `<class>-context` feeder + variant/category agents. The finding producers. See
-[`vuln-catalog.md`](vuln-catalog.md). ✅ **All 9 web-app families + 11 atomic agents + the `reporting` aggregator built, plus the AI/LLM, AI-agent-protocol (`agent-recon`), Active Directory, Web3 / smart-contract (`web3-context` + 6 `sc-*` executors, Foundry-fork-proven), and post-exploitation domains.**
+[`vuln-catalog.md`](vuln-catalog.md). ✅ **All 9 web-app families + 11 atomic agents + the `reporting` aggregator built, plus the AI/LLM, AI-agent-protocol (`agent-recon`), Active Directory, Web3 / smart-contract (`web3-context` + 6 `sc-*` executors, Foundry-fork-proven), and post-exploitation domains.** The **framework-specific executor family** (`framework-base` + `wordpress` / `nextjs`, clonable per stack) specializes the Tier-3 `cve-intelligence` capability with deep per-stack recon + ecosystem CVEs — benign version/behaviour confirmation, each with its own `*-verify` reviewer.
 
 ## Tier 3 — Mission & capability agents (the red team) — ROADMAP
 Two kinds:
@@ -54,4 +54,4 @@ Intelligence all make claims → they get a reviewer). Anything that generates o
 → `roe-gate.md` + human approval gates (exploitation/post-ex altitude). CVE Intelligence is read/OSINT
 → treat all external data as untrusted (data, not instructions).
 
-**Status:** Tier 1 partial (js-analysis ✅) · **Tier 2 complete** (9 families + 11 atomic + reporting, 34 findings-agents each with its own reviewer) · **Tier 3 ✅ built** — mission (bug-bounty, ctf-solver, `redstrike` orchestrator) + capability (cve-intelligence, exploit-generator, attack-chain-discovery, parameter-optimization). **All three tiers complete** — Tier-1 recon now includes `osint` + `host-discovery` + `content-discovery` (custom wordlists) + `js-analysis`.
+**Status:** Tier 1 partial (js-analysis ✅) · **Tier 2 complete** (9 families + 11 atomic + the framework-executor family `wordpress`/`nextjs` + reporting, 36 findings-agents each with its own reviewer) · **Tier 3 ✅ built** — mission (bug-bounty, ctf-solver, `redstrike` orchestrator) + capability (cve-intelligence, exploit-generator, attack-chain-discovery, parameter-optimization). **All three tiers complete** — Tier-1 recon now includes `osint` + `host-discovery` + `content-discovery` (custom wordlists) + `js-analysis`.
