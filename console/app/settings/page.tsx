@@ -55,8 +55,9 @@ export default function SettingsPage() {
           <h2 className="text-sm font-semibold">Data source</h2>
           <p className="mb-3 text-xs text-muted">
             The console reads the engagement JSON the Redstrike skills emit — usually via
-            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">python scripts/console.py engagements/&lt;dir&gt;</code>.
-            You can also load files here: a
+            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">python scripts/console.py</code>
+            (serves every engagement under <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">engagements/</code>; switch from the Engagements page or ⌘K).
+            You can also load files here for the active engagement: a
             <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">findings_consolidated.json</code>,
             <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">host_discovery.json</code>,
             <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">chains.json</code> or
