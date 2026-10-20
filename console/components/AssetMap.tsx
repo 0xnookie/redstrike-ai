@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Building2, Globe, Server, Network, Radio, Link2, Plus, Minus, Maximize2, type LucideIcon } from "lucide-react";
-import type { Asset, AssetKind } from "@/lib/types";
+import type { Asset, AssetKind, Service } from "@/lib/types";
 import { COVERAGE } from "@/lib/theme";
 
 type NodeKind = AssetKind | "org";
@@ -24,9 +24,28 @@ const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const baseR = (k: NodeKind) =>
   k === "org" ? 28 : k === "domain" ? 23 : k === "subdomain" ? 20 : k === "ip" || k === "cidr" ? 18 : k === "service" ? 16 : 15;
 
-export function AssetMap({ assets, orgName }: { assets: Asset[]; orgName: string }) {
+export function AssetMap({ assets, orgName, services = [] }: { assets: Asset[]; orgName: string; services?: Service[] }) {
   const { nodes, edges } = useMemo(() => buildGraph(assets, orgName), [assets, orgName]);
   const positioned = useMemo(() => layout(nodes, edges), [nodes, edges]);
+
+  // open-port risk per host (from host discovery): exposed/findings → high, outdated/finding → elevated
+  const hostRisk = useMemo(() => {
+    const agg = new Map<string, { findings: number; open: number; exposed: boolean; outdated: boolean }>();
+    for (const s of services) {
+      if (s.flagged === "out-of-scope") continue;
+      const a = agg.get(s.host) ?? { findings: 0, open: 0, exposed: false, outdated: false };
+      a.findings += s.findings ?? 0;
+      if (s.state === "open") a.open += 1;
+      if (s.flagged === "exposed") a.exposed = true;
+      if (s.flagged === "outdated") a.outdated = true;
+      agg.set(s.host, a);
+    }
+    const m = new Map<string, { level: "high" | "medium" | "low"; open: number }>();
+    agg.forEach((a, host) =>
+      m.set(host, { level: a.exposed || a.findings >= 5 ? "high" : a.outdated || a.findings >= 1 ? "medium" : "low", open: a.open })
+    );
+    return m;
+  }, [services]);
 
   const [view, setView] = useState({ tx: 0, ty: 0, s: 1 });
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
@@ -74,10 +93,22 @@ export function AssetMap({ assets, orgName }: { assets: Asset[]; orgName: string
         {Object.values(positioned).map((n) => {
           const Icon = KIND_ICON[n.kind];
           const st = nodeStyle(n);
+          const hk = n.kind === "subdomain" || n.kind === "ip" || n.kind === "domain" || n.kind === "service" ? n.label.split(":")[0] : undefined;
+          const risk = hk ? hostRisk.get(hk) : undefined;
+          const ringColor = risk && risk.level !== "low" ? (risk.level === "high" ? "#ef4444" : "#f59e0b") : undefined;
+          const showPorts = !!risk && risk.open > 0 && (n.kind === "subdomain" || n.kind === "ip" || n.kind === "domain");
           return (
             <div key={n.id} className="absolute flex flex-col items-center" style={{ left: n.x, top: n.y, transform: "translate(-50%,-50%)" }}>
-              <div className="grid place-items-center rounded-full" style={{ width: n.r * 2, height: n.r * 2, background: st.bg, border: st.border, color: st.icon }}>
+              <div
+                className="relative grid place-items-center rounded-full"
+                style={{ width: n.r * 2, height: n.r * 2, background: st.bg, border: st.border, color: st.icon, boxShadow: ringColor ? `0 0 0 2.5px rgb(var(--card2)), 0 0 0 5px ${ringColor}` : undefined }}
+              >
                 <Icon size={Math.round(n.r * 0.85)} strokeWidth={1.75} />
+                {showPorts && (
+                  <span className="absolute -right-1.5 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full border border-line bg-card px-1 text-[9px] font-semibold text-fg">
+                    {risk!.open}
+                  </span>
+                )}
               </div>
               <div
                 className="mt-1 max-w-[130px] truncate text-center text-[11px] font-medium"
@@ -104,6 +135,12 @@ export function AssetMap({ assets, orgName }: { assets: Asset[]; orgName: string
           <Swatch label="In progress" style={{ background: COVERAGE["in-progress"].color }} />
           <Swatch label="Untested" style={{ background: "rgb(var(--card))", border: `1.5px solid ${COVERAGE.untested.color}` }} />
           <Swatch label="Out of scope" style={{ background: "transparent", border: "1.5px dashed rgb(var(--fg) / 0.3)" }} />
+        </div>
+        <div className="mt-2 space-y-1 border-t border-line pt-2 text-muted">
+          <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wide">Open-port risk</div>
+          <Swatch label="High — exposed / findings" style={{ background: "transparent", border: "2px solid #ef4444" }} />
+          <Swatch label="Elevated — outdated" style={{ background: "transparent", border: "2px solid #f59e0b" }} />
+          <div className="flex items-center gap-2"><span className="grid h-3.5 w-3.5 place-items-center rounded-full border border-line bg-card text-[7px] font-semibold text-fg">n</span>open ports</div>
         </div>
         <p className="mt-2 border-t border-line pt-2 text-[10px] text-muted">Force-directed · drag to pan, scroll to zoom.</p>
       </div>
