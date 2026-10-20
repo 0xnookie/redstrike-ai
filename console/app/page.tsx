@@ -12,9 +12,12 @@ import type { Finding, Severity } from "@/lib/types";
 import { Card, Kpi, PageHeader, SeverityBadge, Pill, Segmented, Dot } from "@/components/ui/primitives";
 import { Donut, Legend, HBars, StackedBars, Progress } from "@/components/ui/charts";
 import { ACTIVITY_ICON } from "@/components/activityIcons";
+import { TestingActivity } from "@/components/dashboard/TestingActivity";
+import { RecentTests } from "@/components/dashboard/RecentTests";
+import { CyberFeed } from "@/components/dashboard/CyberFeed";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity, openFinding } = useConsole();
+  const { activeEngagement, findings, chains, assets, activity, tests, cveFeed, openFinding } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
 
   const rep = reportable(findings);
@@ -75,6 +78,14 @@ export default function DashboardPage() {
           <Kpi key={k} label={SEVERITY[k].label} value={counts[k]} color={SEVERITY[k].color} />
         ))}
         <Kpi label="Chains" value={chains.length} icon={<Workflow size={15} />} />
+      </div>
+
+      {/* testing activity + recent tests */}
+      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <TestingActivity tests={tests} activity={activity} />
+        </div>
+        <RecentTests tests={tests} />
       </div>
 
       {/* over-time + donut */}
@@ -202,6 +213,11 @@ export default function DashboardPage() {
             <span>{vstats.total} findings judged</span>
           </div>
         </Card>
+      </div>
+
+      {/* what's new in cyber */}
+      <div className="mt-3">
+        <CyberFeed feed={cveFeed} />
       </div>
     </>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, TestRun, CveFeed } from "./types";
 import { sampleData } from "./data";
 
 type Mode = "demo" | "live";
@@ -19,6 +19,10 @@ interface ConsoleCtx {
   activity: ConsoleData["activity"];
   assets: ConsoleData["assets"];
   services: ConsoleData["services"];
+  /** pentest runs scoped to the active engagement (Testing Activity + Recent Tests) */
+  tests: TestRun[];
+  /** global CVE feed for "What's New in Cyber" (not engagement-scoped) */
+  cveFeed: CveFeed | undefined;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
   resetDemo: () => void;
   /** finding detail drawer, lifted to the app so it opens from any view (and the ⌘K palette) */
@@ -52,6 +56,12 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   );
   const chains = data.chains;
 
+  // tests scoped to the active engagement (untagged demo runs belong to it)
+  const tests = useMemo(
+    () => data.tests.filter((t) => !t.engagement_id || t.engagement_id === activeId),
+    [data.tests, activeId]
+  );
+
   const classify = useCallback(
     (json: unknown, name: string): string => {
       // findings array
@@ -63,6 +73,19 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       }
       if (json && typeof json === "object") {
         const o = json as Record<string, unknown>;
+        // tests.json → { tests: [...] } pentest runs (object-wrapped so it isn't
+        // mistaken for a bare findings array)
+        if (Array.isArray(o.tests)) {
+          const t = (o.tests as TestRun[]).map((x) => ({ ...x, engagement_id: activeId }));
+          setData((d) => ({ ...d, tests: t }));
+          setMode("live");
+          return "tests";
+        }
+        // cve_feed.json → { generated_at, count_7d, count_30d, items: [...] }
+        if (Array.isArray(o.items) && (o.count_7d != null || o.count_30d != null || o.generated_at != null)) {
+          setData((d) => ({ ...d, cveFeed: o as unknown as CveFeed }));
+          return "cve_feed";
+        }
         // host_discovery.json → flatten hosts[].ports[] into the services table
         if (Array.isArray(o.hosts)) {
           const services: Service[] = [];
@@ -154,7 +177,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     if (booted.current) return;
     booted.current = true;
     (async () => {
-      for (const url of ["/findings_consolidated.json", "/scope.json", "/host_discovery.json", "/attack_chains.json"]) {
+      for (const url of ["/findings_consolidated.json", "/scope.json", "/host_discovery.json", "/attack_chains.json", "/tests.json", "/cve_feed.json"]) {
         try {
           const res = await fetch(url, { cache: "no-store" });
           if (!res.ok) continue;
@@ -178,6 +201,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     activity: data.activity,
     assets: data.assets,
     services: data.services,
+    tests,
+    cveFeed: data.cveFeed,
     loadFiles,
     resetDemo,
     selectedFinding,

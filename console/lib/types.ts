@@ -157,6 +157,36 @@ export interface Service {
   flagged?: string;       // short note when notable: outdated · exposed · edge · out-of-scope
 }
 
+// A discrete pentest run — feeds the Testing Activity heatmap + the Recent Tests list.
+export type TestStatus = "running" | "completed" | "failed" | "queued";
+export interface TestRun {
+  id: string;
+  target: string;          // host / scope the run was pointed at
+  profile?: string;        // e.g. "Full web assessment", "XSS hunt"
+  status: TestStatus;
+  startedAt: string;       // ISO
+  durationMin?: number;
+  findings?: number;       // findings produced by the run
+  topSeverity?: Severity;  // highest-severity finding of the run
+  engagement_id?: string;
+}
+
+// Global CVE feed for the "What's New in Cyber" dashboard section. Not engagement-
+// scoped; a deployment may override the demo feed by serving `cve_feed.json`.
+export interface CveItem {
+  id: string;              // e.g. "CVE-2026-9589"
+  summary: string;
+  severity?: Severity;     // when the record carries a qualitative rating
+  cvss?: number;           // base score
+  published: string;       // ISO date
+}
+export interface CveFeed {
+  generated_at: string;
+  count_7d: number;        // detections in the last 7 days
+  count_30d: number;       // detections in the last 30 days
+  items: CveItem[];        // newest detections, most-recent first
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -166,4 +196,6 @@ export interface ConsoleData {
   activity: ActivityEvent[];
   assets: Asset[];
   services: Service[];
+  tests: TestRun[];
+  cveFeed?: CveFeed;
 }
