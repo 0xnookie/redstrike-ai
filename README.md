@@ -10,7 +10,7 @@ Redstrike AI
 
 **A red-team of AI agents for authorized penetration testing — web, AI/LLM (OWASP LLM Top 10), Active Directory, and post-exploitation — where every skill ships a methodology checklist *and* an independent reviewer agent that verifies each finding against evidence.**
 
-🎯 [What is it](#-what-is-redstrike-ai) • 🏗️ [Architecture](#️-architecture) • 🔁 [Two-Altitude Review](#-the-two-altitude-review) • 🧩 [Skill Contract](#-the-skill-contract) • 🤖 [Agents](#-agents--skills) • 🚀 [Quickstart](#-quickstart) • 🛡️ [Safety](#️-safety--authorization)
+🎯 [What is it](#-what-is-redstrike-ai) • 🖥️ [Console](#️-console) • 🏗️ [Architecture](#️-architecture) • 🔁 [Two-Altitude Review](#-the-two-altitude-review) • 🧩 [Skill Contract](#-the-skill-contract) • 🤖 [Agents](#-agents--skills) • 🚀 [Quickstart](#-quickstart) • 🛡️ [Safety](#️-safety--authorization)
 
 [![Security](https://img.shields.io/badge/Security-Penetration%20Testing-red)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -39,6 +39,38 @@ The problem with LLM-driven offensive tooling is two failure modes: it **halluci
 - **Evidence-first** — no finding ships without a reproducible artifact; the reviewer rejects anything it can't verify.
 - **Authorization-gated** — scope allowlist, approval gates for exploitation, audit logging, benign-PoC + cleanup rules baked in.
 - **Substrate-agnostic** — runs as native **Claude Code** skills + subagents, on the Claude Agent SDK, or under its own orchestrator.
+
+---
+
+## 🖥️ Console
+
+A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the same `findings_consolidated.json` / `attack_chains.json` / `scope.json` the skills emit (or starts on bundled demo data), scores CVSS 3.1 in-browser to match `scripts/cvss.py`, and keeps composite kill-chains out of the severity counts. Built with **Next.js + TypeScript + Tailwind**.
+
+```sh
+cd console && npm install && npm run dev   # → http://localhost:3000
+```
+
+<p align="center">
+  <img src="assets/console/dashboard.png" alt="Redstrike console — dashboard" width="100%" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/console/findings.png" alt="Findings" width="100%" /><br/><sub><b>Findings</b> — filter, sort, severity-coded; full write-up drawer with evidence &amp; CVSS</sub></td>
+    <td width="50%"><img src="assets/console/attack-chains.png" alt="Attack chains" width="100%" /><br/><sub><b>Attack chains</b> — kill-chain graph composed from accepted findings</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — force-directed coverage map (tested / in-progress / out-of-scope)</sub></td>
+    <td width="50%"><img src="assets/console/agents.png" alt="Agent fleet" width="100%" /><br/><sub><b>Agents</b> — the executor + independent-reviewer fleet, by family &amp; tier</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="assets/console/report.png" alt="Report" width="100%" />
+  <br/><sub><b>Report</b> — executive summary, risk-ordered findings, export / print</sub>
+</p>
+
+> Theme toggles light/dark; everything is monochrome chrome with color reserved for data (severity, verdict, coverage, graphs). See [`console/`](console/) for the full view list and how to load real engagement data.
 
 ---
 
