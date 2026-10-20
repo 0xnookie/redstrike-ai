@@ -1,0 +1,127 @@
+[
+  {
+    "id": "RS-2026-001", "title": "SQL injection in product search (UNION-based)", "asset": "https://api.example.com/v2/search",
+    "category": { "cwe": "CWE-89", "owasp": "A03:2021", "wstg": "WSTG-INPV-05" }, "attack_mapping": ["T1190"],
+    "severity": "critical", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "impact": "Full read/write access to the primary application database, including the users table (password hashes, PII).",
+    "reproduction": ["GET /v2/search?q=widget' UNION SELECT NULL,version(),NULL-- -", "Observe the DB version string rendered in the results list", "Enumerate information_schema.tables via the same injection point"],
+    "evidence": [{ "type": "request_response", "ref": "sqli-inband/poc/union-search.http" }, { "type": "tool_output", "ref": "sqli-inband/poc/sqlmap-redacted.txt" }],
+    "remediation": "Use parameterized queries / prepared statements for the search handler; apply least-privilege to the DB role.",
+    "references": ["https://owasp.org/www-community/attacks/SQL_Injection"],
+    "review": { "verdict": "accepted", "reviewer": "sqli-inband-verify", "reviewed_at": "2026-10-18T10:00:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-002", "title": "Authentication bypass → administrator account takeover", "asset": "https://app.example.com/login",
+    "category": { "cwe": "CWE-287", "owasp": "A07:2021", "wstg": "WSTG-ATHN-04" }, "attack_mapping": ["T1078", "T1548"],
+    "severity": "critical", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
+    "impact": "An unauthenticated attacker can assume any account, including administrators, and reach the full admin console.",
+    "reproduction": ["Submit login with a crafted JWT whose 'role' claim is elevated and 'alg' set to none", "Server accepts the unsigned token", "Navigate to /admin — full access granted"],
+    "evidence": [{ "type": "request_response", "ref": "auth-bypass/poc/alg-none.http" }, { "type": "screenshot", "ref": "auth-bypass/poc/admin-console.png" }],
+    "remediation": "Reject tokens with alg=none; pin the expected algorithm server-side; verify signatures against the correct key.",
+    "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    "review": { "verdict": "accepted", "reviewer": "auth-bypass-verify", "reviewed_at": "2026-10-18T10:20:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-003", "title": "SSRF to cloud metadata → temporary credential theft", "asset": "https://api.example.com/v2/fetch",
+    "category": { "cwe": "CWE-918", "owasp": "A10:2021", "wstg": "WSTG-INPV-19" }, "attack_mapping": ["T1552.005"],
+    "severity": "critical", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N",
+    "impact": "The 'fetch' feature reaches the cloud metadata endpoint, exposing short-lived IAM credentials for the app role.",
+    "reproduction": ["POST /v2/fetch {\"url\":\"http://169.254.169.254/latest/meta-data/iam/security-credentials/\"}", "Role name returned", "Request the role path to retrieve (redacted) temporary credentials"],
+    "evidence": [{ "type": "request_response", "ref": "ssrf-cloud/poc/imds.http" }, { "type": "log", "ref": "ssrf-cloud/poc/collaborator-hit.txt" }],
+    "remediation": "Allowlist egress destinations; block link-local/metadata ranges; require IMDSv2; isolate the fetch service.",
+    "references": ["https://owasp.org/www-community/attacks/Server_Side_Request_Forgery"],
+    "review": { "verdict": "accepted", "reviewer": "ssrf-cloud-verify", "reviewed_at": "2026-10-18T10:40:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-004", "title": "Stored XSS in support-ticket body (renders in agent console)", "asset": "https://app.example.com/support/tickets",
+    "category": { "cwe": "CWE-79", "owasp": "A03:2021", "wstg": "WSTG-INPV-02" }, "attack_mapping": ["T1059.007"],
+    "severity": "high", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N",
+    "impact": "A customer-submitted ticket executes script in the support agent's authenticated session (session theft, actions as agent).",
+    "reproduction": ["Create a ticket whose body is an img tag with an onerror handler exfiltrating document.cookie", "A support agent opens the ticket in the console", "The payload fires in the agent's origin"],
+    "evidence": [{ "type": "dom_capture", "ref": "xss-stored/poc/ticket-dom.html" }, { "type": "screenshot", "ref": "xss-stored/poc/agent-alert.png" }],
+    "remediation": "Context-aware output encoding when rendering ticket content; a strict CSP; sanitize HTML on input.",
+    "references": ["https://owasp.org/www-community/attacks/xss/"],
+    "review": { "verdict": "accepted", "reviewer": "xss-stored-verify", "reviewed_at": "2026-10-18T11:00:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-005", "title": "Insecure deserialization in session cookie", "asset": "https://app.example.com/",
+    "category": { "cwe": "CWE-502", "owasp": "A08:2021", "wstg": "WSTG-INPV-11" }, "attack_mapping": ["T1190"],
+    "severity": "high", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+    "impact": "The session cookie is a serialized object; a benign URLDNS gadget proves attacker-controlled data is deserialized (RCE-adjacent).",
+    "reproduction": ["Decode the session cookie — it is a serialized object", "Replace with a URLDNS gadget pointing at the OOB host", "Observe the DNS callback on cookie processing"],
+    "evidence": [{ "type": "poc_script", "ref": "deserialization/poc/urldns.py" }, { "type": "log", "ref": "deserialization/poc/dns-callback.txt" }],
+    "remediation": "Do not deserialize untrusted data; use signed, opaque session identifiers; restrict gadget classes.",
+    "references": ["https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data"],
+    "review": { "verdict": "accepted", "reviewer": "deserialization-verify", "reviewed_at": "2026-10-18T11:30:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-006", "title": "Reflected XSS in marketing campaign parameter", "asset": "https://www.example.com/promo",
+    "category": { "cwe": "CWE-79", "owasp": "A03:2021", "wstg": "WSTG-INPV-01" }, "attack_mapping": ["T1059.007"],
+    "severity": "medium", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "impact": "A crafted link executes attacker script in a victim's browser in the example.com origin.",
+    "reproduction": ["Request /promo with a ref parameter breaking out of the attribute into a script context", "The ref value is reflected unencoded in the page", "Script executes on load"],
+    "evidence": [{ "type": "request_response", "ref": "xss-reflected/poc/promo-ref.http" }],
+    "remediation": "HTML-encode reflected parameters; add a CSP; validate the 'ref' allowlist.",
+    "references": ["https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"],
+    "review": { "verdict": "accepted", "reviewer": "xss-reflected-verify", "reviewed_at": "2026-10-18T11:45:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-007", "title": "CSRF on email-change endpoint (no anti-CSRF token)", "asset": "https://app.example.com/account/email",
+    "category": { "cwe": "CWE-352", "owasp": "A01:2021", "wstg": "WSTG-SESS-05" }, "attack_mapping": ["T1548"],
+    "severity": "medium", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
+    "impact": "A cross-origin page can change a logged-in user's account email, enabling a password-reset takeover.",
+    "reproduction": ["Host an auto-submitting form POSTing to /account/email", "Logged-in victim visits the page", "Email changes with no token challenge; SameSite does not block it"],
+    "evidence": [{ "type": "poc_script", "ref": "csrf/poc/email-change.html" }],
+    "remediation": "Require a per-request anti-CSRF token; set SameSite=Lax/Strict; re-authenticate for sensitive changes.",
+    "references": ["https://owasp.org/www-community/attacks/csrf"],
+    "review": { "verdict": "accepted", "reviewer": "csrf-verify", "reviewed_at": "2026-10-18T11:55:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-008", "title": "Clickjacking — missing frame-ancestors / X-Frame-Options", "asset": "https://www.example.com/account",
+    "category": { "cwe": "CWE-1021", "owasp": "A05:2021", "wstg": "WSTG-CLNT-09" },
+    "severity": "low", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "impact": "Sensitive pages are framable, enabling UI-redress against state-changing actions.",
+    "reproduction": ["Frame /account in an attacker page", "No frame protections present", "Overlay a decoy to drive a sensitive click"],
+    "evidence": [{ "type": "poc_script", "ref": "clickjacking/poc/frame.html" }, { "type": "screenshot", "ref": "clickjacking/poc/overlay.png" }],
+    "remediation": "Set Content-Security-Policy: frame-ancestors 'self'; add X-Frame-Options: DENY on sensitive routes.",
+    "references": ["https://owasp.org/www-community/attacks/Clickjacking"],
+    "review": { "verdict": "accepted", "reviewer": "clickjacking-verify", "reviewed_at": "2026-10-18T12:00:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-009", "title": "Server technology & version disclosure", "asset": "https://www.example.com/",
+    "category": { "cwe": "CWE-200", "owasp": "A05:2021", "wstg": "WSTG-INFO-02" },
+    "severity": "info", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+    "impact": "Response headers disclose the exact server and framework versions, easing targeted exploit selection.",
+    "reproduction": ["HEAD /", "Inspect Server and X-Powered-By headers"],
+    "evidence": [{ "type": "request_response", "ref": "security-headers/poc/banner.http" }],
+    "remediation": "Suppress or genericize version banners (Server, X-Powered-By).",
+    "references": ["https://owasp.org/www-project-web-security-testing-guide/"],
+    "review": { "verdict": "accepted", "reviewer": "security-headers-verify", "reviewed_at": "2026-10-18T12:05:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-010", "title": "Blind SQL injection (time-based) in report filter", "asset": "https://api.example.com/v2/reports",
+    "category": { "cwe": "CWE-89", "owasp": "A03:2021", "wstg": "WSTG-INPV-05" }, "attack_mapping": ["T1190"],
+    "severity": "medium", "potential_severity": "high", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "impact": "A reliable time-based boolean differential confirms injection. Data extraction could not be shown because the staging DB is unseeded.",
+    "reproduction": ["POST a filter with a conditional time delay → +5s response", "Control with zero delay → baseline latency", "Differential reproducible across 10 trials"],
+    "evidence": [{ "type": "tool_output", "ref": "sqli-blind/poc/timing.txt" }],
+    "remediation": "Parameterize the report filter; least-privilege DB role.",
+    "references": ["https://owasp.org/www-community/attacks/Blind_SQL_Injection"],
+    "review": { "verdict": "blocked", "reviewer": "sqli-blind-verify", "reviewed_at": "2026-10-18T12:20:00Z", "scope_ok": true, "notes": "Injection confirmed by timing; extraction blocked by unseeded staging DB — reported as demonstration-limited." }
+  },
+  {
+    "id": "RS-2026-011", "title": "Unauthenticated → cloud account compromise", "asset": "https://api.example.com/v2/fetch",
+    "category": { "cwe": "CWE-918", "owasp": "A10:2021" }, "composite": true,
+    "severity": "critical", "confidence": "confirmed", "status": "verified", "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "impact": "Chaining SSRF→metadata (RS-2026-003) with the leaked role enables pivot into the cloud account.",
+    "reproduction": ["See chain-001 in attack_chains.json"], "evidence": [{ "type": "log", "ref": "attack-chain/poc/chain-001.md" }],
+    "review": { "verdict": "accepted", "reviewer": "attack-chain-discovery-verify", "reviewed_at": "2026-10-19T09:00:00Z", "scope_ok": true }
+  },
+  {
+    "id": "RS-2026-012", "title": "Self-XSS in developer console paste", "asset": "https://app.example.com/",
+    "category": { "cwe": "CWE-79" }, "severity": "low", "confidence": "tentative", "status": "rejected", "cvss_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N",
+    "impact": "Requires the victim to paste attacker code into their own console — no cross-user vector.",
+    "reproduction": ["Paste payload into DevTools console"], "evidence": [{ "type": "screenshot", "ref": "xss-dom/poc/self-xss.png" }],
+    "review": { "verdict": "rejected", "reviewer": "xss-dom-verify", "reviewed_at": "2026-10-17T15:00:00Z", "scope_ok": true, "notes": "No delivery path to another user; self-XSS is not a reportable vulnerability." }
+  }
+]
