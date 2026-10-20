@@ -48,9 +48,9 @@
             }
           }
         },
-        "reproduction": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "impact": { "type": "string" },
-        "remediation": { "type": "string" },
+        "reproduction": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Ordered steps to reproduce. Wrap every inline payload, request line, JSON body or command in Markdown backticks (e.g. `POST /tokens {\"username\":\"admin'-- -\"}`) so the console renders it verbatim as code." },
+        "impact": { "type": "string", "description": "What the evidence proves an attacker can do. Backtick any inline payload/command/JSON as in `reproduction`." },
+        "remediation": { "type": "string", "description": "How to fix it. Backtick any inline code/config/payload." },
         "references": { "type": "array", "items": { "type": "string" } },
         "review": {
           "type": "object",
