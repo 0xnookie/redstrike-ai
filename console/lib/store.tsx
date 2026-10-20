@@ -25,6 +25,9 @@ interface ConsoleCtx {
   selectedFinding: Finding | null;
   openFinding: (f: Finding) => void;
   closeFinding: () => void;
+  /** seed for the Findings search (e.g. clicking a host's finding count on Assets) */
+  findingsQuery: string;
+  setFindingsQuery: (q: string) => void;
 }
 
 const Ctx = createContext<ConsoleCtx | null>(null);
@@ -36,6 +39,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const openFinding = useCallback((f: Finding) => setSelectedFinding(f), []);
   const closeFinding = useCallback(() => setSelectedFinding(null), []);
+  const [findingsQuery, setFindingsQuery] = useState("");
 
   const activeEngagement =
     data.engagements.find((e) => e.id === activeId) ?? data.engagements[0];
@@ -159,6 +163,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     selectedFinding,
     openFinding,
     closeFinding,
+    findingsQuery,
+    setFindingsQuery,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

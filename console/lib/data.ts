@@ -310,9 +310,9 @@ export const assets: Asset[] = [
 export const services: Service[] = [
   { id: "sv-01", host: "www.example.com", ip: "203.0.113.10", port: 80, proto: "tcp", service: "http", product: "nginx", version: "1.25.3", state: "open", title: "Acme Corp", findings: 0 },
   { id: "sv-02", host: "www.example.com", ip: "203.0.113.10", port: 443, proto: "tcp", service: "https", product: "nginx", version: "1.25.3", state: "open", tls: "TLS 1.3", title: "Acme Corp", findings: 3 },
-  { id: "sv-03", host: "api.example.com", ip: "203.0.113.11", port: 443, proto: "tcp", service: "https", product: "Express", version: "4.17.1", state: "open", tls: "TLS 1.3", title: "Acme API v2", findings: 6, flagged: "outdated" },
+  { id: "sv-03", host: "api.example.com", ip: "203.0.113.11", port: 443, proto: "tcp", service: "https", product: "Express", version: "4.17.1", state: "open", tls: "TLS 1.3", title: "Acme API v2", findings: 3, flagged: "outdated" },
   { id: "sv-04", host: "api.example.com", ip: "203.0.113.11", port: 80, proto: "tcp", service: "http", product: "nginx", version: "1.25.3", state: "open", title: "301 → https", findings: 0 },
-  { id: "sv-05", host: "app.example.com", ip: "203.0.113.12", port: 443, proto: "tcp", service: "https", product: "Apache Tomcat", version: "9.0.71", state: "open", tls: "TLS 1.2", title: "Acme App", findings: 5 },
+  { id: "sv-05", host: "app.example.com", ip: "203.0.113.12", port: 443, proto: "tcp", service: "https", product: "Apache Tomcat", version: "9.0.71", state: "open", tls: "TLS 1.2", title: "Acme App", findings: 4 },
   { id: "sv-06", host: "app.example.com", ip: "203.0.113.12", port: 8080, proto: "tcp", service: "http-proxy", product: "Apache Tomcat", version: "9.0.71", state: "open", title: "Manager console", findings: 0, flagged: "exposed" },
   { id: "sv-07", host: "shop.example.com", ip: "203.0.113.13", port: 443, proto: "tcp", service: "https", product: "Apache httpd", version: "2.4.57", state: "open", tls: "TLS 1.3", title: "Acme Shop", findings: 0 },
   { id: "sv-08", host: "203.0.113.24", ip: "203.0.113.24", port: 22, proto: "tcp", service: "ssh", product: "OpenSSH", version: "8.9p1", state: "open", findings: 0, flagged: "exposed" },

@@ -21,10 +21,10 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "verdict", label: "Verdict" },
 ];
 
-export function FindingsTable({ findings, onSelect }: { findings: Finding[]; onSelect: (f: Finding) => void }) {
+export function FindingsTable({ findings, onSelect, initialQuery = "" }: { findings: Finding[]; onSelect: (f: Finding) => void; initialQuery?: string }) {
   const [sevFilter, setSevFilter] = useState<Set<Severity>>(new Set());
   const [verdictFilter, setVerdictFilter] = useState<string>("all");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [sortKey, setSortKey] = useState<SortKey>("cvss");
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
 
