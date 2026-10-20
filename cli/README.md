@@ -42,11 +42,20 @@ redstrike init "Acme Corp" \           # scaffold engagements/acme-corp-<date>/ 
   --i-confirm-authorization            # assert written authorization is on file
 # review the generated scope.yaml, then:
 redstrike run acme-corp-<date>         # launch Claude Code, scoped + gated (interactive)
+redstrike run acme-corp-<date> --console   # …then bring up the web console when the run finishes
 redstrike run acme-corp-<date> --dry-run   # inspect the exact argv + generated runtime/ files
 redstrike run acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20 --allow 'Bash(nmap *)'
 redstrike status acme-corp-<date>      # findings-by-severity/status + scope summary
 redstrike verify acme-corp-<date>      # run the deterministic gate (verify_completion.py)
+redstrike console                      # open the web console over ALL engagements (idempotent)
+redstrike console acme-corp-<date>     # …or just one engagement
 ```
+
+`--console` (or `REDSTRIKE_CONSOLE=1`) brings up the web console (`scripts/console.py`) when a
+run finishes. It's **idempotent** — if a console is already serving the port it just opens the
+browser instead of stacking a second server — and the console re-scans `engagements/` on every
+request, so a scan that finished after launch shows up on refresh. `redstrike console` starts it
+on demand (foreground; `--background` to detach, `--no-open` to skip the browser).
 
 ## Autonomous mode (`--autonomous`)
 Runs headless via `claude -p` with a streamed progress view + run summary, **deny-by-default**
