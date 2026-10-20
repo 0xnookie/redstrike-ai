@@ -44,10 +44,11 @@ The problem with LLM-driven offensive tooling is two failure modes: it **halluci
 
 ## 🖥️ Console
 
-A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the real JSON the skills emit — `findings_consolidated.json` (reporting), `host_discovery.json` (host-discovery), `chains.json` (attack-chain-discovery) and `scope.yaml` — with **no demo data**: point `scripts/console.py` at an engagement dir and it serves + auto-loads them (empty states otherwise). It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, derives the agent/activity views from each finding's reviewer record, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
+A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the real JSON the skills emit — `findings_consolidated.json` (reporting), `host_discovery.json` (host-discovery), `chains.json` (attack-chain-discovery) and `scope.yaml` — with **no demo data**. Point `scripts/console.py` at your `engagements/` directory and it serves **every** engagement at once (switch between them in the UI); point it at a single engagement dir for just that one. It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, derives the agent/activity views from each finding's reviewer record, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
 
 ```sh
-python scripts/console.py engagements/<client>-<date>/   # build (first run) + serve a live engagement → :8787
+python scripts/console.py                                # build (first run) + serve ALL engagements/ → :8787
+python scripts/console.py engagements/<client>-<date>/   # or just one engagement
 cd console && npm install && npm run dev                 # or: dev server for UI work (empty state)
 ```
 
