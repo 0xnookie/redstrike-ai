@@ -5,7 +5,7 @@ import type { Severity, Verdict, Confidence } from "@/lib/types";
 /* ---------- Card ---------- */
 export function Card({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cx("rounded-xl border border-line bg-card shadow-card", className)} {...rest}>
+    <div className={cx("rounded-xl border border-line bg-card surface", className)} {...rest}>
       {children}
     </div>
   );
@@ -62,8 +62,8 @@ export function Kpi({
     <Comp
       onClick={onClick}
       className={cx(
-        "flex flex-col rounded-xl border bg-card p-3.5 text-left shadow-card transition",
-        onClick && "hover:border-brand/40 hover:shadow-pop",
+        "flex flex-col rounded-xl border bg-card p-3.5 text-left surface transition",
+        onClick && "surface-hover hover:border-brand/40",
         active ? "border-brand/60 ring-1 ring-brand/30" : "border-line"
       )}
     >

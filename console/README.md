@@ -13,7 +13,7 @@ the framework's skills emit, and falls back to a built-in demo dataset so it run
 | `/engagements` | **Engagements** | All authorized assessments; pick one to make it the active context |
 | `/findings` | **Findings** | Filterable/sortable table + full detail drawer (CVSS, mappings, reproduction, evidence, remediation, reviewer verdict) |
 | `/chains` | **Attack chains** | Kill-chain flow graph composed from accepted findings |
-| `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, coverage map, asset table |
+| `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, force-directed coverage map, asset table, and **open ports & services** from host discovery |
 | `/activity` | **Activity** | Execution timeline across the agent fleet (recon → findings → reviews → approvals → chains) |
 | `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier |
 | `/report` | **Report** | Client-ready assembly: executive summary, risk-ordered findings, demonstration-limited section, attack chains; export JSON / print to PDF |
@@ -26,6 +26,7 @@ The console renders the engagement's own JSON (see `../skills/_contract/*.schema
 - `findings_consolidated.json` — array of `finding.schema.json`
 - `attack_chains.json` — `attack_chain.schema.json`
 - `scope.json` — engagement scope / rules / window
+- `host_discovery.json` — hosts + open ports/services (`{ hosts: [{ host, ip, ports: [{ port, service, version }] }] }`) → the Ports & services table
 
 CVSS 3.1 base scores are computed in-browser (`lib/cvss.ts`) with the **same formula as
 `../scripts/cvss.py`**, so the numbers match the engagement's authoritative scorer. Composite
@@ -45,7 +46,7 @@ Build for production: `npm run build && npm run start`.
 
 Everything starts on the embedded **demo** dataset (badge: *Demo data*). To view a real
 engagement, click **Load data** in the top bar (or drag-and-drop) and select any combination of
-`findings_consolidated.json`, `scope.json` and `attack_chains.json` — each file is routed by its
+`findings_consolidated.json`, `scope.json`, `host_discovery.json` and `attack_chains.json` — each file is routed by its
 shape. Parsing happens entirely in the browser; nothing is uploaded. The badge flips to *Live
 engagement*; **Reset to demo** restores the sample.
 

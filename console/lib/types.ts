@@ -138,6 +138,25 @@ export interface Asset {
   parent?: string;
 }
 
+// Open port + service, flattened from host-discovery's host_discovery.json
+// (`{ hosts: [{ host, ip, ports: [{ port, service, version }], title }] }`).
+export type PortState = "open" | "filtered" | "closed";
+export interface Service {
+  id: string;
+  host: string;
+  ip?: string;
+  port: number;
+  proto?: "tcp" | "udp";
+  service: string;        // http · https · ssh · smtp …
+  product?: string;       // nginx · OpenSSH · Tomcat …
+  version?: string;
+  state: PortState;
+  tls?: string;           // e.g. "TLS 1.3"
+  title?: string;         // HTTP title / banner
+  findings?: number;      // findings attributed to this service
+  flagged?: string;       // short note when notable: outdated · exposed · edge · out-of-scope
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -146,4 +165,5 @@ export interface ConsoleData {
   agents: Agent[];
   activity: ActivityEvent[];
   assets: Asset[];
+  services: Service[];
 }

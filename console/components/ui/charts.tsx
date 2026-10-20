@@ -13,21 +13,24 @@ export function Donut({
   const r = (size - thickness) / 2;
   const C = 2 * Math.PI * r;
   const cx0 = size / 2;
+  const segs = data.filter((d) => d.value > 0);
+  const GAP = segs.length > 1 ? thickness * 1.3 : 0;
   let offset = 0;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
       <circle cx={cx0} cy={cx0} r={r} fill="none" strokeWidth={thickness} className="stroke-line" />
       {total > 0 &&
-        data.filter((d) => d.value > 0).map((d, i) => {
-          const len = (d.value / total) * C;
+        segs.map((d, i) => {
+          const frac = (d.value / total) * C;
+          const len = Math.max(1, frac - GAP);
           const seg = (
             <circle
               key={i} cx={cx0} cy={cx0} r={r} fill="none" stroke={d.color} strokeWidth={thickness}
               strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-offset}
-              transform={`rotate(-90 ${cx0} ${cx0})`} strokeLinecap="butt"
+              transform={`rotate(-90 ${cx0} ${cx0})`} strokeLinecap="round"
             />
           );
-          offset += len;
+          offset += frac;
           return seg;
         })}
       <text x={cx0} y={cx0 - 2} textAnchor="middle" className="fill-fg" fontSize={size * 0.19} fontWeight={700}>
