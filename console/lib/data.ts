@@ -218,6 +218,17 @@ export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
   return assets;
 }
 
+/** Pick a sensible org-root label for the asset map (the shared parent domain). */
+export function hostRoot(services: Service[], fallback: string): string {
+  const hosts = Array.from(new Set(services.map((s) => s.host).filter(Boolean)));
+  if (hosts.length === 1) return hosts[0];
+  if (hosts.length > 1) {
+    const apex = hosts[0].split(".").slice(-2).join(".");
+    if (hosts.every((h) => h.split(".").slice(-2).join(".") === apex)) return apex;
+  }
+  return fallback || hosts[0] || "target";
+}
+
 /** Overlay real reportable-finding counts onto assets (host + endpoint match). */
 export function overlayAssetFindings(assets: Asset[], findings: Finding[]): Asset[] {
   if (!assets.length) return assets;
