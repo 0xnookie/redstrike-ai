@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Building2, Globe, Server, Network, Radio, Link2, Plus, Minus, Maximize2, type LucideIcon } from "lucide-react";
-import type { Asset, AssetKind, Service } from "@/lib/types";
-import { COVERAGE } from "@/lib/theme";
-import { cx } from "@/lib/format";
+import type { Asset, AssetKind, Service, Finding } from "@/lib/types";
+import { COVERAGE, SEVERITY } from "@/lib/theme";
+import { cx, hostOf } from "@/lib/format";
 
 type NodeKind = AssetKind | "org";
 interface GNode {
@@ -25,28 +25,36 @@ const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const baseR = (k: NodeKind) =>
   k === "org" ? 28 : k === "domain" ? 23 : k === "subdomain" ? 20 : k === "ip" || k === "cidr" ? 18 : k === "service" ? 16 : 15;
 
-export function AssetMap({ assets, orgName, services = [], onSelectHost, selectedHost }: { assets: Asset[]; orgName: string; services?: Service[]; onSelectHost?: (host: string) => void; selectedHost?: string }) {
+export function AssetMap({ assets, orgName, services = [], findings = [], onSelectHost, selectedHost }: { assets: Asset[]; orgName: string; services?: Service[]; findings?: Finding[]; onSelectHost?: (host: string) => void; selectedHost?: string }) {
   const { nodes, edges } = useMemo(() => buildGraph(assets, orgName), [assets, orgName]);
   const positioned = useMemo(() => layout(nodes, edges), [nodes, edges]);
 
-  // open-port risk per host (from host discovery): exposed/findings → high, outdated/finding → elevated
+  // per-host risk: worst finding severity on the host + service posture (exposed/outdated)
   const hostRisk = useMemo(() => {
-    const agg = new Map<string, { findings: number; open: number; exposed: boolean; outdated: boolean }>();
+    const agg = new Map<string, { open: number; exposed: boolean; outdated: boolean }>();
     for (const s of services) {
       if (s.flagged === "out-of-scope") continue;
-      const a = agg.get(s.host) ?? { findings: 0, open: 0, exposed: false, outdated: false };
-      a.findings += s.findings ?? 0;
+      const a = agg.get(s.host) ?? { open: 0, exposed: false, outdated: false };
       if (s.state === "open") a.open += 1;
       if (s.flagged === "exposed") a.exposed = true;
       if (s.flagged === "outdated") a.outdated = true;
       agg.set(s.host, a);
     }
+    const sev = new Map<string, number>(); // max severity rank per host
+    for (const f of findings) {
+      if (f.composite) continue;
+      const host = hostOf(f.asset);
+      sev.set(host, Math.max(sev.get(host) ?? 0, SEVERITY[f.severity]?.rank ?? 0));
+    }
     const m = new Map<string, { level: "high" | "medium" | "low"; open: number }>();
-    agg.forEach((a, host) =>
-      m.set(host, { level: a.exposed || a.findings >= 5 ? "high" : a.outdated || a.findings >= 1 ? "medium" : "low", open: a.open })
-    );
+    new Set<string>([...agg.keys(), ...sev.keys()]).forEach((host) => {
+      const a = agg.get(host) ?? { open: 0, exposed: false, outdated: false };
+      const r = sev.get(host) ?? 0;
+      const level = a.exposed || r >= 4 ? "high" : a.outdated || r >= 1 ? "medium" : "low";
+      m.set(host, { level, open: a.open });
+    });
     return m;
-  }, [services]);
+  }, [services, findings]);
 
   const [view, setView] = useState({ tx: 0, ty: 0, s: 1 });
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
