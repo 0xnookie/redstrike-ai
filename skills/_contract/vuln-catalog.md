@@ -81,8 +81,16 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **HTTP parameter pollution** | A03/A05 | single | — | `parameter-pollution` ✅ (dup/polluted params across URL/body/JSON/cookie/header; gateway-vs-backend precedence flip) | ✅ |
 | **WAF / filter bypass** | — | single (capability) | — | `waf-bypass` ✅ (fingerprint + tuned evasion ladder; feeds the vuln agents; review-only, no findings) | ✅ |
 | **Exposed surface / sensitive files** | A05/A01 | single | — | `exposed-surface` ✅ (active dir/file/param fuzzing → signature-confirmed exposures: VCS `/.git`, backups, `.env`/config, data dumps, directory listing, debug/actuator panels, nuclei info-leaks; de-duped vs `secrets`/`security-headers`/`privesc`) | ✅ |
+| **Framework-specific exploitation** | A06 Vulnerable & Outdated Components | family (base+agents) | `framework-base` ✅ (shared executor pipeline: fingerprint → version-pin → surface enum → version-matched CVE → benign confirm → counterevidence) | `wordpress` ✅ (core · plugins · themes · xmlrpc · REST · users · exposure) · `nextjs` ✅ (middleware CVE-2025-29927 · image-optimizer SSRF · RSC/cache · source maps · data routes) — clone the base for drupal/joomla/laravel/spring/…; **specializes `cve-intelligence`** (deep per-stack recon + ecosystem) | ✅ |
 
 ## Notes
+- **Framework agents** (`wordpress`, `nextjs`, …) are Tier-2 executors that **specialize `cve-intelligence`**
+  (generic SBOM→CVE) for ONE stack: they own the CORE framework + its ecosystem (plugins/themes/middleware) +
+  framework-specific misconfigs; generic third-party libraries stay with `cve-intelligence`. They inherit
+  [`framework-base.md`](framework-base.md) exactly as single-class hunters inherit `hunter-base.md` — a new
+  stack is a thin clone (fingerprint signals + surface checklist + CVE focus + tool + chains). Benign version/
+  behaviour confirmation only; real exploitation defers to `exploit-generator` (approval-gated). De-dupe vs
+  `cve-intelligence` (generic libs) + `exposed-surface` (file/VCS exposure) + `secrets`.
 - Families are built **feeder-first**; a variant is worthless without its context artifact.
 - A category that starts atomic can grow into a family later — split when a second confirmation
   method appears (that is exactly how XSS earned four agents).
