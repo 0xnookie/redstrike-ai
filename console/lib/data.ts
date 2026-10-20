@@ -2,7 +2,7 @@
 // backend (the Claude Code skills produce the real JSON into the engagement dir).
 // `example.com` is reserved for documentation. Findings mirror the finding.schema.json.
 
-import type { ConsoleData, Engagement, Finding, AttackChain, Agent, ActivityEvent, Asset } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Agent, ActivityEvent, Asset, Service } from "./types";
 
 const ENG = "acme-corp-2026-10";
 
@@ -306,6 +306,24 @@ export const assets: Asset[] = [
   mkAsset("as-ep6", "/account/email", "endpoint", "in", "tested", 1, ["POST"], "app.example.com"),
 ];
 
+// ---- open ports + services (from host-discovery / host_discovery.json) ----
+export const services: Service[] = [
+  { id: "sv-01", host: "www.example.com", ip: "203.0.113.10", port: 80, proto: "tcp", service: "http", product: "nginx", version: "1.25.3", state: "open", title: "Acme Corp", findings: 0 },
+  { id: "sv-02", host: "www.example.com", ip: "203.0.113.10", port: 443, proto: "tcp", service: "https", product: "nginx", version: "1.25.3", state: "open", tls: "TLS 1.3", title: "Acme Corp", findings: 3 },
+  { id: "sv-03", host: "api.example.com", ip: "203.0.113.11", port: 443, proto: "tcp", service: "https", product: "Express", version: "4.17.1", state: "open", tls: "TLS 1.3", title: "Acme API v2", findings: 6, flagged: "outdated" },
+  { id: "sv-04", host: "api.example.com", ip: "203.0.113.11", port: 80, proto: "tcp", service: "http", product: "nginx", version: "1.25.3", state: "open", title: "301 → https", findings: 0 },
+  { id: "sv-05", host: "app.example.com", ip: "203.0.113.12", port: 443, proto: "tcp", service: "https", product: "Apache Tomcat", version: "9.0.71", state: "open", tls: "TLS 1.2", title: "Acme App", findings: 5 },
+  { id: "sv-06", host: "app.example.com", ip: "203.0.113.12", port: 8080, proto: "tcp", service: "http-proxy", product: "Apache Tomcat", version: "9.0.71", state: "open", title: "Manager console", findings: 0, flagged: "exposed" },
+  { id: "sv-07", host: "shop.example.com", ip: "203.0.113.13", port: 443, proto: "tcp", service: "https", product: "Apache httpd", version: "2.4.57", state: "open", tls: "TLS 1.3", title: "Acme Shop", findings: 0 },
+  { id: "sv-08", host: "203.0.113.24", ip: "203.0.113.24", port: 22, proto: "tcp", service: "ssh", product: "OpenSSH", version: "8.9p1", state: "open", findings: 0, flagged: "exposed" },
+  { id: "sv-09", host: "203.0.113.24", ip: "203.0.113.24", port: 3306, proto: "tcp", service: "mysql", product: "MySQL", version: "8.0.34", state: "filtered", findings: 0 },
+  { id: "sv-10", host: "vpn.example.com", ip: "203.0.113.25", port: 443, proto: "tcp", service: "https", product: "SSL-VPN portal", state: "open", tls: "TLS 1.2", title: "VPN login", findings: 0, flagged: "edge" },
+  { id: "sv-11", host: "vpn.example.com", ip: "203.0.113.25", port: 500, proto: "udp", service: "isakmp", product: "IKE", state: "open", findings: 0, flagged: "edge" },
+  { id: "sv-12", host: "mail.example.com", ip: "203.0.113.14", port: 25, proto: "tcp", service: "smtp", product: "Postfix", version: "3.7.4", state: "open", findings: 0 },
+  { id: "sv-13", host: "mail.example.com", ip: "203.0.113.14", port: 993, proto: "tcp", service: "imaps", product: "Dovecot", state: "open", tls: "TLS 1.3", findings: 0 },
+  { id: "sv-14", host: "admin.example.com", ip: "203.0.113.205", port: 443, proto: "tcp", service: "https", product: "Element-UI", state: "open", tls: "TLS 1.2", title: "Admin", findings: 0, flagged: "out-of-scope" },
+];
+
 export const sampleData: ConsoleData = {
   engagements,
   activeEngagementId: ENG,
@@ -314,4 +332,5 @@ export const sampleData: ConsoleData = {
   agents,
   activity,
   assets,
+  services,
 };

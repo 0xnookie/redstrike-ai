@@ -67,7 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-fg/40 bg-card px-10 py-8 shadow-pop">
             <Upload className="text-fg" size={28} />
-            <p className="text-sm font-medium">Drop findings_consolidated.json, scope.json or attack_chains.json</p>
+            <p className="text-sm font-medium">Drop findings_consolidated.json, scope.json, host_discovery.json or attack_chains.json</p>
             <p className="text-xs text-muted">Files are routed by shape — any combination works</p>
           </div>
         </div>
