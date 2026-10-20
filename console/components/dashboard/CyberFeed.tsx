@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Card } from "@/components/ui/primitives";
+import { Card, Dot } from "@/components/ui/primitives";
 import { fmtDate } from "@/lib/format";
 import { SEVERITY } from "@/lib/theme";
 import type { CveFeed, CveItem, Severity } from "@/lib/types";
@@ -32,7 +32,7 @@ function sevOf(it: CveItem): Severity | undefined {
  * feed is data the console renders; it names no external source. A live deployment
  * can override the demo feed by serving `cve_feed.json` next to the console.
  */
-export function CyberFeed({ feed }: { feed?: CveFeed }) {
+export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boolean }) {
   if (!feed) return null;
   const items = feed.items ?? [];
 
@@ -40,7 +40,15 @@ export function CyberFeed({ feed }: { feed?: CveFeed }) {
     <Card className="overflow-hidden p-0">
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <h2 className="text-sm font-semibold">What&apos;s New in Cyber</h2>
-        <span className="text-[11px] text-muted">Updated {fmtDate(feed.generated_at)}</span>
+        <div className="flex items-center gap-2 text-[11px] text-muted">
+          {live ? (
+            <span className="inline-flex items-center gap-1.5 font-medium text-fg"><Dot color="#22c55e" pulse /> Live</span>
+          ) : (
+            <span>Demo feed</span>
+          )}
+          <span className="text-muted/60">·</span>
+          <span>Updated {fmtDate(feed.generated_at)}</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2">

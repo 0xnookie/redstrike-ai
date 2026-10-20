@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConsoleData, Engagement, Finding, AttackChain, Service, TestRun, CveFeed } from "./types";
 import { sampleData } from "./data";
+import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 
 type Mode = "demo" | "live";
 
@@ -23,6 +24,8 @@ interface ConsoleCtx {
   tests: TestRun[];
   /** global CVE feed for "What's New in Cyber" (not engagement-scoped) */
   cveFeed: CveFeed | undefined;
+  /** true once the live CVE feed has been fetched (vs the bundled snapshot / a pinned file) */
+  cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
   resetDemo: () => void;
   /** finding detail drawer, lifted to the app so it opens from any view (and the ⌘K palette) */
@@ -44,6 +47,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const openFinding = useCallback((f: Finding) => setSelectedFinding(f), []);
   const closeFinding = useCallback(() => setSelectedFinding(null), []);
   const [findingsQuery, setFindingsQuery] = useState("");
+  const [cveLive, setCveLive] = useState(false);
+  const cvePinnedRef = useRef(false); // a served cve_feed.json pins the feed (disables live fetch)
+  const cveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const activeEngagement =
     data.engagements.find((e) => e.id === activeId) ?? data.engagements[0];
@@ -83,6 +89,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         }
         // cve_feed.json → { generated_at, count_7d, count_30d, items: [...] }
         if (Array.isArray(o.items) && (o.count_7d != null || o.count_30d != null || o.generated_at != null)) {
+          cvePinnedRef.current = true; // explicit feed file wins over the live fetch
           setData((d) => ({ ...d, cveFeed: o as unknown as CveFeed }));
           return "cve_feed";
         }
@@ -186,7 +193,26 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
           /* missing / not JSON — ignore */
         }
       }
+      // Live CVE feed for "What's New in Cyber" — fetched client-side, refreshed on
+      // an interval. Skipped when a cve_feed.json was served (explicit override).
+      // On failure (offline / CORS / rate-limited) the bundled snapshot stays.
+      if (!cvePinnedRef.current) {
+        const applyLive = async () => {
+          try {
+            const live = await fetchLiveCveFeed();
+            setData((d) => ({ ...d, cveFeed: live }));
+            setCveLive(true);
+          } catch {
+            /* keep whatever feed we already have */
+          }
+        };
+        await applyLive();
+        if (!cvePinnedRef.current) cveTimer.current = setInterval(applyLive, CVE_FEED.refreshMs);
+      }
     })();
+    return () => {
+      if (cveTimer.current) clearInterval(cveTimer.current);
+    };
   }, [classify]);
 
   const value: ConsoleCtx = {
@@ -203,6 +229,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     services: data.services,
     tests,
     cveFeed: data.cveFeed,
+    cveLive,
     loadFiles,
     resetDemo,
     selectedFinding,
