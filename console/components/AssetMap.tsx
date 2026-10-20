@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Building2, Globe, Server, Network, Radio, Link2, Plus, Minus, Maximize2, type LucideIcon } from "lucide-react";
 import type { Asset, AssetKind, Service } from "@/lib/types";
 import { COVERAGE } from "@/lib/theme";
+import { cx } from "@/lib/format";
 
 type NodeKind = AssetKind | "org";
 interface GNode {
@@ -24,7 +25,7 @@ const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const baseR = (k: NodeKind) =>
   k === "org" ? 28 : k === "domain" ? 23 : k === "subdomain" ? 20 : k === "ip" || k === "cidr" ? 18 : k === "service" ? 16 : 15;
 
-export function AssetMap({ assets, orgName, services = [] }: { assets: Asset[]; orgName: string; services?: Service[] }) {
+export function AssetMap({ assets, orgName, services = [], onSelectHost, selectedHost }: { assets: Asset[]; orgName: string; services?: Service[]; onSelectHost?: (host: string) => void; selectedHost?: string }) {
   const { nodes, edges } = useMemo(() => buildGraph(assets, orgName), [assets, orgName]);
   const positioned = useMemo(() => layout(nodes, edges), [nodes, edges]);
 
@@ -97,11 +98,23 @@ export function AssetMap({ assets, orgName, services = [] }: { assets: Asset[]; 
           const risk = hk ? hostRisk.get(hk) : undefined;
           const ringColor = risk && risk.level !== "low" ? (risk.level === "high" ? "#ef4444" : "#f59e0b") : undefined;
           const showPorts = !!risk && risk.open > 0 && (n.kind === "subdomain" || n.kind === "ip" || n.kind === "domain");
+          const clickable = !!hk && !!onSelectHost;
+          const selected = !!hk && hk === selectedHost;
+          const ringParts: string[] = [];
+          if (ringColor) ringParts.push("0 0 0 2.5px rgb(var(--card2))", `0 0 0 5px ${ringColor}`);
+          if (selected) { const g = ringColor ? 7 : 2.5, o = ringColor ? 9.5 : 5; ringParts.push(`0 0 0 ${g}px rgb(var(--card2))`, `0 0 0 ${o}px rgb(var(--fg))`); }
           return (
-            <div key={n.id} className="absolute flex flex-col items-center" style={{ left: n.x, top: n.y, transform: "translate(-50%,-50%)" }}>
+            <div
+              key={n.id}
+              className={cx("group absolute flex flex-col items-center", clickable && "cursor-pointer")}
+              style={{ left: n.x, top: n.y, transform: "translate(-50%,-50%)" }}
+              onMouseDown={clickable ? (e) => e.stopPropagation() : undefined}
+              onClick={clickable ? () => onSelectHost!(hk!) : undefined}
+              title={hk}
+            >
               <div
-                className="relative grid place-items-center rounded-full"
-                style={{ width: n.r * 2, height: n.r * 2, background: st.bg, border: st.border, color: st.icon, boxShadow: ringColor ? `0 0 0 2.5px rgb(var(--card2)), 0 0 0 5px ${ringColor}` : undefined }}
+                className={cx("relative grid place-items-center rounded-full transition-transform", clickable && "group-hover:scale-110", selected && "scale-110")}
+                style={{ width: n.r * 2, height: n.r * 2, background: st.bg, border: st.border, color: st.icon, boxShadow: ringParts.length ? ringParts.join(", ") : undefined }}
               >
                 <Icon size={Math.round(n.r * 0.85)} strokeWidth={1.75} />
                 {showPorts && (
@@ -142,7 +155,7 @@ export function AssetMap({ assets, orgName, services = [] }: { assets: Asset[]; 
           <Swatch label="Elevated — outdated" style={{ background: "transparent", border: "2px solid #f59e0b" }} />
           <div className="flex items-center gap-2"><span className="grid h-3.5 w-3.5 place-items-center rounded-full border border-line bg-card text-[7px] font-semibold text-fg">n</span>open ports</div>
         </div>
-        <p className="mt-2 border-t border-line pt-2 text-[10px] text-muted">Force-directed · drag to pan, scroll to zoom.</p>
+        <p className="mt-2 border-t border-line pt-2 text-[10px] text-muted">Force-directed · drag to pan, scroll to zoom · click a host to filter ports.</p>
       </div>
 
       {/* zoom controls */}
