@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service } from "./types";
 import { sampleData } from "./data";
 
 type Mode = "demo" | "live";
@@ -18,6 +18,7 @@ interface ConsoleCtx {
   agents: ConsoleData["agents"];
   activity: ConsoleData["activity"];
   assets: ConsoleData["assets"];
+  services: ConsoleData["services"];
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
   resetDemo: () => void;
   /** finding detail drawer, lifted to the app so it opens from any view (and the ⌘K palette) */
@@ -58,6 +59,30 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       }
       if (json && typeof json === "object") {
         const o = json as Record<string, unknown>;
+        // host_discovery.json → flatten hosts[].ports[] into the services table
+        if (Array.isArray(o.hosts)) {
+          const services: Service[] = [];
+          (o.hosts as any[]).forEach((h, hi) => {
+            const ports = Array.isArray(h?.ports) ? h.ports : [];
+            ports.forEach((p: any, pi: number) => services.push({
+              id: `svc-${hi}-${pi}`,
+              host: h?.host ?? h?.hostname ?? String(h?.ip ?? ""),
+              ip: h?.ip,
+              port: Number(p?.port),
+              proto: p?.proto ?? p?.protocol ?? "tcp",
+              service: p?.service ?? p?.name ?? "?",
+              product: p?.product,
+              version: p?.version,
+              state: p?.state ?? "open",
+              tls: p?.tls,
+              title: h?.title,
+              findings: 0,
+            }));
+          });
+          setData((d) => ({ ...d, services }));
+          setMode("live");
+          return "host_discovery";
+        }
         if (Array.isArray(o.chains)) {
           setData((d) => ({ ...d, chains: o.chains as AttackChain[] }));
           return "chains";
@@ -128,6 +153,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     agents: data.agents,
     activity: data.activity,
     assets: data.assets,
+    services: data.services,
     loadFiles,
     resetDemo,
     selectedFinding,

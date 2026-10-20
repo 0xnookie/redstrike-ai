@@ -5,11 +5,11 @@ import Link from "next/link";
 import { Plus, ArrowUpRight, Bug, ShieldCheck, Workflow, Network } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { reportable, severityCounts, severityChartData, groupByCategory, groupByAsset, verificationStats, maxCvss } from "@/lib/stats";
-import { SEVERITY, SEVERITY_ORDER, VERDICT, sevMeta } from "@/lib/theme";
+import { SEVERITY, SEVERITY_ORDER, VERDICT, sevMeta, ENGAGEMENT_STATUS } from "@/lib/theme";
 import { fmtDate, relTime, cx, verdictOf } from "@/lib/format";
 import { cvssScore } from "@/lib/cvss";
-import type { Finding } from "@/lib/types";
-import { Card, Kpi, PageHeader, SeverityBadge, Pill, Segmented } from "@/components/ui/primitives";
+import type { Finding, Severity } from "@/lib/types";
+import { Card, Kpi, PageHeader, SeverityBadge, Pill, Segmented, Dot } from "@/components/ui/primitives";
 import { Donut, Legend, HBars, StackedBars, Progress } from "@/components/ui/charts";
 import { ACTIVITY_ICON } from "@/components/activityIcons";
 
@@ -22,6 +22,8 @@ export default function DashboardPage() {
   const sevData = severityChartData(rep);
   const vstats = verificationStats(findings.filter((f) => !f.composite));
   const inScopeAssets = assets.filter((a) => a.scope === "in").length;
+  const estat = ENGAGEMENT_STATUS[activeEngagement.status];
+  const posture: Severity = counts.critical ? "critical" : counts.high ? "high" : counts.medium ? "medium" : counts.low ? "low" : "info";
 
   // findings-over-time (by reviewer date), stacked by severity
   const byDay = new Map<string, Record<string, number>>();
@@ -36,15 +38,35 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        subtitle={`${activeEngagement.name} · global status`}
-        actions={
-          <Link href="/engagements" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-card px-3 text-sm font-medium transition hover:border-brand/40">
-            <Plus size={15} /> New engagement
-          </Link>
-        }
-      />
+      {/* hero */}
+      <div className="surface relative mb-5 overflow-hidden rounded-2xl border border-line bg-card">
+        <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(42rem 22rem at 100% -40%, rgb(var(--fg) / 0.06), transparent 60%)" }} />
+        <div className="relative flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted">
+              <Dot color={estat.color} pulse={activeEngagement.status === "running"} /> {estat.label} engagement
+            </div>
+            <h1 className="mt-1.5 truncate text-2xl font-semibold tracking-tight">{activeEngagement.name}</h1>
+            <p className="mt-0.5 line-clamp-1 max-w-2xl text-sm text-muted">{activeEngagement.goal}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            <div className="flex items-center gap-3 rounded-xl border border-line bg-card2 px-4 py-2.5">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted">Peak risk</div>
+                <div className="text-sm font-semibold" style={{ color: sevMeta(posture).color }}>{SEVERITY[posture].label}</div>
+              </div>
+              <div className="h-8 w-px bg-line" />
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted">Max CVSS</div>
+                <div className="text-sm font-semibold tabular-nums" style={{ color: sevMeta(posture).color }}>{maxCvss(rep).toFixed(1)}</div>
+              </div>
+            </div>
+            <Link href="/engagements" className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-card px-3 text-sm font-medium transition hover:border-fg/30">
+              <Plus size={15} /> New
+            </Link>
+          </div>
+        </div>
+      </div>
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
