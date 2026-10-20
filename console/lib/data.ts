@@ -2,7 +2,7 @@
 // backend (the Claude Code skills produce the real JSON into the engagement dir).
 // `example.com` is reserved for documentation. Findings mirror the finding.schema.json.
 
-import type { ConsoleData, Engagement, Finding, AttackChain, Agent, ActivityEvent, Asset, Service } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Agent, ActivityEvent, Asset, Service, TestRun, CveFeed, Severity } from "./types";
 
 const ENG = "acme-corp-2026-10";
 
@@ -324,6 +324,76 @@ export const services: Service[] = [
   { id: "sv-14", host: "admin.example.com", ip: "203.0.113.205", port: 443, proto: "tcp", service: "https", product: "Element-UI", state: "open", tls: "TLS 1.2", title: "Admin", findings: 0, flagged: "out-of-scope" },
 ];
 
+// ---- testing activity (pentest runs across the year, feeds the heatmap) ----
+// Deterministic (seeded LCG) so server prerender and client hydration agree.
+function genTests(): TestRun[] {
+  const profiles = [
+    "Full web assessment", "XSS hunt", "API authz sweep", "SQLi deep-dive",
+    "SSRF + cloud", "Recon + discovery", "Auth & session", "CVE triage",
+    "Access-control review", "Framework fingerprint",
+  ];
+  const targets = ["app.example.com", "api.example.com", "www.example.com", "shop.example.com", "vpn.example.com"];
+  const sevs: Severity[] = ["info", "low", "medium", "high", "critical"];
+  let s = 20261012 >>> 0;
+  const rnd = () => ((s = (Math.imul(s, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff);
+  const pick = <T,>(arr: T[]) => arr[Math.floor(rnd() * arr.length)];
+
+  const out: TestRun[] = [];
+  const yearStart = Date.UTC(2026, 0, 1);
+  const lastDoy = 292; // ~Oct 20
+  for (let doy = 5; doy <= lastDoy; doy++) {
+    const date = new Date(yearStart + doy * 86_400_000);
+    const dow = date.getUTCDay();
+    const weekend = dow === 0 || dow === 6;
+    // ramp activity up over the year; sparser on weekends
+    const base = 0.22 + (doy / lastDoy) * 0.4;
+    if (rnd() > (weekend ? base * 0.3 : base)) continue;
+    const runs = 1 + Math.floor(rnd() * (weekend ? 1.4 : 2.6));
+    for (let k = 0; k < runs; k++) {
+      const f = rnd() < 0.5 ? 0 : 1 + Math.floor(rnd() * 5);
+      const topSeverity = f ? sevs[Math.min(4, Math.floor(rnd() * rnd() * 5))] : undefined;
+      out.push({
+        id: `T-${doy}-${k}`,
+        target: pick(targets),
+        profile: pick(profiles),
+        status: "completed",
+        startedAt: new Date(date.getTime() + (8 + k * 2) * 3_600_000 + Math.floor(rnd() * 3_000_000)).toISOString(),
+        durationMin: 8 + Math.floor(rnd() * 190),
+        findings: f,
+        topSeverity,
+      });
+    }
+  }
+  // a couple of fresh runs tied to the active engagement
+  out.push(
+    { id: "T-live-1", target: "api.example.com", profile: "BOLA / IDOR sweep", status: "running", startedAt: "2026-10-20T09:35:00Z", findings: 2, topSeverity: "high" },
+    { id: "T-live-2", target: "app.example.com", profile: "Framework fingerprint", status: "completed", startedAt: "2026-10-20T08:10:00Z", durationMin: 24, findings: 1, topSeverity: "medium" },
+  );
+  return out;
+}
+export const tests: TestRun[] = genTests();
+
+// ---- global CVE feed ("What's New in Cyber") — demo snapshot; names no source ----
+export const cveFeed: CveFeed = {
+  generated_at: "2026-10-20T12:00:00Z",
+  count_7d: 5350,
+  count_30d: 14944,
+  items: [
+    { id: "CVE-2026-9589", summary: "Missing authorization in the configuration cascade operations of a collaboration server allows an unauthenticated actor to alter server settings.", severity: "critical", cvss: 9.1, published: "2026-10-20" },
+    { id: "CVE-2026-9571", summary: "Unauthenticated deserialization in a reporting module leads to remote code execution on the host.", severity: "critical", cvss: 9.8, published: "2026-10-20" },
+    { id: "CVE-2026-9560", summary: "An identity provider exposes an unauthenticated endpoint under /v5/ that discloses tenant metadata.", severity: "medium", cvss: 4.3, published: "2026-10-20" },
+    { id: "CVE-2026-9548", summary: "A fast-tunnel service mishandles a crafted frame, allowing a denial-of-service of the forwarding process.", severity: "medium", cvss: 6.3, published: "2026-10-19" },
+    { id: "CVE-2026-9533", summary: "A content-management platform contains a missing authentication check in its file module that allows unauthorized file read.", severity: "high", cvss: 7.5, published: "2026-10-19" },
+    { id: "CVE-2026-9521", summary: "Improper authorization lets a pull-request commenter trigger privileged automation in a CI integration.", severity: "low", cvss: 3.5, published: "2026-10-19" },
+    { id: "CVE-2026-9507", summary: "Reflected cross-site scripting in the search parameter of an admin console.", severity: "medium", cvss: 6.1, published: "2026-10-18" },
+    { id: "CVE-2026-9495", summary: "Server-side request forgery in an image-proxy endpoint reaches internal metadata services.", severity: "high", cvss: 8.2, published: "2026-10-18" },
+    { id: "CVE-2026-9482", summary: "A router firmware ships a hardcoded maintenance credential reachable over the LAN management port.", severity: "critical", cvss: 9.0, published: "2026-10-18" },
+    { id: "CVE-2026-9470", summary: "Path traversal in a document-download handler permits reading files outside the intended directory.", severity: "high", cvss: 7.5, published: "2026-10-17" },
+    { id: "CVE-2026-9458", summary: "Weak session-token entropy allows prediction of authenticated session identifiers.", severity: "medium", cvss: 5.9, published: "2026-10-17" },
+    { id: "CVE-2026-9441", summary: "An exposed debug actuator discloses environment variables including backend connection strings.", severity: "high", cvss: 7.1, published: "2026-10-16" },
+  ],
+};
+
 export const sampleData: ConsoleData = {
   engagements,
   activeEngagementId: ENG,
@@ -333,4 +403,6 @@ export const sampleData: ConsoleData = {
   activity,
   assets,
   services,
+  tests,
+  cveFeed,
 };
