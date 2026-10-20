@@ -17,7 +17,7 @@ import { RecentTests } from "@/components/dashboard/RecentTests";
 import { CyberFeed } from "@/components/dashboard/CyberFeed";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity, tests, cveFeed, openFinding } = useConsole();
+  const { activeEngagement, findings, chains, assets, activity, tests, cveFeed, cveLive, openFinding } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
 
   const rep = reportable(findings);
@@ -217,7 +217,7 @@ export default function DashboardPage() {
 
       {/* what's new in cyber */}
       <div className="mt-3">
-        <CyberFeed feed={cveFeed} />
+        <CyberFeed feed={cveFeed} live={cveLive} />
       </div>
     </>
   );
