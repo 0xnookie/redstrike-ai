@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "serve": "python ../scripts/console.py ../samples/acme-demo"
   },
   "dependencies": {
     "lucide-react": "0.454.0",

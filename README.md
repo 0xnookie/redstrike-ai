@@ -44,10 +44,11 @@ The problem with LLM-driven offensive tooling is two failure modes: it **halluci
 
 ## 🖥️ Console
 
-A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the same `findings_consolidated.json` / `attack_chains.json` / `scope.json` the skills emit (or starts on bundled demo data), scores CVSS 3.1 in-browser to match `scripts/cvss.py`, and keeps composite kill-chains out of the severity counts. Built with **Next.js + TypeScript + Tailwind**.
+A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the same `findings_consolidated.json` / `host_discovery.json` / `scope.json` / `attack_chains.json` the skills emit — point `scripts/console.py` at a real engagement dir and it auto-loads them (or it starts on bundled demo data). It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
 
 ```sh
-cd console && npm install && npm run dev   # → http://localhost:3000
+cd console && npm install && npm run dev                             # dev · demo data
+npm run build && python ../scripts/console.py ../samples/acme-demo   # serve a live engagement
 ```
 
 <p align="center">
