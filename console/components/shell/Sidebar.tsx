@@ -37,8 +37,8 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
 export function Logo() {
   return (
     <div className="flex items-center" title="Redstrike">
-      <span className="font-pixel text-[12px] leading-none tracking-wide text-fg">REDSTRIKE</span>
-      <span className="ml-1 inline-block h-[11px] w-[6px] animate-pulse bg-fg" aria-hidden />
+      <span className="crisp-pixels font-pixel text-[13px] leading-none tracking-[0.03em] text-fg">REDSTRIKE</span>
+      <span className="ml-1 inline-block h-[13px] w-[7px] animate-pulse" style={{ background: "#ef4444" }} aria-hidden />
     </div>
   );
 }

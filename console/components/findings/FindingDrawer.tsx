@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, Copy, Check } from "lucide-react";
 import type { Finding } from "@/lib/types";
 import { cvssScore } from "@/lib/cvss";
 import { sevMeta, VERDICT } from "@/lib/theme";
@@ -15,6 +15,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>
       <div className="text-sm leading-relaxed">{children}</div>
     </div>
+  );
+}
+
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard?.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1200); }}
+      className="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-muted transition hover:text-fg"
+      title={`Copy ${label ?? "to clipboard"}`}
+    >
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+      {copied ? "Copied" : label ?? "Copy"}
+    </button>
   );
 }
 
@@ -49,7 +63,7 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
               <ConfidenceBadge confidence={f.confidence} />
             </div>
             <h2 className="mt-2 text-lg font-semibold leading-tight">{f.title}</h2>
-            <div className="mt-0.5 font-mono text-xs text-muted">{f.id}</div>
+            <div className="mt-1 flex items-center gap-2 font-mono text-xs text-muted">{f.id}<CopyButton text={f.id} /></div>
             {f.potential_severity && f.potential_severity !== f.severity && (
               <div className="mt-2 flex items-center gap-2 text-xs">
                 Demonstrated <SeverityBadge severity={f.severity} dot={false} /> · potential{" "}
@@ -68,6 +82,7 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
               {score === null ? "?" : score.toFixed(1)}
             </span>
             <code className="ml-2 break-all text-xs text-muted">{f.cvss_vector}</code>
+            <span className="ml-2 inline-block align-middle"><CopyButton text={f.cvss_vector} label="vector" /></span>
           </Field>
         )}
         <Field label="Affected asset"><code className="break-all rounded bg-card2 px-1.5 py-0.5 text-xs">{f.asset}</code></Field>
