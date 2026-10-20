@@ -20,6 +20,11 @@ export const CVE_FEED = {
   refreshMs: 15 * 60 * 1000, // re-poll every 15 min
 };
 
+/** Authoritative record page for a CVE id (full CVSS vector, references, CPEs). */
+export function cveRecordUrl(id: string): string {
+  return `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(id)}`;
+}
+
 const SEV_MAP: Record<string, Severity> = {
   CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low", NONE: "info",
 };
