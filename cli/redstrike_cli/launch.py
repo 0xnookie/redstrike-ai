@@ -214,6 +214,31 @@ def gate(prep: Prepared, *, now=None) -> list[str]:
     return problems
 
 
+def launch_console(repo: Path, target: Path | None = None, port: int = 8787,
+                   background: bool = True, open_browser: bool = True,
+                   dry_run: bool = False) -> list[str]:
+    """Start scripts/console.py over the engagements (idempotent, won't stack).
+
+    Returns the argv (handy for --dry-run / tests). Background mode detaches and
+    returns immediately so callers like `run --console` don't block; dry_run only
+    builds the argv.
+    """
+    script = repo / "scripts" / "console.py"
+    tgt = str(target) if target else str(repo / "engagements")
+    argv = [sys.executable, str(script), tgt, "--port", str(port)]
+    if background:
+        argv.append("--background")
+    if open_browser:
+        argv.append("--open")
+    if dry_run:
+        return argv
+    try:
+        subprocess.run(argv, check=False)
+    except FileNotFoundError:
+        print("note: could not launch the console (python / scripts/console.py missing).", file=sys.stderr)
+    return argv
+
+
 def exec_claude(argv: list[str], cwd: Path) -> int:
     try:
         return subprocess.run(argv, cwd=str(cwd), check=False).returncode

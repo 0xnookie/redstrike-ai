@@ -32,7 +32,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -89,26 +88,29 @@ def discover(target: Path) -> list[Path]:
     return engs
 
 
-def gather(engagement: Path, tmp: Path) -> dict:
-    """canonical name -> source Path for one engagement (scope.yaml -> scope.json)."""
+def files_for(engagement: Path) -> dict:
+    """canonical name -> source Path for one engagement (real files on disk only)."""
     files = {}
     for canonical, candidates in WANTED.items():
+        if canonical == "scope.json":
+            continue  # scope is resolved separately (scope.yaml -> JSON in memory)
         for name in candidates:
             hit = _shallowest(engagement, name)
             if hit:
                 files[canonical] = hit
                 break
-    if "scope.json" not in files:
-        sy = engagement / "scope.yaml"
-        if not sy.exists():
-            sy = _shallowest(engagement, "scope.yaml")
-        if sy and sy.exists():
-            scope = scope_yaml_to_json(sy)
-            if scope:
-                dest = tmp / "scope.json"
-                dest.write_text(json.dumps(scope, default=str), encoding="utf-8")
-                files["scope.json"] = dest
     return files
+
+
+def scope_for(engagement: Path):
+    """A scope dict for one engagement: a real scope.json if present, else scope.yaml."""
+    sj = _shallowest(engagement, "scope.json")
+    if sj:
+        return _read_json(sj)
+    sy = engagement / "scope.yaml"
+    if not sy.exists():
+        sy = _shallowest(engagement, "scope.yaml")
+    return scope_yaml_to_json(sy) if (sy and sy.exists()) else None
 
 
 def _read_json(path):
@@ -229,43 +231,76 @@ def _minimal_scope_read(path: Path) -> dict:
     return doc
 
 
-def build_routes(engagements: list[Path], tmp: Path):
-    """Return (routes: url->Path, manifest: dict) for every discovered engagement."""
-    routes = {}
+def manifest_entries(target: Path) -> list:
+    """One entry per discovered engagement — rebuilt live on each request, so a
+    console left running reflects a scan that finished after launch."""
     entries = []
-    for eng in engagements:
-        eid = eng.name
-        sub = tmp / eid
-        sub.mkdir(parents=True, exist_ok=True)
-        files = gather(eng, sub)
-        if not files:
-            continue
-        for canonical, src in files.items():
-            routes[f"/e/{eid}/{canonical}"] = src
+    for eng in discover(target):
+        files = files_for(eng)
         cons = _read_json(files.get("findings_consolidated.json"))
+        scope = scope_for(eng)
+        has = {k: (k in files) for k in WANTED}
+        has["scope.json"] = scope is not None
         entries.append({
-            "id": eid,
-            "scope": _read_json(files.get("scope.json")),
+            "id": eng.name,
+            "scope": scope,
             "summary": summarize(files),
             "generated": (cons.get("generated") if isinstance(cons, dict) else None),
-            "has": {k: (k in files) for k in WANTED},
+            "has": has,
         })
-    manifest = tmp / "engagements.json"
-    manifest.write_text(json.dumps({"engagements": entries}), encoding="utf-8")
-    routes["/engagements.json"] = manifest
-    return routes, entries
+    return entries
 
 
-def make_handler(routes: dict):
+def make_handler(target: Path):
+    def resolve(clean: str):
+        """Return ('json', bytes) | ('file', Path) | None for a dynamic route."""
+        if clean == "/engagements.json":
+            body = json.dumps({"engagements": manifest_entries(target)}, default=str)
+            return ("json", body.encode("utf-8"))
+        if clean.startswith("/e/"):
+            parts = clean[len("/e/"):].split("/", 1)
+            if len(parts) != 2:
+                return None
+            eid, name = parts
+            eng = next((e for e in discover(target) if e.name == eid), None)
+            if not eng:
+                return None
+            if name == "scope.json":
+                scope = scope_for(eng)
+                return ("json", json.dumps(scope, default=str).encode("utf-8")) if scope else None
+            src = files_for(eng).get(name)
+            return ("file", src) if src else None
+        return None
+
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **k):
             super().__init__(*a, directory=str(OUT), **k)
 
-        def translate_path(self, path):
-            clean = path.split("?")[0]
-            if clean in routes:
-                return str(routes[clean])
-            return super().translate_path(path)
+        def _serve_dynamic(self, body_only: bool) -> bool:
+            r = resolve(self.path.split("?")[0])
+            if r is None:
+                return False
+            kind, payload = r
+            try:
+                data = payload if kind == "json" else Path(payload).read_bytes()
+            except OSError:
+                self.send_error(404)
+                return True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if not body_only:
+                self.wfile.write(data)
+            return True
+
+        def do_GET(self):
+            if not self._serve_dynamic(body_only=False):
+                super().do_GET()
+
+        def do_HEAD(self):
+            if not self._serve_dynamic(body_only=True):
+                super().do_HEAD()
 
         def end_headers(self):
             self.send_header("Cache-Control", "no-store")
@@ -277,12 +312,21 @@ def make_handler(routes: dict):
     return Handler
 
 
+def port_in_use(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Serve the Redstrike console against your engagements.")
     ap.add_argument("target", nargs="?", default=str(ROOT / "engagements"),
                     help="an engagement dir, or a directory of engagements (default: engagements/)")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--build", action="store_true", help="force a fresh console build")
+    ap.add_argument("--open", action="store_true", help="open the console in a browser")
+    ap.add_argument("--background", action="store_true", help="start detached, print the URL, and return")
     args = ap.parse_args()
 
     target = Path(args.target).resolve()
@@ -290,29 +334,64 @@ def main() -> int:
         print(f"error: path not found: {target}", file=sys.stderr)
         return 2
 
-    engagements = discover(target)
-    if not engagements:
+    url = f"http://localhost:{args.port}/"
+
+    # idempotent: if something is already serving this port, don't start a second one
+    if port_in_use(args.port):
+        print(f"  console already serving at {url}")
+        if args.open:
+            _open_browser(url, wait_port=args.port)
+        return 0
+
+    if not discover(target):
         print(f"error: no engagements found under {target}", file=sys.stderr)
         return 2
 
-    ensure_build(args.build)
-    tmp = Path(tempfile.mkdtemp(prefix="redstrike-console-"))
-    routes, entries = build_routes(engagements, tmp)
+    # background: re-spawn self detached (so callers like `redstrike run` don't block)
+    if args.background:
+        cmd = [sys.executable, str(Path(__file__).resolve()), str(target), "--port", str(args.port)]
+        if args.build:
+            cmd.append("--build")
+        devnull = open(os.devnull, "wb")
+        subprocess.Popen(cmd, stdout=devnull, stderr=devnull, start_new_session=True)
+        print(f"  console (background) → {url}")
+        if args.open:
+            _open_browser(url, wait_port=args.port)
+        return 0
 
+    ensure_build(args.build)
+    entries = manifest_entries(target)
     print(f"\n  source     : {target}")
     print(f"  engagements: {len(entries)}")
     for e in entries:
         s = e["summary"]
         print(f"    · {e['id']:<40} {s['findings']} findings · {s['chains']} chains")
-    url = f"http://localhost:{args.port}/"
     print(f"\n  console    : {url}\n  (Ctrl+C to stop)\n")
 
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(routes))
+    if args.open:
+        import threading
+        threading.Thread(target=_open_browser, args=(url, args.port), daemon=True).start()
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(target))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped.")
     return 0
+
+
+def _open_browser(url: str, wait_port: int | None = None) -> None:
+    import time
+    import webbrowser
+    if wait_port is not None:
+        for _ in range(100):  # wait up to ~10s for the server to bind
+            if port_in_use(wait_port):
+                break
+            time.sleep(0.1)
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
