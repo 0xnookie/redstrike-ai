@@ -11,12 +11,10 @@ import { cvssScore } from "@/lib/cvss";
 import type { Finding } from "@/lib/types";
 import { Card, Kpi, PageHeader, SeverityBadge, Pill, Segmented } from "@/components/ui/primitives";
 import { Donut, Legend, HBars, StackedBars, Progress } from "@/components/ui/charts";
-import { FindingDrawer } from "@/components/findings/FindingDrawer";
 import { ACTIVITY_ICON } from "@/components/activityIcons";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity } = useConsole();
-  const [selected, setSelected] = useState<Finding | null>(null);
+  const { activeEngagement, findings, chains, assets, activity, openFinding } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
 
   const rep = reportable(findings);
@@ -141,7 +139,7 @@ export default function DashboardPage() {
               const score = cvssScore(f.cvss_vector);
               return (
                 <li key={f.id}>
-                  <button onClick={() => setSelected(f)} className="flex w-full items-center gap-3 py-2.5 text-left transition hover:opacity-80">
+                  <button onClick={() => openFinding(f)} className="flex w-full items-center gap-3 py-2.5 text-left transition hover:opacity-80">
                     <SeverityBadge severity={f.severity} dot />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{f.title}</div>
@@ -183,8 +181,6 @@ export default function DashboardPage() {
           </div>
         </Card>
       </div>
-
-      <FindingDrawer finding={selected} onClose={() => setSelected(null)} />
     </>
   );
 }

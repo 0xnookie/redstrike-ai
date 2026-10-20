@@ -61,6 +61,13 @@ body {
   background-size: 22px 22px;
 }
 
+/* kill font antialiasing so the pixel wordmark renders as hard pixels */
+.crisp-pixels {
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: never;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }

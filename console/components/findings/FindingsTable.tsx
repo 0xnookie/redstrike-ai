@@ -131,7 +131,7 @@ export function FindingsTable({ findings, onSelect }: { findings: Finding[]; onS
                   onClick={() => onSelect(f)}
                   className={cx("cursor-pointer border-t border-line transition hover:bg-card2", v === "rejected" && "opacity-50")}
                 >
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">{f.id}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs" style={{ boxShadow: `inset 3px 0 0 ${sevMeta(f.severity).color}` }}>{f.id}</td>
                   <td className="px-4 py-3"><SeverityBadge severity={f.severity} /></td>
                   <td className="max-w-xs px-4 py-3"><div className="font-medium leading-tight">{f.title}</div></td>
                   <td className="px-4 py-3"><code className="text-xs text-muted">{f.asset}</code></td>
