@@ -9,6 +9,7 @@ import { cvssScore, cvssRating } from "@/lib/cvss";
 import { fmtDate, verdictOf } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { Card, PageHeader, Pill, SeverityBadge } from "@/components/ui/primitives";
+import { RichText } from "@/components/ui/RichText";
 export default function ReportPage() {
   const { activeEngagement: eng, findings, chains, openFinding } = useConsole();
 
@@ -174,8 +175,8 @@ function ReportFinding({ finding: f, onOpen }: { finding: Finding; onOpen: () =>
         {f.category?.owasp && <Pill label={`OWASP ${f.category.owasp}`} color="#60a5fa" />}
         <code className="rounded bg-card2 px-1.5 py-0.5 text-[11px] text-muted">{f.asset}</code>
       </div>
-      {f.impact && <p className="mt-2 text-sm text-muted"><span className="font-medium text-fg">Impact. </span>{f.impact}</p>}
-      {f.remediation && <p className="mt-1 text-sm text-muted"><span className="font-medium text-fg">Remediation. </span>{f.remediation}</p>}
+      {f.impact && <p className="mt-2 text-sm text-muted"><span className="font-medium text-fg">Impact. </span><RichText text={f.impact} /></p>}
+      {f.remediation && <p className="mt-1 text-sm text-muted"><span className="font-medium text-fg">Remediation. </span><RichText text={f.remediation} /></p>}
     </div>
   );
 }
