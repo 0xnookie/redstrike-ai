@@ -7,6 +7,7 @@
 ## Test (scope-gated, benign)
 - [ ] Duplicates injected per source (URL / body / JSON / cookie / header)
 - [ ] Array notation + cloaking variants tried
+- [ ] Server-side parameter pollution (SSPP): inject `%26`/`%23`/`=`/`"` into a value the app forwards to an internal API; diff + read errors
 - [ ] Precedence determined per layer (gateway vs backend)
 - [ ] A security decision flipped (authz / identity / value / filter smuggle) on test identities
 - [ ] Confirmed benignly

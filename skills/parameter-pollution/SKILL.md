@@ -25,7 +25,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 2. Inject duplicates per source: URL `?p=a&p=b`, body, JSON `{"p":"a","p":"b"}`, cookie, header · interceptor + refs · `hpp_tests.jsonl`
 3. Array/notation variants (`p[]=`, `p[0]=`) + cloaking (`par%61m`, case, `%00`, double-encode) · refs · `hpp_tests.jsonl`
 4. Determine precedence (which value the response reflects/acts on) per layer · interceptor · `hpp_tests.jsonl`
-5. Exploit a decision: authz (`access=false&access=true`), identity (`user=victim&user=admin`), WAF/filter smuggle, SSRF (`url=ok&url=internal`), OAuth (`redirect_uri` dup) · refs · `poc/<id>/`
+5. Exploit a decision: authz (`access=false&access=true`), identity (`user=victim&user=admin`), WAF/filter smuggle, SSRF (`url=ok&url=internal`), OAuth (`redirect_uri` dup), SSPP (inject `%26`/`%23` into a value forwarded to an internal API) · refs · `poc/<id>/`
 6. Confirm benignly (decision flipped, test identities) · synth · `poc/<id>/`
 7. Rate (CVSS) + write finding · synth · `findings.json`
 8. Emit report + curl · synth · `report.md`, `curl_commands.sh`
