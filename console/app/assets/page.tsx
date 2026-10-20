@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Network, Globe, Server, Link2, Boxes, Radio, Search } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Network, Globe, Server, Link2, Boxes, Radio, Search, X } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { cx, fmtDate } from "@/lib/format";
 import type { Asset, AssetKind, Service } from "@/lib/types";
@@ -19,6 +19,14 @@ export default function AssetsPage() {
   const [kind, setKind] = useState<AssetKind | "all">("all");
   const [svcQuery, setSvcQuery] = useState("");
   const [proto, setProto] = useState<"all" | "tcp" | "udp">("all");
+  const [hostFilter, setHostFilter] = useState<string | null>(null);
+  const portsRef = useRef<HTMLDivElement>(null);
+  const selectHost = (host: string) =>
+    setHostFilter((prev) => {
+      const next = prev === host ? null : host;
+      if (next) setTimeout(() => portsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      return next;
+    });
 
   const kinds = useMemo(() => Array.from(new Set(assets.map((a) => a.kind))), [assets]);
   const shown = assets.filter((a) => kind === "all" || a.kind === kind);
@@ -36,10 +44,11 @@ export default function AssetsPage() {
   const shownSvcs = useMemo(() => {
     const q = svcQuery.trim().toLowerCase();
     return services
+      .filter((s) => !hostFilter || s.host === hostFilter)
       .filter((s) => proto === "all" || (s.proto ?? "tcp") === proto)
       .filter((s) => !q || `${s.host} ${s.ip ?? ""} ${s.service} ${s.product ?? ""} ${s.port}`.toLowerCase().includes(q))
       .sort((a, b) => a.host.localeCompare(b.host) || a.port - b.port);
-  }, [services, proto, svcQuery]);
+  }, [services, proto, svcQuery, hostFilter]);
 
   const scopeList = (arr: string[], color: string) =>
     arr.length ? arr.map((d) => <Pill key={d} label={d} color={color} dot />) : <span className="text-xs text-muted">—</span>;
@@ -58,17 +67,23 @@ export default function AssetsPage() {
 
       {/* asset coverage map */}
       <div className="mb-3">
-        <AssetMap assets={assets} orgName={eng.target} services={services} />
+        <AssetMap assets={assets} orgName={eng.target} services={services} onSelectHost={selectHost} selectedHost={hostFilter ?? undefined} />
       </div>
 
       {/* ports & services (from host discovery) */}
+      <div ref={portsRef} className="scroll-mt-20">
       <Card className="mb-3">
         <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold">Ports &amp; services</h2>
-            <p className="text-xs text-muted">From host discovery · {openPorts} open ports across {hostCount} hosts</p>
+            <p className="text-xs text-muted">From host discovery · {hostFilter ? `${shownSvcs.length} port${shownSvcs.length === 1 ? "" : "s"} on ${hostFilter}` : `${openPorts} open ports across ${hostCount} hosts`}</p>
           </div>
           <div className="flex items-center gap-2">
+            {hostFilter && (
+              <button onClick={() => setHostFilter(null)} className="inline-flex items-center gap-1 rounded-full border border-brand/50 bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand" title="Clear host filter">
+                {hostFilter} <X size={12} />
+              </button>
+            )}
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
               <input
@@ -106,6 +121,7 @@ export default function AssetsPage() {
           {shownSvcs.length === 0 && <div className="py-10 text-center text-sm text-muted">No ports match.</div>}
         </div>
       </Card>
+      </div>
 
       {/* scope + coverage */}
       <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
