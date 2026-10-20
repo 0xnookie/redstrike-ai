@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useRef } from "react";
+import { ExternalLink } from "lucide-react";
 import { Card, Dot } from "@/components/ui/primitives";
 import { fmtDate } from "@/lib/format";
+import { cveRecordUrl } from "@/lib/cveFeed";
 import { SEVERITY } from "@/lib/theme";
 import type { CveFeed, CveItem, Severity } from "@/lib/types";
 
@@ -28,9 +30,9 @@ function sevOf(it: CveItem): Severity | undefined {
 
 /**
  * "What's New in Cyber" — a global CVE feed (not engagement-scoped): the 7-/30-day
- * detection counts, a dotted globe, and the newest vulnerability detections. The
- * feed is data the console renders; it names no external source. A live deployment
- * can override the demo feed by serving `cve_feed.json` next to the console.
+ * detection counts, a spinning dotted globe, and the newest vulnerability detections,
+ * each linking out to its authoritative record. Fed live (lib/cveFeed.ts) or by a
+ * served cve_feed.json; falls back to the bundled snapshot offline.
  */
 export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boolean }) {
   if (!feed) return null;
@@ -77,11 +79,21 @@ export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boole
               const sv = sevOf(it);
               const m = sv ? SEVERITY[sv] : undefined;
               return (
-                <div key={it.id} className="flex items-start gap-3 px-4 py-3">
+                <a
+                  key={it.id}
+                  href={cveRecordUrl(it.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`${it.id} — open full record`}
+                  className="group flex items-start gap-3 px-4 py-3 transition hover:bg-card2"
+                >
                   <span className="mt-0.5 h-9 w-[3px] shrink-0 rounded-full" style={{ background: m?.color ?? "rgb(var(--fg) / 0.18)" }} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-sm font-medium">{it.id}</span>
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <span className="font-mono text-sm font-medium group-hover:underline">{it.id}</span>
+                        <ExternalLink size={11} className="shrink-0 text-muted opacity-0 transition group-hover:opacity-100" />
+                      </span>
                       <span className="shrink-0 text-[11px] text-muted">{age(it.published, feed.generated_at)}</span>
                     </div>
                     <p className="mt-0.5 line-clamp-1 text-xs text-muted">{it.summary}</p>
@@ -90,7 +102,7 @@ export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boole
                     {m && <div className="text-[11px] font-medium" style={{ color: m.color }}>{m.label}</div>}
                     {typeof it.cvss === "number" && <div className="text-[11px] tabular-nums text-muted">CVSS {it.cvss.toFixed(1)}</div>}
                   </div>
-                </div>
+                </a>
               );
             })
           )}
@@ -100,54 +112,110 @@ export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boole
   );
 }
 
-/* ---------- dotted globe (hand-rolled SVG, theme-aware, deterministic) ---------- */
-function DotGlobe({ className }: { className?: string }) {
-  const R = 174;
-  const { dots, markers } = useMemo(() => {
-    const N = 900;
-    const tilt = -0.32; // rotate the sphere about X so the north pole leans back
+/* ---------- spinning dotted globe (canvas, theme-aware) ---------- */
+// A real 3D rotation: sphere points are re-projected every frame around the
+// vertical axis, so dots flow across the face and fade at the limb (not a flat
+// CSS spin). Respects prefers-reduced-motion (renders static). Dot color tracks
+// the --fg token so it adapts to light/dark.
+const GLOBE_MARKERS: [number, number][] = [
+  [39, -98], [49, 11], [-14, -52], [35, 104], [1, 37], [-33, 151],
+];
+
+function DotGlobe({ className, size = 348 }: { className?: string; size?: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    ctx.scale(dpr, dpr);
+
+    const cx = size / 2;
+    const cy = size / 2;
+    const R = (size / 2) * 0.94;
+    const tilt = -0.34; // lean the north pole back
     const ct = Math.cos(tilt), st = Math.sin(tilt);
+
+    // base sphere points (Fibonacci) in unit-sphere coords
+    const N = 900;
     const golden = Math.PI * (3 - Math.sqrt(5));
-    const dots: { x: number; y: number; o: number }[] = [];
+    const pts: { x: number; y: number; z: number }[] = [];
     for (let i = 0; i < N; i++) {
-      const y = 1 - (i / (N - 1)) * 2; // 1 … -1
+      const y = 1 - (i / (N - 1)) * 2;
       const rad = Math.sqrt(Math.max(0, 1 - y * y));
       const theta = golden * i;
-      const x = Math.cos(theta) * rad;
-      const z = Math.sin(theta) * rad;
-      const yy = y * ct - z * st;
-      const zz = y * st + z * ct;
-      if (zz < -0.06) continue; // front hemisphere only
-      dots.push({ x: R + x * R, y: R - yy * R, o: 0.16 + Math.max(0, zz) * 0.6 });
+      pts.push({ x: Math.cos(theta) * rad, y, z: Math.sin(theta) * rad });
     }
-    const mk = (lat: number, lon: number) => {
-      const la = (lat * Math.PI) / 180;
-      const lo = (lon * Math.PI) / 180;
-      const x = Math.cos(la) * Math.cos(lo);
-      const y = Math.sin(la);
-      const z = Math.cos(la) * Math.sin(lo);
-      const yy = y * ct - z * st;
-      const zz = y * st + z * ct;
-      return { x: R + x * R, y: R - yy * R, z: zz };
-    };
-    const markers = [mk(39, -98), mk(49, 11), mk(-14, -52), mk(35, 104), mk(1, 37), mk(-33, 151)].filter((m) => m.z > -0.02);
-    return { dots, markers };
-  }, []);
+    const markers = GLOBE_MARKERS.map(([lat, lon]) => ({
+      x: Math.cos((lat * Math.PI) / 180) * Math.cos((lon * Math.PI) / 180),
+      y: Math.sin((lat * Math.PI) / 180),
+      z: Math.cos((lat * Math.PI) / 180) * Math.sin((lon * Math.PI) / 180),
+    }));
 
-  return (
-    <svg className={className} width={R * 2} height={R * 2} viewBox={`0 0 ${R * 2} ${R * 2}`} aria-hidden="true">
-      {dots.map((d, i) => (
-        <circle key={i} cx={d.x} cy={d.y} r={1.1} fill="rgb(var(--fg))" opacity={d.o * 0.62} />
-      ))}
-      {markers.map((m, i) => (
-        <g key={i}>
-          <circle cx={m.x} cy={m.y} r={5} fill="#f43f5e">
-            <animate attributeName="r" values="4;11;4" dur="2.6s" begin={`${i * 0.4}s`} repeatCount="indefinite" />
-            <animate attributeName="opacity" values="0.4;0;0.4" dur="2.6s" begin={`${i * 0.4}s`} repeatCount="indefinite" />
-          </circle>
-          <circle cx={m.x} cy={m.y} r={2.4} fill="#f43f5e" />
-        </g>
-      ))}
-    </svg>
-  );
+    // theme-adaptive dot color (read the --fg channels, refresh on theme change)
+    let fg = "255,255,255";
+    const readFg = () => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue("--fg").trim();
+      if (v) fg = v.replace(/\s+/g, ",");
+    };
+    readFg();
+    const mo = new MutationObserver(readFg);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] });
+
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const SPEED = 0.2; // rad/s
+    const start = performance.now();
+    let raf = 0;
+
+    const frame = (now: number) => {
+      const spin = reduce ? 0.5 : ((now - start) / 1000) * SPEED;
+      const cosA = Math.cos(spin), sinA = Math.sin(spin);
+      ctx.clearRect(0, 0, size, size);
+
+      for (const p of pts) {
+        const x = p.x * cosA + p.z * sinA; // rotate about Y (longitude)
+        const z = -p.x * sinA + p.z * cosA;
+        const yy = p.y * ct - z * st; // tilt about X
+        const zz = p.y * st + z * ct;
+        if (zz < -0.05) continue; // front hemisphere
+        ctx.beginPath();
+        ctx.arc(cx + x * R, cy - yy * R, 1.1, 0, 6.2832);
+        ctx.fillStyle = `rgba(${fg},${(0.1 + Math.max(0, zz) * 0.5).toFixed(3)})`;
+        ctx.fill();
+      }
+
+      for (let i = 0; i < markers.length; i++) {
+        const p = markers[i];
+        const x = p.x * cosA + p.z * sinA;
+        const z = -p.x * sinA + p.z * cosA;
+        const yy = p.y * ct - z * st;
+        const zz = p.y * st + z * ct;
+        if (zz < 0) continue; // behind the globe
+        const mx = cx + x * R, my = cy - yy * R;
+        const k = reduce ? 0.4 : ((now / 2600 + i * 0.17) % 1); // expanding pulse
+        ctx.beginPath();
+        ctx.arc(mx, my, 3 + k * 8, 0, 6.2832);
+        ctx.fillStyle = `rgba(244,63,94,${(0.4 * (1 - k)).toFixed(3)})`;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(mx, my, 2.4, 0, 6.2832);
+        ctx.fillStyle = "rgba(244,63,94,0.95)";
+        ctx.fill();
+      }
+
+      if (!reduce) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      mo.disconnect();
+    };
+  }, [size]);
+
+  return <canvas ref={ref} className={className} style={{ width: size, height: size }} aria-hidden="true" />;
 }
