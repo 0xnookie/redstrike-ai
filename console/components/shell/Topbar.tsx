@@ -6,7 +6,7 @@ import { useConsole } from "@/lib/store";
 import { ThemeToggle } from "./ThemeToggle";
 import { cx } from "@/lib/format";
 
-export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+export function Topbar({ onToggleSidebar, onOpenPalette }: { onToggleSidebar: () => void; onOpenPalette: () => void }) {
   const { mode, loadFiles, resetDemo } = useConsole();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -20,17 +20,24 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         <PanelLeft size={18} />
       </button>
 
-      <div className="relative hidden flex-1 sm:block">
-        <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-        <input
-          placeholder="Search findings, assets, agents…"
-          className="h-9 w-full max-w-md rounded-lg border border-line bg-card pl-9 pr-16 text-sm outline-none placeholder:text-muted focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
-        />
-        <kbd className="pointer-events-none absolute left-[22rem] top-1/2 hidden -translate-y-1/2 rounded border border-line bg-card2 px-1.5 py-0.5 text-[10px] text-muted lg:block">
-          ⌘K
-        </kbd>
+      <div className="hidden flex-1 sm:flex">
+        <button
+          onClick={onOpenPalette}
+          className="flex h-9 w-full max-w-md items-center gap-2 rounded-lg border border-line bg-card px-3 text-sm text-muted transition hover:border-fg/30"
+        >
+          <Search size={15} />
+          <span className="flex-1 text-left">Search findings, assets, agents…</span>
+          <kbd className="rounded border border-line bg-card2 px-1.5 py-0.5 text-[10px]">⌘K</kbd>
+        </button>
       </div>
       <div className="flex-1 sm:hidden" />
+      <button
+        onClick={onOpenPalette}
+        aria-label="Open search"
+        className="grid h-9 w-9 place-items-center rounded-lg text-muted transition hover:bg-card2 hover:text-fg sm:hidden"
+      >
+        <Search size={18} />
+      </button>
 
       <span
         className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex"

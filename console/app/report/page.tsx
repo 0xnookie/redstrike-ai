@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Printer, FileDown, ShieldCheck } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { reportable, severityCounts, maxCvss } from "@/lib/stats";
@@ -9,11 +9,8 @@ import { cvssScore, cvssRating } from "@/lib/cvss";
 import { fmtDate, verdictOf } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { Card, PageHeader, Pill, SeverityBadge } from "@/components/ui/primitives";
-import { FindingDrawer } from "@/components/findings/FindingDrawer";
-
 export default function ReportPage() {
-  const { activeEngagement: eng, findings, chains } = useConsole();
-  const [selected, setSelected] = useState<Finding | null>(null);
+  const { activeEngagement: eng, findings, chains, openFinding } = useConsole();
 
   const rep = reportable(findings);
   const counts = severityCounts(rep);
@@ -94,7 +91,7 @@ export default function ReportPage() {
             {headline.map((f) => {
               const s = cvssScore(f.cvss_vector);
               return (
-                <button key={f.id} onClick={() => setSelected(f)} className="flex items-center gap-3 rounded-lg border border-line bg-card2 p-3 text-left transition hover:border-brand/40">
+                <button key={f.id} onClick={() => openFinding(f)} className="flex items-center gap-3 rounded-lg border border-line bg-card2 p-3 text-left transition hover:border-fg/30">
                   <SeverityBadge severity={f.severity} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{f.title}</div>
@@ -112,7 +109,7 @@ export default function ReportPage() {
       <Card className="mb-3">
         <div className="border-b border-line p-4"><h2 className="text-sm font-semibold">Findings detail</h2></div>
         <div className="divide-y divide-line">
-          {ordered.map((f) => <ReportFinding key={f.id} finding={f} onOpen={() => setSelected(f)} />)}
+          {ordered.map((f) => <ReportFinding key={f.id} finding={f} onOpen={() => openFinding(f)} />)}
         </div>
       </Card>
 
@@ -156,8 +153,6 @@ export default function ReportPage() {
           </div>
         </Card>
       )}
-
-      <FindingDrawer finding={selected} onClose={() => setSelected(null)} />
     </>
   );
 }

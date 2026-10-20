@@ -9,13 +9,11 @@ import { cx } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { Card, PageHeader, Pill, EmptyState } from "@/components/ui/primitives";
 import { ChainGraph } from "@/components/chains/ChainGraph";
-import { FindingDrawer } from "@/components/findings/FindingDrawer";
 
 export default function ChainsPage() {
-  const { chains, findings } = useConsole();
+  const { chains, findings, openFinding } = useConsole();
   const findingsById = useMemo(() => Object.fromEntries(findings.map((f) => [f.id, f])), [findings]);
   const [activeId, setActiveId] = useState(chains[0]?.id);
-  const [selected, setSelected] = useState<Finding | null>(null);
 
   const chain = chains.find((c) => c.id === activeId) ?? chains[0];
 
@@ -62,7 +60,7 @@ export default function ChainsPage() {
 
         {/* graph + meta */}
         <div className="space-y-3">
-          {chain && <ChainGraph chain={chain} findingsById={findingsById} onSelectFinding={setSelected} />}
+          {chain && <ChainGraph chain={chain} findingsById={findingsById} onSelectFinding={openFinding} />}
 
           {/* role legend */}
           <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
@@ -109,8 +107,6 @@ export default function ChainsPage() {
           )}
         </div>
       </div>
-
-      <FindingDrawer finding={selected} onClose={() => setSelected(null)} />
     </>
   );
 }

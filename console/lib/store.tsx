@@ -20,6 +20,10 @@ interface ConsoleCtx {
   assets: ConsoleData["assets"];
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
   resetDemo: () => void;
+  /** finding detail drawer, lifted to the app so it opens from any view (and the ⌘K palette) */
+  selectedFinding: Finding | null;
+  openFinding: (f: Finding) => void;
+  closeFinding: () => void;
 }
 
 const Ctx = createContext<ConsoleCtx | null>(null);
@@ -28,6 +32,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<ConsoleData>(sampleData);
   const [mode, setMode] = useState<Mode>("demo");
   const [activeId, setActiveId] = useState<string>(sampleData.activeEngagementId);
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
+  const openFinding = useCallback((f: Finding) => setSelectedFinding(f), []);
+  const closeFinding = useCallback(() => setSelectedFinding(null), []);
 
   const activeEngagement =
     data.engagements.find((e) => e.id === activeId) ?? data.engagements[0];
@@ -123,6 +130,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     assets: data.assets,
     loadFiles,
     resetDemo,
+    selectedFinding,
+    openFinding,
+    closeFinding,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

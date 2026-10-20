@@ -1,17 +1,13 @@
 "use client";
 
-import { useState } from "react";
 import { useConsole } from "@/lib/store";
 import { reportable, severityCounts, verificationStats } from "@/lib/stats";
 import { SEVERITY, SEVERITY_ORDER } from "@/lib/theme";
-import type { Finding } from "@/lib/types";
 import { PageHeader, Kpi } from "@/components/ui/primitives";
 import { FindingsTable } from "@/components/findings/FindingsTable";
-import { FindingDrawer } from "@/components/findings/FindingDrawer";
 
 export default function FindingsPage() {
-  const { findings } = useConsole();
-  const [selected, setSelected] = useState<Finding | null>(null);
+  const { findings, openFinding } = useConsole();
 
   const rep = reportable(findings);
   const counts = severityCounts(rep);
@@ -29,8 +25,7 @@ export default function FindingsPage() {
         <Kpi label="Rejected" value={v.rejected} sub="excluded" />
       </div>
 
-      <FindingsTable findings={findings} onSelect={setSelected} />
-      <FindingDrawer finding={selected} onClose={() => setSelected(null)} />
+      <FindingsTable findings={findings} onSelect={openFinding} />
     </>
   );
 }
