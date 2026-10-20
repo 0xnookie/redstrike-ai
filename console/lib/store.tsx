@@ -2,10 +2,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ConsoleData, Engagement, Finding, AttackChain, Service, TestRun, CveFeed } from "./types";
-import { sampleData } from "./data";
+import {
+  emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
+  deriveAgentStats, deriveActivity,
+} from "./data";
 import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 
-type Mode = "demo" | "live";
+// "empty" = nothing loaded (honest zero-state); "live" = reading a real engagement.
+type Mode = "empty" | "live";
 
 interface ConsoleCtx {
   mode: Mode;
@@ -24,10 +28,11 @@ interface ConsoleCtx {
   tests: TestRun[];
   /** global CVE feed for "What's New in Cyber" (not engagement-scoped) */
   cveFeed: CveFeed | undefined;
-  /** true once the live CVE feed has been fetched (vs the bundled snapshot / a pinned file) */
+  /** true once the live CVE feed has been fetched (vs a pinned cve_feed.json) */
   cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
-  resetDemo: () => void;
+  /** clear back to the empty zero-state */
+  clearData: () => void;
   /** finding detail drawer, lifted to the app so it opens from any view (and the ⌘K palette) */
   selectedFinding: Finding | null;
   openFinding: (f: Finding) => void;
@@ -40,9 +45,9 @@ interface ConsoleCtx {
 const Ctx = createContext<ConsoleCtx | null>(null);
 
 export function ConsoleProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<ConsoleData>(sampleData);
-  const [mode, setMode] = useState<Mode>("demo");
-  const [activeId, setActiveId] = useState<string>(sampleData.activeEngagementId);
+  const [data, setData] = useState<ConsoleData>(emptyData);
+  const [mode, setMode] = useState<Mode>("empty");
+  const [activeId, setActiveId] = useState<string>(emptyData.activeEngagementId);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const openFinding = useCallback((f: Finding) => setSelectedFinding(f), []);
   const closeFinding = useCallback(() => setSelectedFinding(null), []);
@@ -62,15 +67,32 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   );
   const chains = data.chains;
 
-  // tests scoped to the active engagement (untagged demo runs belong to it)
+  // tests scoped to the active engagement
   const tests = useMemo(
     () => data.tests.filter((t) => !t.engagement_id || t.engagement_id === activeId),
     [data.tests, activeId]
   );
 
+  // Agents, activity and per-asset finding counts have no dedicated engagement
+  // file — they are derived from the real findings + host-discovery.
+  const agents = useMemo(() => deriveAgentStats(agentRoster, findings), [findings]);
+  const activity = useMemo(() => deriveActivity(findings), [findings]);
+  const assets = useMemo(() => overlayAssetFindings(data.assets, findings), [data.assets, findings]);
+
+  const patchEngagement = useCallback(
+    (patch: Partial<Engagement>) => {
+      setData((d) => ({
+        ...d,
+        engagements: d.engagements.map((e) => (e.id === activeId ? { ...e, ...patch } : e)),
+      }));
+      setMode("live");
+    },
+    [activeId]
+  );
+
   const classify = useCallback(
-    (json: unknown, name: string): string => {
-      // findings array
+    (json: unknown, _name: string): string => {
+      // bare findings array (older findings_consolidated.json / a per-skill findings.json)
       if (Array.isArray(json)) {
         const tagged = (json as Finding[]).map((f) => ({ ...f, engagement_id: activeId }));
         setData((d) => ({ ...d, findings: tagged }));
@@ -79,79 +101,102 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       }
       if (json && typeof json === "object") {
         const o = json as Record<string, unknown>;
-        // tests.json → { tests: [...] } pentest runs (object-wrapped so it isn't
-        // mistaken for a bare findings array)
+
+        // tests.json → { tests: [...] }
         if (Array.isArray(o.tests)) {
           const t = (o.tests as TestRun[]).map((x) => ({ ...x, engagement_id: activeId }));
           setData((d) => ({ ...d, tests: t }));
           setMode("live");
           return "tests";
         }
+
         // cve_feed.json → { generated_at, count_7d, count_30d, items: [...] }
         if (Array.isArray(o.items) && (o.count_7d != null || o.count_30d != null || o.generated_at != null)) {
           cvePinnedRef.current = true; // explicit feed file wins over the live fetch
           setData((d) => ({ ...d, cveFeed: o as unknown as CveFeed }));
           return "cve_feed";
         }
-        // host_discovery.json → flatten hosts[].ports[] into the services table
-        if (Array.isArray(o.hosts)) {
-          const services: Service[] = [];
-          (o.hosts as any[]).forEach((h, hi) => {
-            const ports = Array.isArray(h?.ports) ? h.ports : [];
-            ports.forEach((p: any, pi: number) => services.push({
-              id: `svc-${hi}-${pi}`,
-              host: h?.host ?? h?.hostname ?? String(h?.ip ?? ""),
-              ip: h?.ip,
-              port: Number(p?.port),
-              proto: p?.proto ?? p?.protocol ?? "tcp",
-              service: p?.service ?? p?.name ?? "?",
-              product: p?.product,
-              version: p?.version,
-              state: p?.state ?? "open",
-              tls: p?.tls,
-              title: h?.title,
-              flagged: p?.flagged,
-              findings: 0,
+
+        // host_discovery.json → services + assets (current live_hosts shape OR older hosts[].ports[])
+        if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
+          const orgName = (o.engagement as string) || activeEngagement.target || "";
+          const services = buildServices(o);
+          const builtAssets = buildAssets(o, hostRoot(services, orgName));
+          setData((d) => ({ ...d, services, assets: builtAssets }));
+          // a minimal scope hint from host-discovery's scope block
+          const sc = o.scope as Record<string, unknown> | undefined;
+          if (sc && typeof sc.host === "string") {
+            setData((d) => ({
+              ...d,
+              engagements: d.engagements.map((e) =>
+                e.id === activeId && e.in_scope.domains.length === 0
+                  ? { ...e, in_scope: { ...e.in_scope, domains: [sc.host as string] } }
+                  : e
+              ),
             }));
-          });
-          setData((d) => ({ ...d, services }));
+          }
           setMode("live");
           return "host_discovery";
         }
+
+        // attack chains (step-graph): attack-chain-discovery/chains.json → { chains: [{ steps }] }
         if (Array.isArray(o.chains)) {
           setData((d) => ({ ...d, chains: o.chains as AttackChain[] }));
+          setMode("live");
           return "chains";
         }
+        if (Array.isArray(o.attack_chains) && (o.attack_chains as any[])[0]?.steps) {
+          setData((d) => ({ ...d, chains: o.attack_chains as AttackChain[] }));
+          setMode("live");
+          return "chains";
+        }
+
+        // findings_consolidated.json → { engagement, target, findings: [...], attack_chains?: [...] }
         if (Array.isArray(o.findings)) {
           const tagged = (o.findings as Finding[]).map((f) => ({ ...f, engagement_id: activeId }));
-          setData((d) => ({ ...d, findings: tagged }));
+          // the consolidated `attack_chains` are composite, non-additive findings
+          // (the kill-chain write-ups). Fold them in flagged composite so they
+          // resolve in the chain graph / report but stay OUT of the severity counts.
+          const composites = Array.isArray(o.attack_chains) && !(o.attack_chains as any[])[0]?.steps
+            ? (o.attack_chains as Finding[]).map((f) => ({ ...f, composite: true, engagement_id: activeId }))
+            : [];
+          setData((d) => ({ ...d, findings: [...tagged, ...composites] }));
+          patchEngagement({
+            name: (o.engagement as string) || activeEngagement.name,
+            target: (o.target as string) || activeEngagement.target,
+            status: "running",
+            ...(o.window ? { window: o.window as Engagement["window"] } : {}),
+            ...(o.authorized_by ? { authorized_by: o.authorized_by as string } : {}),
+            ...(o.in_scope ? { in_scope: o.in_scope as Engagement["in_scope"] } : {}),
+            ...(o.out_of_scope ? { out_of_scope: o.out_of_scope as Engagement["out_of_scope"] } : {}),
+            ...(o.rules ? { rules: o.rules as Engagement["rules"] } : {}),
+          });
+          // step-graph chains only; the consolidated attack_chains are composite findings
+          if (Array.isArray(o.attack_chains) && (o.attack_chains as any[])[0]?.steps) {
+            setData((d) => ({ ...d, chains: o.attack_chains as AttackChain[] }));
+          }
           setMode("live");
           return "findings";
         }
-        if (o.in_scope || o.window || o.engagement) {
-          // scope.json → patch the active engagement's header fields
-          setData((d) => ({
-            ...d,
-            engagements: d.engagements.map((e) =>
-              e.id === activeId
-                ? {
-                    ...e,
-                    name: (o.engagement as string) || e.name,
-                    authorized_by: (o.authorized_by as string) || e.authorized_by,
-                    window: (o.window as Engagement["window"]) || e.window,
-                    in_scope: (o.in_scope as Engagement["in_scope"]) || e.in_scope,
-                    out_of_scope: (o.out_of_scope as Engagement["out_of_scope"]) || e.out_of_scope,
-                    rules: (o.rules as Engagement["rules"]) || e.rules,
-                  }
-                : e
-            ),
-          }));
+
+        // scope.json → engagement header (name / window / scope / rules)
+        if (o.in_scope || o.window || o.engagement || o.authorized_by) {
+          patchEngagement({
+            name: (o.engagement as string) || activeEngagement.name,
+            target: (o.target as string) || firstDomain(o) || activeEngagement.target,
+            goal: (o.goal as string) || (o.notes as string) || activeEngagement.goal,
+            authorized_by: (o.authorized_by as string) || activeEngagement.authorized_by,
+            ...(o.window ? { window: o.window as Engagement["window"] } : {}),
+            ...(o.in_scope ? { in_scope: o.in_scope as Engagement["in_scope"] } : {}),
+            ...(o.out_of_scope ? { out_of_scope: o.out_of_scope as Engagement["out_of_scope"] } : {}),
+            ...(o.rules ? { rules: o.rules as Engagement["rules"] } : {}),
+          });
           return "scope";
         }
       }
       return "unknown";
     },
-    [activeId]
+    [activeId, activeEngagement.name, activeEngagement.target, patchEngagement]
   );
 
   const loadFiles = useCallback(
@@ -162,7 +207,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         try {
           const text = await file.text();
           kinds.push(classify(JSON.parse(text), file.name));
-        } catch (e) {
+        } catch {
           kinds.push(`error:${file.name}`);
         }
       }
@@ -171,14 +216,14 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     [classify]
   );
 
-  const resetDemo = useCallback(() => {
-    setData(sampleData);
-    setActiveId(sampleData.activeEngagementId);
-    setMode("demo");
+  const clearData = useCallback(() => {
+    setData(emptyData);
+    setActiveId(emptyData.activeEngagementId);
+    setMode("empty");
   }, []);
 
   // Auto-load a live engagement when the console is served next to its output
-  // (the `redstrike console` launcher). Harmless 404s otherwise → demo stays.
+  // (scripts/console.py). Harmless 404s otherwise → the empty state stays.
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return;
@@ -195,7 +240,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       }
       // Live CVE feed for "What's New in Cyber" — fetched client-side, refreshed on
       // an interval. Skipped when a cve_feed.json was served (explicit override).
-      // On failure (offline / CORS / rate-limited) the bundled snapshot stays.
+      // On failure (offline / CORS / rate-limited) the card simply stays hidden.
       if (!cvePinnedRef.current) {
         const applyLive = async () => {
           try {
@@ -223,15 +268,15 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     setActiveId,
     findings,
     chains,
-    agents: data.agents,
-    activity: data.activity,
-    assets: data.assets,
+    agents,
+    activity,
+    assets,
     services: data.services,
     tests,
     cveFeed: data.cveFeed,
     cveLive,
     loadFiles,
-    resetDemo,
+    clearData,
     selectedFinding,
     openFinding,
     closeFinding,
@@ -240,6 +285,25 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** Pick a sensible org-root label for the asset map (the shared parent domain). */
+function hostRoot(services: Service[], fallback: string): string {
+  const hosts = Array.from(new Set(services.map((s) => s.host).filter(Boolean)));
+  if (hosts.length === 1) return hosts[0];
+  // common apex suffix (e.g. example.com) across hosts, else the fallback
+  const parts = hosts.map((h) => h.split("."));
+  if (parts.length > 1) {
+    const apex = parts[0].slice(-2).join(".");
+    if (parts.every((p) => p.slice(-2).join(".") === apex)) return apex;
+  }
+  return fallback || hosts[0] || "target";
+}
+
+/** First in-scope domain from a scope object, used as a target fallback. */
+function firstDomain(o: Record<string, unknown>): string | undefined {
+  const inScope = o.in_scope as { domains?: string[] } | undefined;
+  return inScope?.domains?.[0]?.replace(/^\*\./, "");
 }
 
 export function useConsole(): ConsoleCtx {

@@ -28,7 +28,7 @@ const PAGES = [
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
-  const { engagements, findings, activeId, setActiveId, openFinding, resetDemo, mode } = useConsole();
+  const { engagements, findings, activeId, setActiveId, openFinding, clearData, mode } = useConsole();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,9 +50,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       icon: <span className="h-2 w-2 rounded-full" style={{ background: sevMeta(f.severity).color }} />, run: () => { openFinding(f); onClose(); },
     }));
     list.push({ id: "act:theme", group: "Actions", label: `Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`, icon: <Moon size={15} />, run: () => { setTheme(resolvedTheme === "dark" ? "light" : "dark"); onClose(); } });
-    if (mode === "live") list.push({ id: "act:reset", group: "Actions", label: "Reset to demo data", icon: <RotateCcw size={15} />, run: () => { resetDemo(); onClose(); } });
+    if (mode === "live") list.push({ id: "act:clear", group: "Actions", label: "Clear loaded data", icon: <RotateCcw size={15} />, run: () => { clearData(); onClose(); } });
     return list;
-  }, [engagements, findings, activeId, resolvedTheme, mode, router, setActiveId, openFinding, setTheme, resetDemo, onClose]);
+  }, [engagements, findings, activeId, resolvedTheme, mode, router, setActiveId, openFinding, setTheme, clearData, onClose]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();

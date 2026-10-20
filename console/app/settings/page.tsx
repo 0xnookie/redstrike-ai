@@ -9,7 +9,7 @@ import { Card, PageHeader } from "@/components/ui/primitives";
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const { mode, resetDemo, loadFiles } = useConsole();
+  const { mode, clearData, loadFiles } = useConsole();
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => setMounted(true), []);
@@ -54,22 +54,25 @@ export default function SettingsPage() {
         <Card className="p-5">
           <h2 className="text-sm font-semibold">Data source</h2>
           <p className="mb-3 text-xs text-muted">
-            The console reads the engagement JSON the Redstrike skills emit. Load a
+            The console reads the engagement JSON the Redstrike skills emit — usually via
+            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">python scripts/console.py engagements/&lt;dir&gt;</code>.
+            You can also load files here: a
             <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">findings_consolidated.json</code>,
-            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">scope.json</code> or
-            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">attack_chains.json</code>.
+            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">host_discovery.json</code>,
+            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">chains.json</code> or
+            <code className="mx-1 rounded bg-card2 px-1 py-0.5 text-[11px]">scope.json</code>.
           </p>
           <div className="flex items-center gap-2">
             <span
               className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
               style={{
-                color: mode === "demo" ? "#f59e0b" : "#22c55e",
-                background: (mode === "demo" ? "#f59e0b" : "#22c55e") + "1f",
-                border: `1px solid ${(mode === "demo" ? "#f59e0b" : "#22c55e") + "55"}`,
+                color: mode === "empty" ? "#9ca3af" : "#22c55e",
+                background: (mode === "empty" ? "#9ca3af" : "#22c55e") + "1f",
+                border: `1px solid ${(mode === "empty" ? "#9ca3af" : "#22c55e") + "55"}`,
               }}
             >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: mode === "demo" ? "#f59e0b" : "#22c55e" }} />
-              {mode === "demo" ? "Demo data" : "Live engagement"}
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: mode === "empty" ? "#9ca3af" : "#22c55e" }} />
+              {mode === "empty" ? "No data loaded" : "Live engagement"}
             </span>
           </div>
           <div className="mt-3 flex items-center gap-2">
@@ -77,8 +80,8 @@ export default function SettingsPage() {
               <Upload size={15} /> Load JSON
             </button>
             {mode === "live" && (
-              <button onClick={resetDemo} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-card px-3 text-sm font-medium transition hover:border-brand/40">
-                <RotateCcw size={15} /> Reset to demo
+              <button onClick={clearData} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-card px-3 text-sm font-medium transition hover:border-brand/40">
+                <RotateCcw size={15} /> Clear data
               </button>
             )}
             <input ref={fileRef} type="file" accept=".json,application/json" multiple className="hidden" onChange={(e) => e.target.files && loadFiles(e.target.files)} />
