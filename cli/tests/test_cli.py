@@ -92,5 +92,45 @@ class TestBuildArgv(unittest.TestCase):
             self.assertEqual(launch.gate(prep), [])  # fresh window is open + complete
 
 
+class TestConsole(unittest.TestCase):
+    def test_console_dry_run_prints_argv(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            (repo / "engagements").mkdir()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main([
+                    "--repo", str(repo), "--no-color", "--no-banner",
+                    "console", "--dry-run", "--background",
+                ])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertIn("scripts/console.py", out)
+            self.assertIn("--background", out)
+            self.assertIn("--open", out)
+            self.assertIn(str(repo / "engagements"), out)
+
+    def test_run_console_dry_run_does_not_launch(self):
+        # a dry-run must prepare the argv but never bring up the console
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            (repo / "engagements").mkdir()
+            main([
+                "--repo", str(repo), "--no-color", "--no-banner",
+                "init", "Acme", "--authorized-by", "x", "--domain", "*.acme.com",
+                "--i-confirm-authorization",
+            ])
+            eid = engagement.engagement_id("Acme")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main([
+                    "--repo", str(repo), "--no-color", "--no-banner",
+                    "run", eid, "--dry-run", "--console",
+                ])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertNotIn("bringing up the web console", out)
+
+
 if __name__ == "__main__":
     unittest.main()

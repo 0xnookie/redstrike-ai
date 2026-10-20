@@ -206,6 +206,41 @@ def cmd_init(args, repo: Path) -> int:
     return 0
 
 
+def _console_requested(args) -> bool:
+    if getattr(args, "console", False):
+        return True
+    return os.environ.get("REDSTRIKE_CONSOLE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def maybe_launch_console(args, repo: Path) -> None:
+    """After a run, optionally bring up the console (idempotent — reuses a running one)."""
+    if _console_requested(args):
+        print()
+        print(ui.ok("bringing up the web console over engagements/ …"))
+        launch.launch_console(repo, port=getattr(args, "console_port", 8787))
+    else:
+        print("  tip: view results in the web console — `redstrike console`")
+
+
+def cmd_console(args, repo: Path) -> int:
+    target = repo / "engagements"
+    if args.engagement:
+        eng = resolve_engagement(repo, args.engagement)
+        if not eng:
+            print(ui.err(f"engagement '{args.engagement}' not found"))
+            return 1
+        target = eng
+    if not args.no_banner:
+        ui.print_banner("console")
+    argv = launch.launch_console(
+        repo, target=target, port=args.port,
+        background=args.background, open_browser=not args.no_open, dry_run=args.dry_run,
+    )
+    if args.dry_run:
+        print("  " + " ".join(shlex.quote(a) for a in argv))
+    return 0
+
+
 def cmd_run(args, repo: Path) -> int:
     eng_dir = resolve_engagement(repo, args.engagement)
     if not eng_dir:
@@ -261,7 +296,9 @@ def cmd_run(args, repo: Path) -> int:
     print()
     print(ui.ok("scope gate armed · launching Claude Code engine (interactive, gated)…"))
     print()
-    return launch.exec_claude(argv, cwd=eng_dir)
+    rc = launch.exec_claude(argv, cwd=eng_dir)
+    maybe_launch_console(args, repo)
+    return rc
 
 
 def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
@@ -325,6 +362,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
     print()
     audit = eng_dir / "runtime" / "autorun.jsonl"
     rc, _summary = autorun.run_autonomous(claude_bin, argv, eng_dir, audit, pending_path=prep.pending_path)
+    maybe_launch_console(args, repo)
     return rc
 
 
@@ -441,6 +479,16 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--max-turns", type=int, default=200, help="autonomous: hard turn cap (default 200)")
     r.add_argument("--max-budget-usd", type=float, default=20.0, help="autonomous: USD budget cap (default 20)")
     r.add_argument("--resume", action="store_true", help="autonomous: resume the engagement's stored session")
+    r.add_argument("--console", action="store_true",
+                   help="when the run finishes, bring up the web console over engagements/ (or set REDSTRIKE_CONSOLE=1)")
+    r.add_argument("--console-port", type=int, default=8787, help="port for --console (default 8787)")
+
+    c = sub.add_parser("console", help="open the web console over your engagements")
+    c.add_argument("engagement", nargs="?", help="limit to a single engagement (default: all engagements/)")
+    c.add_argument("--port", type=int, default=8787)
+    c.add_argument("--background", action="store_true", help="detach and return instead of blocking")
+    c.add_argument("--no-open", action="store_true", help="do not open a browser")
+    c.add_argument("--dry-run", action="store_true", help="print the command and exit")
 
     v = sub.add_parser("verify", help="run the mechanical gate (verify_completion.py)")
     v.add_argument("engagement")
@@ -464,6 +512,7 @@ _DISPATCH = {
     "install": cmd_install,
     "init": cmd_init,
     "run": cmd_run,
+    "console": cmd_console,
     "verify": cmd_verify,
     "status": cmd_status,
     "approve": cmd_approve,
