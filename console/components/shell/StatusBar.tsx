@@ -31,8 +31,8 @@ export function StatusBar() {
       </span>
       <span>chains:{chains.length}</span>
       <span className="ml-auto flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: mode === "demo" ? "#f59e0b" : "#22c55e" }} />
-        {mode === "demo" ? "demo" : "live"}
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: mode === "empty" ? "#9ca3af" : "#22c55e" }} />
+        {mode === "empty" ? "no data" : "live"}
       </span>
     </footer>
   );

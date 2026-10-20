@@ -138,8 +138,9 @@ export interface Asset {
   parent?: string;
 }
 
-// Open port + service, flattened from host-discovery's host_discovery.json
-// (`{ hosts: [{ host, ip, ports: [{ port, service, version }], title }] }`).
+// Open port + service, built from host-discovery's host_discovery.json
+// (current `{ live_hosts: [{ url, ip, port, scheme, service, stack, title }] }`,
+//  or the older `{ hosts: [{ host, ip, ports: [...] }] }`).
 export type PortState = "open" | "filtered" | "closed";
 export interface Service {
   id: string;

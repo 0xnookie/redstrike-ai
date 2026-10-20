@@ -2,66 +2,68 @@
 
 A web UI over the Redstrike engagement data model — a multi-view console for running and
 reviewing an AI-driven penetration test. Built with **Next.js (App Router) + TypeScript +
-TailwindCSS**, with a **dark / light theme switch** and no backend: it renders the same JSON
-the framework's skills emit, and falls back to a built-in demo dataset so it runs immediately.
+TailwindCSS**, with a **dark / light theme switch** and no backend: it renders the JSON the
+framework's skills emit into an engagement dir. With nothing loaded it shows honest empty states —
+there is **no bundled demo data**.
 
 ## Views
 
 | Route | View | What it shows |
 |---|---|---|
 | `/` | **Dashboard** | KPIs, severity donut, findings-over-time, activity feed, top findings, category/asset breakdowns, two-altitude review roll-up |
-| `/engagements` | **Engagements** | All authorized assessments; pick one to make it the active context |
+| `/engagements` | **Engagements** | The authorized assessment; pick one to make it the active context |
 | `/findings` | **Findings** | Filterable/sortable table + full detail drawer (CVSS, mappings, reproduction, evidence, remediation, reviewer verdict) |
 | `/chains` | **Attack chains** | Kill-chain flow graph composed from accepted findings |
 | `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, force-directed coverage map, asset table, and **open ports & services** from host discovery |
-| `/activity` | **Activity** | Execution timeline across the agent fleet (recon → findings → reviews → approvals → chains) |
-| `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier |
+| `/activity` | **Activity** | Execution timeline derived from each finding's reviewer record (findings → reviews) |
+| `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier; per-skill produced/accepted counts derived from the loaded findings |
 | `/report` | **Report** | Client-ready assembly: executive summary, risk-ordered findings, demonstration-limited section, attack chains; export JSON / print to PDF |
 | `/settings` | **Settings** | Theme, data source, about |
 
 ## Data model
 
-The console renders the engagement's own JSON (see `../skills/_contract/*.schema.json`):
+The console renders the engagement's own JSON exactly as the skills emit it (see
+`../skills/_contract/*.schema.json`). It served at the site root by `scripts/console.py` under the
+canonical names the console fetches on open:
 
-- `findings_consolidated.json` — array of `finding.schema.json`
-- `attack_chains.json` — `attack_chain.schema.json`
-- `scope.json` — engagement scope / rules / window
-- `host_discovery.json` — hosts + open ports/services (`{ hosts: [{ host, ip, ports: [{ port, service, version }] }] }`) → the Ports & services table
+- **`findings_consolidated.json`** (reporting) — `{ engagement, target, severity_counts, findings: [...], attack_chains: [...] }`, or a bare `findings` array. `findings[]` follow `finding.schema.json`; `attack_chains[]` are the composite, non-additive kill-chain write-ups (folded in but kept **out** of the severity counts).
+- **`host_discovery.json`** (host-discovery) — `{ live_hosts: [...], api_endpoints: [...] }` → the Assets map + **Ports & services** table.
+- **`chains.json`** (attack-chain-discovery) — `{ chains: [{ steps: [...] }] }` → the **Attack chains** graph (served as `/attack_chains.json`).
+- **`scope.yaml`** (engagement root) — scope / rules / window → the **Scope** panel (the launcher converts it to `scope.json`).
+
+Agents stats and the activity timeline have no dedicated file — the console **derives** them from each
+finding's `review.reviewer` + `review.reviewed_at`.
 
 CVSS 3.1 base scores are computed in-browser (`lib/cvss.ts`) with the **same formula as
-`../scripts/cvss.py`**, so the numbers match the engagement's authoritative scorer. Composite
-kill-chains are excluded from severity counts, matching the reporting skill.
+`../scripts/cvss.py`**, so the numbers match the engagement's authoritative scorer.
 
 ## Run
 
-**Dev (demo data):**
+**Against an engagement** — the console is a static build; `scripts/console.py` builds it (first run)
+and serves it alongside the engagement's JSON, so the same UI renders *your* results:
+
+```sh
+python ../scripts/console.py <engagement-dir>    # e.g. engagements/<client>-<date>/
+#  → http://localhost:8787   (badge: "Live engagement")
+```
+
+It searches the engagement dir recursively for `findings_consolidated.json`, `host_discovery.json`,
+`chains.json` and `scope.yaml`/`scope.json`, serves each at the site root under its canonical name,
+and the console **auto-loads** them on open. Missing files just stay an empty state. No Node is needed
+to serve once the console is built.
+
+**Dev (empty state / UI work):**
 
 ```sh
 cd console && npm install && npm run dev        # http://localhost:3000
 ```
 
-**Against a live engagement** — the console is a static build; `scripts/console.py` serves it and
-feeds it the JSON a real engagement produces, so the same UI renders *your* results:
+## Loading data manually
 
-```sh
-npm run build                                    # once → console/out/
-python ../scripts/console.py <engagement-dir>    # e.g. engagements/<client>-<date>/
-python ../scripts/console.py ../samples/acme-demo   # or the bundled sample
-#  → http://localhost:8787   (badge flips to "Live engagement")
-```
-
-It searches the engagement dir (recursively) for `findings_consolidated.json`, `host_discovery.json`,
-`scope.json` and `attack_chains.json`, serves each at the site root, and the console **auto-loads**
-them on open. Missing files just stay on demo data; no Node is needed to serve. `npm run serve` is a
-shortcut for the bundled sample.
-
-## Loading real engagement data
-
-Everything starts on the embedded **demo** dataset (badge: *Demo data*). To view a real
-engagement, click **Load data** in the top bar (or drag-and-drop) and select any combination of
-`findings_consolidated.json`, `scope.json`, `host_discovery.json` and `attack_chains.json` — each file is routed by its
-shape. Parsing happens entirely in the browser; nothing is uploaded. The badge flips to *Live
-engagement*; **Reset to demo** restores the sample.
+Besides the launcher, you can click **Load data** in the top bar (or drag-and-drop) and select any
+combination of `findings_consolidated.json`, `host_discovery.json`, `chains.json` and `scope.json` —
+each file is routed by its shape. Parsing happens entirely in the browser; nothing is uploaded. The
+badge flips to *Live engagement*; **Clear data** returns to the empty state.
 
 > Engagement findings and evidence are sensitive and git-ignored. Keep them local and deliver
 > through the agreed channel.
@@ -77,11 +79,11 @@ components/
   chains/       ChainGraph (SVG flow)
 lib/
   types.ts      data model (mirrors the finding / attack-chain schemas)
-  data.ts       embedded demo dataset
+  data.ts       zero-state (emptyData) + static agent roster + real-shape builders/derivers
   cvss.ts       CVSS 3.1 base scorer (port of scripts/cvss.py)
   theme.ts      severity / verdict / confidence color maps
   stats.ts      aggregations (severity counts, verification, groupings)
-  store.tsx     client store: active engagement, demo/live mode, JSON loader
+  store.tsx     client store: active engagement, empty/live mode, JSON loader + classifier
 ```
 
 ## Theming

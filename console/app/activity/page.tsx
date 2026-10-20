@@ -35,9 +35,12 @@ export default function ActivityPage() {
       </div>
 
       <Card className="p-5">
+        {events.length === 0 && (
+          <p className="py-12 text-center text-sm text-muted">No activity yet — load an engagement with reviewed findings.</p>
+        )}
         <ol className="relative">
           {/* vertical rail */}
-          <span className="absolute bottom-2 left-[15px] top-2 w-px bg-line" aria-hidden />
+          {events.length > 0 && <span className="absolute bottom-2 left-[15px] top-2 w-px bg-line" aria-hidden />}
           {events.map((e) => {
             const I = ACTIVITY_ICON[e.kind];
             return (

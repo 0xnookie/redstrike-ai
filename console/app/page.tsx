@@ -135,6 +135,7 @@ export default function DashboardPage() {
               View all <ArrowUpRight size={13} />
             </Link>
           </div>
+          {activity.length === 0 && <p className="py-8 text-center text-xs text-muted">No activity yet.</p>}
           <ul className="space-y-3">
             {activity.slice().reverse().slice(0, 6).map((e) => {
               const I = ACTIVITY_ICON[e.kind];
