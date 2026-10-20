@@ -7,7 +7,7 @@ import { PageHeader, Kpi } from "@/components/ui/primitives";
 import { FindingsTable } from "@/components/findings/FindingsTable";
 
 export default function FindingsPage() {
-  const { findings, openFinding } = useConsole();
+  const { findings, openFinding, findingsQuery } = useConsole();
 
   const rep = reportable(findings);
   const counts = severityCounts(rep);
@@ -25,7 +25,7 @@ export default function FindingsPage() {
         <Kpi label="Rejected" value={v.rejected} sub="excluded" />
       </div>
 
-      <FindingsTable findings={findings} onSelect={openFinding} />
+      <FindingsTable key={findingsQuery} findings={findings} onSelect={openFinding} initialQuery={findingsQuery} />
     </>
   );
 }

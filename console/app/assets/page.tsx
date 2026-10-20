@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Network, Globe, Server, Link2, Boxes, Radio, Search, X } from "lucide-react";
 import { useConsole } from "@/lib/store";
+import { useRouter } from "next/navigation";
 import { cx, fmtDate } from "@/lib/format";
 import type { Asset, AssetKind, Service } from "@/lib/types";
 import { Card, PageHeader, Kpi, Pill, Dot } from "@/components/ui/primitives";
@@ -15,7 +16,9 @@ const KIND_LABEL: Record<AssetKind, string> = {
 };
 
 export default function AssetsPage() {
-  const { activeEngagement: eng, assets, services } = useConsole();
+  const { activeEngagement: eng, assets, services, findings, setFindingsQuery } = useConsole();
+  const router = useRouter();
+  const openHostFindings = (host: string) => { setFindingsQuery(host); router.push("/findings"); };
   const [kind, setKind] = useState<AssetKind | "all">("all");
   const [svcQuery, setSvcQuery] = useState("");
   const [proto, setProto] = useState<"all" | "tcp" | "udp">("all");
@@ -67,7 +70,7 @@ export default function AssetsPage() {
 
       {/* asset coverage map */}
       <div className="mb-3">
-        <AssetMap assets={assets} orgName={eng.target} services={services} onSelectHost={selectHost} selectedHost={hostFilter ?? undefined} />
+        <AssetMap assets={assets} orgName={eng.target} services={services} findings={findings} onSelectHost={selectHost} selectedHost={hostFilter ?? undefined} />
       </div>
 
       {/* ports & services (from host discovery) */}
@@ -115,7 +118,7 @@ export default function AssetsPage() {
               </tr>
             </thead>
             <tbody>
-              {shownSvcs.map((s) => <ServiceRow key={s.id} svc={s} />)}
+              {shownSvcs.map((s) => <ServiceRow key={s.id} svc={s} onFindings={openHostFindings} />)}
             </tbody>
           </table>
           {shownSvcs.length === 0 && <div className="py-10 text-center text-sm text-muted">No ports match.</div>}
@@ -228,7 +231,7 @@ const SVC_STATE: Record<Service["state"], { label: string; color: string }> = {
 };
 const SVC_FLAG: Record<string, string> = { outdated: "#f59e0b", exposed: "#ef4444", edge: "#3b82f6", "out-of-scope": "#9ca3af" };
 
-function ServiceRow({ svc: s }: { svc: Service }) {
+function ServiceRow({ svc: s, onFindings }: { svc: Service; onFindings?: (host: string) => void }) {
   const st = SVC_STATE[s.state] ?? SVC_STATE.open;
   const out = s.flagged === "out-of-scope";
   return (
@@ -245,7 +248,13 @@ function ServiceRow({ svc: s }: { svc: Service }) {
       <td className="px-4 py-3">{s.tls ? <Pill label={s.tls} color="#38bdf8" /> : <span className="text-xs text-muted">—</span>}</td>
       <td className="px-4 py-3"><span className="inline-flex items-center gap-1.5 text-xs"><Dot color={st.color} />{st.label}</span></td>
       <td className="px-4 py-3">{s.flagged ? <Pill label={s.flagged} color={SVC_FLAG[s.flagged] ?? "#9ca3af"} dot /> : <span className="text-xs text-muted">—</span>}</td>
-      <td className="px-4 py-3 tabular-nums">{s.findings || <span className="text-muted">0</span>}</td>
+      <td className="px-4 py-3 tabular-nums">
+        {s.findings ? (
+          <button onClick={() => onFindings?.(s.host)} className="font-medium text-fg underline decoration-fg/30 underline-offset-2 hover:decoration-fg" title={`View ${s.findings} findings on ${s.host}`}>{s.findings}</button>
+        ) : (
+          <span className="text-muted">0</span>
+        )}
+      </td>
     </tr>
   );
 }
