@@ -7,6 +7,7 @@ import { cvssScore } from "@/lib/cvss";
 import { sevMeta, VERDICT } from "@/lib/theme";
 import { fmtDate, verdictOf } from "@/lib/format";
 import { Pill, SeverityBadge, ConfidenceBadge } from "@/components/ui/primitives";
+import { RichText } from "@/components/ui/RichText";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   if (!children) return null;
@@ -87,14 +88,14 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
         )}
         <Field label="Affected asset"><code className="break-all rounded bg-card2 px-1.5 py-0.5 text-xs">{f.asset}</code></Field>
         {maps.length > 0 && <Field label="Mappings"><div className="flex flex-wrap gap-1.5">{maps}</div></Field>}
-        {f.impact && <Field label="Impact">{f.impact}</Field>}
+        {f.impact && <Field label="Impact"><RichText text={f.impact} /></Field>}
         {f.reproduction?.length > 0 && (
           <Field label="Reproduction">
             <ol className="space-y-1.5">
               {f.reproduction.map((s, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="shrink-0 tabular-nums text-muted">{i + 1}.</span>
-                  <span>{s}</span>
+                  <RichText text={s} className="min-w-0 flex-1" />
                 </li>
               ))}
             </ol>
@@ -113,7 +114,7 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
             </ul>
           </Field>
         )}
-        {f.remediation && <Field label="Remediation">{f.remediation}</Field>}
+        {f.remediation && <Field label="Remediation"><RichText text={f.remediation} /></Field>}
         {f.references && f.references.length > 0 && (
           <Field label="References">
             <ul className="space-y-1">
@@ -130,7 +131,7 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
               <span className="font-mono text-xs text-muted">{f.review.reviewer}</span>
               {f.review.reviewed_at && <span className="text-xs text-muted">· {fmtDate(f.review.reviewed_at)}</span>}
             </div>
-            {f.review.notes && <p className="mt-1.5 text-xs text-muted">{f.review.notes}</p>}
+            {f.review.notes && <p className="mt-1.5 text-xs text-muted"><RichText text={f.review.notes} /></p>}
           </Field>
         )}
       </aside>

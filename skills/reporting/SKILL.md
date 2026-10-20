@@ -46,6 +46,17 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (report + consolidated JSO
 - **Phase 1 (generic):** collect + filter-to-accepted + de-dupe.
 - **Phase 2 (target-specific):** CVSS normalization + writeups + executive summary.
 
+## Console
+The web console (`scripts/console.py engagements/<dir>`) renders this engagement from the files the
+pipeline already emits — do NOT emit anything console-specific, just keep these shapes:
+- `report/findings_consolidated.json` — an object `{ engagement, target, generated, severity_counts, findings: [...], attack_chains: [...] }` (or a bare `findings` array). `findings[]` follow `finding.schema.json`; the kill-chain write-ups go in `attack_chains[]` (composite, non-additive). The console reads findings from here, folds `attack_chains` in as composite (kept out of the severity counts), and takes the engagement name/target from the header.
+- `host-discovery/host_discovery.json` — `{ live_hosts: [...], api_endpoints: [...] }` → the console's Assets map + Ports/services table.
+- `attack-chain-discovery/chains.json` — `{ chains: [{ steps: [...] }] }` → the console's Attack-chains graph.
+- `scope.yaml` (engagement root) → the console's Scope panel + window (the launcher converts it to JSON).
+
+Agents stats and the activity timeline are DERIVED by the console from each finding's `review.reviewer` +
+`review.reviewed_at`, so keep the `review` block on every finding. No separate agents/activity file is needed.
+
 ## Safety
 Report `accepted` findings as confirmed. Also include `blocked` findings (confirmed real, but a precondition
 blocked full demonstration) in a clearly-labeled "confirmed — demonstration limited" subsection, showing both
