@@ -7,7 +7,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { cx } from "@/lib/format";
 
 export function Topbar({ onToggleSidebar, onOpenPalette }: { onToggleSidebar: () => void; onOpenPalette: () => void }) {
-  const { mode, loadFiles, resetDemo } = useConsole();
+  const { mode, loadFiles, clearData } = useConsole();
   const fileRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -42,19 +42,19 @@ export function Topbar({ onToggleSidebar, onOpenPalette }: { onToggleSidebar: ()
       <span
         className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex"
         style={{
-          color: mode === "demo" ? "#f59e0b" : "#22c55e",
-          background: (mode === "demo" ? "#f59e0b" : "#22c55e") + "1f",
-          border: `1px solid ${(mode === "demo" ? "#f59e0b" : "#22c55e") + "55"}`,
+          color: mode === "empty" ? "#9ca3af" : "#22c55e",
+          background: (mode === "empty" ? "#9ca3af" : "#22c55e") + "1f",
+          border: `1px solid ${(mode === "empty" ? "#9ca3af" : "#22c55e") + "55"}`,
         }}
       >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: mode === "demo" ? "#f59e0b" : "#22c55e" }} />
-        {mode === "demo" ? "Demo data" : "Live engagement"}
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: mode === "empty" ? "#9ca3af" : "#22c55e" }} />
+        {mode === "empty" ? "No data loaded" : "Live engagement"}
       </span>
 
       {mode === "live" && (
         <button
-          onClick={resetDemo}
-          title="Reset to demo data"
+          onClick={clearData}
+          title="Clear loaded data"
           className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-card text-muted transition hover:text-fg"
         >
           <RotateCcw size={15} />

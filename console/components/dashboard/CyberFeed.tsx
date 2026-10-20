@@ -33,7 +33,8 @@ function sevOf(it: CveItem): Severity | undefined {
  * "What's New in Cyber" — a global CVE feed (not engagement-scoped): the 7-/30-day
  * detection counts, a spinning dotted globe, and the newest vulnerability detections,
  * each linking out to its authoritative record. Fed live (lib/cveFeed.ts) or by a
- * served cve_feed.json; falls back to the bundled snapshot offline.
+ * served cve_feed.json; if the live fetch fails and no feed is pinned, the card
+ * stays hidden rather than showing fabricated data.
  */
 export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boolean }) {
   if (!feed) return null;
@@ -47,7 +48,7 @@ export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boole
           {live ? (
             <span className="inline-flex items-center gap-1.5 font-medium text-fg"><Dot color="#22c55e" pulse /> Live</span>
           ) : (
-            <span>Demo feed</span>
+            <span>Pinned feed</span>
           )}
           <span className="text-muted/60">·</span>
           <span>Updated {fmtDate(feed.generated_at)}</span>
