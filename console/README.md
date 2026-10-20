@@ -22,9 +22,10 @@ there is **no bundled demo data**.
 
 ## Data model
 
-The console renders the engagement's own JSON exactly as the skills emit it (see
-`../skills/_contract/*.schema.json`). It served at the site root by `scripts/console.py` under the
-canonical names the console fetches on open:
+The console renders each engagement's own JSON exactly as the skills emit it (see
+`../skills/_contract/*.schema.json`). `scripts/console.py` discovers every engagement under the
+directory you point it at, publishes a `/engagements.json` manifest, and serves each engagement's
+files under `/e/<id>/…` — the console lazy-loads the one you select. Per engagement:
 
 - **`findings_consolidated.json`** (reporting) — `{ engagement, target, severity_counts, findings: [...], attack_chains: [...] }`, or a bare `findings` array. `findings[]` follow `finding.schema.json`; `attack_chains[]` are the composite, non-additive kill-chain write-ups (folded in but kept **out** of the severity counts).
 - **`host_discovery.json`** (host-discovery) — `{ live_hosts: [...], api_endpoints: [...] }` → the Assets map + **Ports & services** table.
@@ -39,18 +40,21 @@ CVSS 3.1 base scores are computed in-browser (`lib/cvss.ts`) with the **same for
 
 ## Run
 
-**Against an engagement** — the console is a static build; `scripts/console.py` builds it (first run)
-and serves it alongside the engagement's JSON, so the same UI renders *your* results:
+**Against your engagements** — the console is a static build; `scripts/console.py` builds it (first
+run) and serves it alongside the engagement JSON, so the same UI renders *your* results:
 
 ```sh
-python ../scripts/console.py <engagement-dir>    # e.g. engagements/<client>-<date>/
+python ../scripts/console.py                     # ALL engagements under engagements/ (default)
+python ../scripts/console.py <engagement-dir>    # or just one, e.g. engagements/<client>-<date>/
 #  → http://localhost:8787   (badge: "Live engagement")
 ```
 
-It searches the engagement dir recursively for `findings_consolidated.json`, `host_discovery.json`,
-`chains.json` and `scope.yaml`/`scope.json`, serves each at the site root under its canonical name,
-and the console **auto-loads** them on open. Missing files just stay an empty state. No Node is needed
-to serve once the console is built.
+Point it at the `engagements/` directory (the default) and it discovers every engagement inside and
+serves them all at once — switch between them from the **Engagements** page or ⌘K; the active one's
+data lazy-loads on selection and is remembered across reloads. Point it at a single engagement dir to
+serve just that one. It searches each engagement recursively for `findings_consolidated.json`,
+`host_discovery.json`, `chains.json` and `scope.yaml`/`scope.json`. Missing files just stay an empty
+state. No Node is needed to serve once the console is built.
 
 **Dev (empty state / UI work):**
 

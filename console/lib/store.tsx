@@ -1,15 +1,21 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, TestRun, CveFeed } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, EngagementStatus } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
-  deriveAgentStats, deriveActivity,
+  deriveAgentStats, deriveActivity, hostRoot,
 } from "./data";
 import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 
-// "empty" = nothing loaded (honest zero-state); "live" = reading a real engagement.
+// "empty" = nothing loaded (honest zero-state); "live" = reading real engagements.
 type Mode = "empty" | "live";
+
+// Each engagement's own findings/chains/services/assets, loaded on demand.
+interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; }
+const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [] };
+
+const ACTIVE_KEY = "redstrike.activeEngagement";
 
 interface ConsoleCtx {
   mode: Mode;
@@ -17,293 +23,256 @@ interface ConsoleCtx {
   activeEngagement: Engagement;
   activeId: string;
   setActiveId: (id: string) => void;
-  /** findings / chains scoped to the active engagement */
   findings: Finding[];
   chains: AttackChain[];
   agents: ConsoleData["agents"];
   activity: ConsoleData["activity"];
   assets: ConsoleData["assets"];
   services: ConsoleData["services"];
-  /** pentest runs scoped to the active engagement (Testing Activity + Recent Tests) */
   tests: TestRun[];
-  /** global CVE feed for "What's New in Cyber" (not engagement-scoped) */
   cveFeed: CveFeed | undefined;
-  /** true once the live CVE feed has been fetched (vs a pinned cve_feed.json) */
   cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
-  /** clear back to the empty zero-state */
   clearData: () => void;
-  /** finding detail drawer, lifted to the app so it opens from any view (and the ⌘K palette) */
   selectedFinding: Finding | null;
   openFinding: (f: Finding) => void;
   closeFinding: () => void;
-  /** seed for the Findings search (e.g. clicking a host's finding count on Assets) */
   findingsQuery: string;
   setFindingsQuery: (q: string) => void;
 }
 
 const Ctx = createContext<ConsoleCtx | null>(null);
 
+/* ---- helpers ---- */
+async function fetchJson(url: string): Promise<any> {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return undefined;
+    return await res.json();
+  } catch {
+    return undefined;
+  }
+}
+
+const safeLocalGet = (k: string): string | null => {
+  try { return localStorage.getItem(k); } catch { return null; }
+};
+const safeLocalSet = (k: string, v: string) => {
+  try { localStorage.setItem(k, v); } catch { /* private mode / blocked */ }
+};
+
+/** Assemble a dataset from an engagement's parsed canonical files. */
+function datasetFromFiles(cons: any, host: any, chainsFile: any): Dataset {
+  let findings: Finding[] = [];
+  let chains: AttackChain[] = [];
+  if (Array.isArray(cons)) {
+    findings = cons as Finding[];
+  } else if (cons && Array.isArray(cons.findings)) {
+    findings = cons.findings as Finding[];
+    // consolidated attack_chains are composite kill-chain write-ups (no steps) →
+    // fold in flagged composite so they resolve in the graph but stay out of counts
+    if (Array.isArray(cons.attack_chains) && !cons.attack_chains[0]?.steps) {
+      findings = [...findings, ...cons.attack_chains.map((f: Finding) => ({ ...f, composite: true }))];
+    }
+  }
+  if (chainsFile && Array.isArray(chainsFile.chains)) chains = chainsFile.chains as AttackChain[];
+  else if (cons && Array.isArray(cons.attack_chains) && cons.attack_chains[0]?.steps) chains = cons.attack_chains as AttackChain[];
+
+  let services: Service[] = [];
+  let assets: Asset[] = [];
+  if (host && (Array.isArray(host.live_hosts) || Array.isArray(host.hosts))) {
+    services = buildServices(host);
+    assets = buildAssets(host, hostRoot(services, (cons && cons.target) || ""));
+  }
+  return { findings, chains, services, assets };
+}
+
+/** Build an Engagement header from a manifest entry (its parsed scope + summary). */
+function toEngagement(entry: any): Engagement {
+  const sc = entry.scope || {};
+  const win = sc.window && (sc.window.start || sc.window.end) ? sc.window : { start: "", end: "" };
+  const ended = win.end && !isNaN(+new Date(win.end)) && +new Date(win.end) < Date.now();
+  const status: EngagementStatus = (entry.summary?.findings ?? 0) === 0 && !entry.has?.["findings_consolidated.json"]
+    ? "scoping"
+    : ended ? "completed" : "running";
+  return {
+    id: entry.id,
+    name: sc.engagement || entry.id,
+    target: sc.target || "—",
+    goal: sc.notes || "",
+    status,
+    authorized_by: sc.authorized_by || "—",
+    window: { start: win.start || "", end: win.end || "" },
+    in_scope: sc.in_scope || { domains: [], cidrs: [], urls: [] },
+    out_of_scope: sc.out_of_scope || { domains: [], cidrs: [], urls: [] },
+    rules: sc.rules || {},
+    summary: entry.summary,
+  };
+}
+
 export function ConsoleProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<ConsoleData>(emptyData);
+  const [engagements, setEngagements] = useState<Engagement[]>(emptyData.engagements);
+  const [datasets, setDatasets] = useState<Record<string, Dataset>>({});
+  const [activeId, setActiveIdState] = useState<string>(emptyData.activeEngagementId);
   const [mode, setMode] = useState<Mode>("empty");
-  const [activeId, setActiveId] = useState<string>(emptyData.activeEngagementId);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const openFinding = useCallback((f: Finding) => setSelectedFinding(f), []);
   const closeFinding = useCallback(() => setSelectedFinding(null), []);
   const [findingsQuery, setFindingsQuery] = useState("");
+  const [cveFeed, setCveFeed] = useState<CveFeed | undefined>(undefined);
   const [cveLive, setCveLive] = useState(false);
-  const cvePinnedRef = useRef(false); // a served cve_feed.json pins the feed (disables live fetch)
+  const cvePinnedRef = useRef(false);
   const cveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadedRef = useRef<Set<string>>(new Set());
 
-  const activeEngagement =
-    data.engagements.find((e) => e.id === activeId) ?? data.engagements[0];
+  const activeEngagement = engagements.find((e) => e.id === activeId) ?? engagements[0];
+  const active = datasets[activeId] ?? EMPTY_DS;
 
-  // findings / chains scoped to the active engagement; findings without an
-  // engagement_id are treated as belonging to the active one (loaded files).
-  const findings = useMemo(
-    () => data.findings.filter((f) => !f.engagement_id || f.engagement_id === activeId),
-    [data.findings, activeId]
-  );
-  const chains = data.chains;
+  const findings = active.findings;
+  const chains = active.chains;
+  const services = active.services;
+  const assets = useMemo(() => overlayAssetFindings(active.assets, active.findings), [active.assets, active.findings]);
+  const agents = useMemo(() => deriveAgentStats(agentRoster, active.findings), [active.findings]);
+  const activity = useMemo(() => deriveActivity(active.findings), [active.findings]);
+  const tests: TestRun[] = []; // no per-run source yet; the activity timeline drives the heatmap
 
-  // tests scoped to the active engagement
-  const tests = useMemo(
-    () => data.tests.filter((t) => !t.engagement_id || t.engagement_id === activeId),
-    [data.tests, activeId]
-  );
+  /** Fetch + assemble one engagement's dataset (once). */
+  const loadEngagement = useCallback(async (id: string) => {
+    if (loadedRef.current.has(id)) return;
+    loadedRef.current.add(id);
+    const base = `/e/${id}`;
+    const [cons, host, chainsFile] = await Promise.all([
+      fetchJson(`${base}/findings_consolidated.json`),
+      fetchJson(`${base}/host_discovery.json`),
+      fetchJson(`${base}/attack_chains.json`),
+    ]);
+    if (cons === undefined && host === undefined && chainsFile === undefined) {
+      loadedRef.current.delete(id); // nothing served (e.g. scaffold-only) — allow a retry later
+      return;
+    }
+    const ds = datasetFromFiles(cons, host, chainsFile);
+    setDatasets((d) => ({ ...d, [id]: ds }));
+  }, []);
 
-  // Agents, activity and per-asset finding counts have no dedicated engagement
-  // file — they are derived from the real findings + host-discovery.
-  const agents = useMemo(() => deriveAgentStats(agentRoster, findings), [findings]);
-  const activity = useMemo(() => deriveActivity(findings), [findings]);
-  const assets = useMemo(() => overlayAssetFindings(data.assets, findings), [data.assets, findings]);
+  const setActiveId = useCallback((id: string) => {
+    setActiveIdState(id);
+    safeLocalSet(ACTIVE_KEY, id);
+    void loadEngagement(id);
+  }, [loadEngagement]);
 
-  const patchEngagement = useCallback(
-    (patch: Partial<Engagement>) => {
-      setData((d) => ({
-        ...d,
-        engagements: d.engagements.map((e) => (e.id === activeId ? { ...e, ...patch } : e)),
-      }));
-      setMode("live");
-    },
-    [activeId]
-  );
+  /* ---- manual file drop/load into the ACTIVE engagement ---- */
+  const patchActive = useCallback((partial: Partial<Dataset>) => {
+    setDatasets((d) => ({ ...d, [activeId]: { ...(d[activeId] ?? EMPTY_DS), ...partial } }));
+    setMode("live");
+  }, [activeId]);
 
-  const classify = useCallback(
-    (json: unknown, _name: string): string => {
-      // bare findings array (older findings_consolidated.json / a per-skill findings.json)
-      if (Array.isArray(json)) {
-        const tagged = (json as Finding[]).map((f) => ({ ...f, engagement_id: activeId }));
-        setData((d) => ({ ...d, findings: tagged }));
-        setMode("live");
+  const patchEngagement = useCallback((patch: Partial<Engagement>) => {
+    setEngagements((es) => es.map((e) => (e.id === activeId ? { ...e, ...patch } : e)));
+  }, [activeId]);
+
+  const classify = useCallback((json: unknown, _name: string): string => {
+    if (Array.isArray(json)) { patchActive({ findings: json as Finding[] }); return "findings"; }
+    if (json && typeof json === "object") {
+      const o = json as Record<string, unknown>;
+      if (Array.isArray(o.items) && (o.count_7d != null || o.count_30d != null || o.generated_at != null)) {
+        cvePinnedRef.current = true;
+        setCveFeed(o as unknown as CveFeed);
+        return "cve_feed";
+      }
+      if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
+        const services = buildServices(o);
+        patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)) });
+        return "host_discovery";
+      }
+      if (Array.isArray(o.chains)) { patchActive({ chains: o.chains as AttackChain[] }); return "chains"; }
+      if (Array.isArray(o.attack_chains) && (o.attack_chains as any[])[0]?.steps) {
+        patchActive({ chains: o.attack_chains as AttackChain[] }); return "chains";
+      }
+      if (Array.isArray(o.findings)) {
+        let findings = o.findings as Finding[];
+        if (Array.isArray(o.attack_chains) && !(o.attack_chains as any[])[0]?.steps) {
+          findings = [...findings, ...(o.attack_chains as Finding[]).map((f) => ({ ...f, composite: true }))];
+        }
+        patchActive({ findings });
+        patchEngagement({
+          name: (o.engagement as string) || activeEngagement.name,
+          target: (o.target as string) || activeEngagement.target,
+          status: "running",
+        });
         return "findings";
       }
-      if (json && typeof json === "object") {
-        const o = json as Record<string, unknown>;
-
-        // tests.json → { tests: [...] }
-        if (Array.isArray(o.tests)) {
-          const t = (o.tests as TestRun[]).map((x) => ({ ...x, engagement_id: activeId }));
-          setData((d) => ({ ...d, tests: t }));
-          setMode("live");
-          return "tests";
-        }
-
-        // cve_feed.json → { generated_at, count_7d, count_30d, items: [...] }
-        if (Array.isArray(o.items) && (o.count_7d != null || o.count_30d != null || o.generated_at != null)) {
-          cvePinnedRef.current = true; // explicit feed file wins over the live fetch
-          setData((d) => ({ ...d, cveFeed: o as unknown as CveFeed }));
-          return "cve_feed";
-        }
-
-        // host_discovery.json → services + assets (current live_hosts shape OR older hosts[].ports[])
-        if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
-          const orgName = (o.engagement as string) || activeEngagement.target || "";
-          const services = buildServices(o);
-          const builtAssets = buildAssets(o, hostRoot(services, orgName));
-          setData((d) => ({ ...d, services, assets: builtAssets }));
-          // a minimal scope hint from host-discovery's scope block
-          const sc = o.scope as Record<string, unknown> | undefined;
-          if (sc && typeof sc.host === "string") {
-            setData((d) => ({
-              ...d,
-              engagements: d.engagements.map((e) =>
-                e.id === activeId && e.in_scope.domains.length === 0
-                  ? { ...e, in_scope: { ...e.in_scope, domains: [sc.host as string] } }
-                  : e
-              ),
-            }));
-          }
-          setMode("live");
-          return "host_discovery";
-        }
-
-        // attack chains (step-graph): attack-chain-discovery/chains.json → { chains: [{ steps }] }
-        if (Array.isArray(o.chains)) {
-          setData((d) => ({ ...d, chains: o.chains as AttackChain[] }));
-          setMode("live");
-          return "chains";
-        }
-        if (Array.isArray(o.attack_chains) && (o.attack_chains as any[])[0]?.steps) {
-          setData((d) => ({ ...d, chains: o.attack_chains as AttackChain[] }));
-          setMode("live");
-          return "chains";
-        }
-
-        // findings_consolidated.json → { engagement, target, findings: [...], attack_chains?: [...] }
-        if (Array.isArray(o.findings)) {
-          const tagged = (o.findings as Finding[]).map((f) => ({ ...f, engagement_id: activeId }));
-          // the consolidated `attack_chains` are composite, non-additive findings
-          // (the kill-chain write-ups). Fold them in flagged composite so they
-          // resolve in the chain graph / report but stay OUT of the severity counts.
-          const composites = Array.isArray(o.attack_chains) && !(o.attack_chains as any[])[0]?.steps
-            ? (o.attack_chains as Finding[]).map((f) => ({ ...f, composite: true, engagement_id: activeId }))
-            : [];
-          setData((d) => ({ ...d, findings: [...tagged, ...composites] }));
-          patchEngagement({
-            name: (o.engagement as string) || activeEngagement.name,
-            target: (o.target as string) || activeEngagement.target,
-            status: "running",
-            ...(o.window ? { window: o.window as Engagement["window"] } : {}),
-            ...(o.authorized_by ? { authorized_by: o.authorized_by as string } : {}),
-            ...(o.in_scope ? { in_scope: o.in_scope as Engagement["in_scope"] } : {}),
-            ...(o.out_of_scope ? { out_of_scope: o.out_of_scope as Engagement["out_of_scope"] } : {}),
-            ...(o.rules ? { rules: o.rules as Engagement["rules"] } : {}),
-          });
-          // step-graph chains only; the consolidated attack_chains are composite findings
-          if (Array.isArray(o.attack_chains) && (o.attack_chains as any[])[0]?.steps) {
-            setData((d) => ({ ...d, chains: o.attack_chains as AttackChain[] }));
-          }
-          setMode("live");
-          return "findings";
-        }
-
-        // scope.json → engagement header (name / window / scope / rules)
-        if (o.in_scope || o.window || o.engagement || o.authorized_by) {
-          patchEngagement({
-            name: (o.engagement as string) || activeEngagement.name,
-            target: (o.target as string) || firstDomain(o) || activeEngagement.target,
-            goal: (o.goal as string) || (o.notes as string) || activeEngagement.goal,
-            authorized_by: (o.authorized_by as string) || activeEngagement.authorized_by,
-            ...(o.window ? { window: o.window as Engagement["window"] } : {}),
-            ...(o.in_scope ? { in_scope: o.in_scope as Engagement["in_scope"] } : {}),
-            ...(o.out_of_scope ? { out_of_scope: o.out_of_scope as Engagement["out_of_scope"] } : {}),
-            ...(o.rules ? { rules: o.rules as Engagement["rules"] } : {}),
-          });
-          return "scope";
-        }
+      if (o.in_scope || o.window || o.engagement || o.authorized_by) {
+        patchEngagement({
+          name: (o.engagement as string) || activeEngagement.name,
+          target: (o.target as string) || activeEngagement.target,
+          goal: (o.goal as string) || (o.notes as string) || activeEngagement.goal,
+          authorized_by: (o.authorized_by as string) || activeEngagement.authorized_by,
+          ...(o.window ? { window: o.window as Engagement["window"] } : {}),
+          ...(o.in_scope ? { in_scope: o.in_scope as Engagement["in_scope"] } : {}),
+          ...(o.out_of_scope ? { out_of_scope: o.out_of_scope as Engagement["out_of_scope"] } : {}),
+          ...(o.rules ? { rules: o.rules as Engagement["rules"] } : {}),
+        });
+        setMode("live");
+        return "scope";
       }
-      return "unknown";
-    },
-    [activeId, activeEngagement.name, activeEngagement.target, patchEngagement]
-  );
+    }
+    return "unknown";
+  }, [activeEngagement.name, activeEngagement.target, activeEngagement.goal, activeEngagement.authorized_by, patchActive, patchEngagement]);
 
-  const loadFiles = useCallback(
-    async (files: FileList | File[]): Promise<string[]> => {
-      const arr = Array.from(files);
-      const kinds: string[] = [];
-      for (const file of arr) {
-        try {
-          const text = await file.text();
-          kinds.push(classify(JSON.parse(text), file.name));
-        } catch {
-          kinds.push(`error:${file.name}`);
-        }
-      }
-      return kinds;
-    },
-    [classify]
-  );
+  const loadFiles = useCallback(async (files: FileList | File[]): Promise<string[]> => {
+    const arr = Array.from(files);
+    const kinds: string[] = [];
+    for (const file of arr) {
+      try { kinds.push(classify(JSON.parse(await file.text()), file.name)); }
+      catch { kinds.push(`error:${file.name}`); }
+    }
+    return kinds;
+  }, [classify]);
 
   const clearData = useCallback(() => {
-    setData(emptyData);
-    setActiveId(emptyData.activeEngagementId);
+    loadedRef.current = new Set();
+    setEngagements(emptyData.engagements);
+    setDatasets({});
+    setActiveIdState(emptyData.activeEngagementId);
     setMode("empty");
   }, []);
 
-  // Auto-load a live engagement when the console is served next to its output
-  // (scripts/console.py). Harmless 404s otherwise → the empty state stays.
+  /* ---- boot: load the manifest of all engagements, then the active one ---- */
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
     (async () => {
-      for (const url of ["/findings_consolidated.json", "/scope.json", "/host_discovery.json", "/attack_chains.json", "/tests.json", "/cve_feed.json"]) {
-        try {
-          const res = await fetch(url, { cache: "no-store" });
-          if (!res.ok) continue;
-          classify(JSON.parse(await res.text()), url);
-        } catch {
-          /* missing / not JSON — ignore */
-        }
+      const manifest = await fetchJson("/engagements.json");
+      if (manifest && Array.isArray(manifest.engagements) && manifest.engagements.length) {
+        const engs = manifest.engagements.map(toEngagement);
+        setEngagements(engs);
+        setMode("live");
+        const remembered = safeLocalGet(ACTIVE_KEY);
+        const initial = engs.find((e: Engagement) => e.id === remembered)?.id ?? engs[0].id;
+        setActiveIdState(initial);
+        await loadEngagement(initial);
       }
-      // Live CVE feed for "What's New in Cyber" — fetched client-side, refreshed on
-      // an interval. Skipped when a cve_feed.json was served (explicit override).
-      // On failure (offline / CORS / rate-limited) the card simply stays hidden.
+      // Global CVE feed — live, client-side; hidden on failure (no fabricated data).
       if (!cvePinnedRef.current) {
         const applyLive = async () => {
-          try {
-            const live = await fetchLiveCveFeed();
-            setData((d) => ({ ...d, cveFeed: live }));
-            setCveLive(true);
-          } catch {
-            /* keep whatever feed we already have */
-          }
+          try { setCveFeed(await fetchLiveCveFeed()); setCveLive(true); } catch { /* keep current */ }
         };
         await applyLive();
         if (!cvePinnedRef.current) cveTimer.current = setInterval(applyLive, CVE_FEED.refreshMs);
       }
     })();
-    return () => {
-      if (cveTimer.current) clearInterval(cveTimer.current);
-    };
-  }, [classify]);
+    return () => { if (cveTimer.current) clearInterval(cveTimer.current); };
+  }, [loadEngagement]);
 
   const value: ConsoleCtx = {
-    mode,
-    engagements: data.engagements,
-    activeEngagement,
-    activeId,
-    setActiveId,
-    findings,
-    chains,
-    agents,
-    activity,
-    assets,
-    services: data.services,
-    tests,
-    cveFeed: data.cveFeed,
-    cveLive,
-    loadFiles,
-    clearData,
-    selectedFinding,
-    openFinding,
-    closeFinding,
-    findingsQuery,
-    setFindingsQuery,
+    mode, engagements, activeEngagement, activeId, setActiveId,
+    findings, chains, agents, activity, assets, services, tests,
+    cveFeed, cveLive, loadFiles, clearData,
+    selectedFinding, openFinding, closeFinding, findingsQuery, setFindingsQuery,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-/** Pick a sensible org-root label for the asset map (the shared parent domain). */
-function hostRoot(services: Service[], fallback: string): string {
-  const hosts = Array.from(new Set(services.map((s) => s.host).filter(Boolean)));
-  if (hosts.length === 1) return hosts[0];
-  // common apex suffix (e.g. example.com) across hosts, else the fallback
-  const parts = hosts.map((h) => h.split("."));
-  if (parts.length > 1) {
-    const apex = parts[0].slice(-2).join(".");
-    if (parts.every((p) => p.slice(-2).join(".") === apex)) return apex;
-  }
-  return fallback || hosts[0] || "target";
-}
-
-/** First in-scope domain from a scope object, used as a target fallback. */
-function firstDomain(o: Record<string, unknown>): string | undefined {
-  const inScope = o.in_scope as { domains?: string[] } | undefined;
-  return inScope?.domains?.[0]?.replace(/^\*\./, "");
 }
 
 export function useConsole(): ConsoleCtx {
