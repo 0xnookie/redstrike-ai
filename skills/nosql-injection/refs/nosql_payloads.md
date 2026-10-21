@@ -26,6 +26,12 @@ username=admin'||'1'=='1
 '; return true; var x='              # inject into a $where string
 {"$where":"this.username=='admin'"}
 ```
+Vector note: `$where` string concatenation also happens in URL **path/query segments**, not just JSON bodies
+— e.g. `GET /track-order/<id>` where `<id>` is spliced into `this.orderId === '<id>'`. A tautology there
+(`' || 'a'=='a`, url-encoded `%27%20%7C%7C%20%27a%27%3D%3D%27a`, or `'||true||'`) makes the predicate
+always-true and returns the WHOLE collection — one object expected, many returned. Confirm with the
+1-vs-many differential (a non-matching garbage id returns nothing; the tautology returns all), NOT a bulk
+read, and never a sleep/loop.
 
 ## Blind (minimal, short)
 ```
