@@ -51,9 +51,6 @@ env/
 .pytest_cache/
 .mypy_cache/
 
-# ---- Benchmark (per-run score dumps are transient; targets/ + baselines/ are tracked) ----
-benchmark/results/
-
 # ---- Misc ----
 tmp/
 temp/
