@@ -56,11 +56,29 @@ it with a **clean autonomous-run** score once the engagement run is wired into C
   gates future runs within `tolerance` (default 0.05, to absorb run-to-run LLM variance). Tune `max_turns` /
   `max_budget_usd` to trade cost for depth.
 
+## Two answer-key types (how targets stay general, not Juice-Shop-overfit)
+
+A `targets/<name>.json` declares one of:
+
+- **`http-json`** — a live solved-API (Juice Shop: `GET /api/Challenges`, boolean `solved`). Score with
+  `--base-url` (live) or `--answer-key <dump>`.
+- **`findings-match`** — a **static expected-vuln manifest**; recall is scored by matching the run's
+  `findings.json` (accepted/verified findings) against `expected[]`. Needs **no solved-API**, so **any**
+  labelled target works. Score with `--engagement <dir>`:
+  ```bash
+  python scripts/benchmark.py --score --target generic-web --engagement engagements/<client>-<date>
+  ```
+  A matcher fires when EVERY declared key matches: `cwe` (exact), `owasp` (prefix), `wstg` (substring),
+  `title_regex`. `targets/generic-web.json` is a ready OWASP-Top-10 template — clone it per target and trim
+  `expected` to that app's known vulnerabilities.
+
+The scorer, baseline, and regression gate are **target-agnostic** — they work the same for both types.
+
 ## Targets roadmap
 
-Juice Shop first (breadth across the OWASP Top 10). Add shape-diverse targets to avoid overfitting:
-**WebGoat** / **DVWA** (classic web), **VAmPI** / **crAPI** (API-centric, for BOLA/BFLA). Each is a new
-`targets/<name>.json` with its own answer-key adapter; the scorer and gate are target-agnostic.
+Juice Shop is the live-API reference. Add shape-diverse targets to avoid overfitting: **WebGoat** / **DVWA**
+(classic web), **VAmPI** / **crAPI** (API-centric, for BOLA/BFLA). Apps without a solved-API use
+`findings-match` with a curated `expected[]` manifest.
 
 ## Files
 
