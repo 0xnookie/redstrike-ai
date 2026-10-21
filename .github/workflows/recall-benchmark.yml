@@ -109,6 +109,10 @@ jobs:
       - name: Score recall
         run: python scripts/benchmark.py --score --target juice-shop --answer-key challenges.json
 
+      - name: Score findings-coverage (target-agnostic, generic-web manifest)
+        if: steps.creds.outputs.have == 'yes' && env.ENG != ''
+        run: python scripts/benchmark.py --score --target generic-web --engagement "engagements/$ENG"
+
       - name: Record a new baseline (mode=baseline)
         if: steps.creds.outputs.have == 'yes' && inputs.mode == 'baseline'
         run: |
