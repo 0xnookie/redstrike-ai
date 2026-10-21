@@ -34,6 +34,13 @@ missing/incomplete, the window is closed, or a target falls outside scope.
 client-side JS; for a pure API / JS-less target, skip it with an explicit N/A note)*.
 Run `redstrike-cve-intelligence` to prioritize.
 
+**Provision ≥2 test identities + an authenticated recon pass.** If the app has registration/login, create
+(or have the operator supply) **two test accounts** up front — content-discovery then crawls the
+**authenticated** surface and diffs it against unauth, and `authz-context`/`api-context` get the ≥2 identities
+they require for IDOR/BOLA/BFLA (without them that whole surface is unmapped and those classes are starved).
+Map multi-step workflows (checkout/reset/upload/admin) as state for `business-logic`/`race-condition`. TEST
+accounts only — never authenticate with found or real credentials.
+
 ## 2. Vuln categories (Tier 2)  → route DETERMINISTICALLY, then track coverage
 Routing is **deterministic, not improvised.** The authoritative source is
 `skills/_contract/routing-map.json` (every category, the recon **signals** that trigger it, its phase).
