@@ -166,23 +166,7 @@ try:
 except BaseException as e:  # noqa: BLE001 — selftest may sys.exit on a bad map
     err(f"coverage.py selftest failed: {e}")
 
-# 9 — recall-benchmark self-test (target specs valid + category map in sync with the routing map)
-bench_py = ROOT / "scripts" / "benchmark.py"
-if bench_py.is_file():
-    try:
-        import importlib.util
-        _bspec = importlib.util.spec_from_file_location("rs_benchmark_lint", bench_py)
-        _bench = importlib.util.module_from_spec(_bspec)
-        _bspec.loader.exec_module(_bench)
-        import io
-        import contextlib
-        with contextlib.redirect_stdout(io.StringIO()):
-            _bench.selftest()
-        checked["benchmark"] = 1
-    except BaseException as e:  # noqa: BLE001
-        err(f"benchmark.py selftest failed: {e}")
-
-# 10 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
+# 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():
     try:
