@@ -277,6 +277,26 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                 if p.is_file() and p.stat().st_size > 0 and str(p.resolve()) not in referenced:
                     orphans.append(str(p.relative_to(eng)))
 
+    # recall audit: open-proof-gaps are real-looking findings dropped ONLY for lack of proof — keep visible
+    opgaps = []
+    reviews_dir2 = eng / "reviews"
+    for f in findings:
+        rc = (f.get("review") or {}).get("rejection_class")
+        if rc is None and reviews_dir2.is_dir():
+            vp = reviews_dir2 / f"{f.get('id')}.verdict.json"
+            if vp.is_file():
+                try:
+                    rc = (json.loads(vp.read_text(encoding="utf-8")) or {}).get("rejection_class")
+                except json.JSONDecodeError:
+                    rc = None
+        if rc == "open-proof-gap":
+            opgaps.append(f.get("id"))
+    if opgaps:
+        shown = ", ".join(str(x) for x in opgaps[:5]) + ("…" if len(opgaps) > 5 else "")
+        top_warnings.append(f"recall audit: {len(opgaps)} open-proof-gap finding(s) ({shown}) — "
+                            "real-looking but unproven here; report as caveats / recall re-run candidates, "
+                            "not silent drops")
+
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
 

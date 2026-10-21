@@ -67,6 +67,7 @@
               "additionalProperties": { "enum": ["pass", "fail", "n/a"] }
             },
             "false_positive_checks": { "type": "array", "items": { "type": "string" } },
+            "rejection_class": { "enum": ["false-positive", "out-of-scope", "duplicate", "open-proof-gap"], "description": "REQUIRED when verdict=rejected — why. false-positive/out-of-scope/duplicate are clean drops. 'open-proof-gap' = real-looking but undemonstrable here (env/creds/WAF/time); it is REPORTED as a known gap / recall caveat, never silently dropped. Recall rule: when genuinely unsure between false-positive and open-proof-gap, choose open-proof-gap — a false positive is caught downstream, a false negative is invisible." },
             "scope_ok": { "type": "boolean" },
             "notes": { "type": "string" }
           }
