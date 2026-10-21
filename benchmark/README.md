@@ -42,10 +42,19 @@ it with a **clean autonomous-run** score once the engagement run is wired into C
 
 - `validate.yml` runs `benchmark.py --selftest` on every push — keeps the target specs valid and the
   category map in sync with `routing-map.json` (no network).
-- `recall-benchmark.yml` (`workflow_dispatch`) spins up Juice Shop, **runs the Redstrike engagement**, then
-  runs `--check`. The engagement-run step is the open piece: it needs the agent runtime + credentials and is
-  marked as pluggable in the workflow. Until it's wired, trigger the workflow after a local/manual run that
-  populated the target, or run `--check` locally.
+- `recall-benchmark.yml` (`workflow_dispatch`) runs the **full loop**: spin up Juice Shop → install the
+  Redstrike CLI + Claude Code → `redstrike init` an engagement scoped to the service and pre-approve benign
+  exploitation (drops `exploitation` from `approval_required_phases`, leaving host-level post-exploitation
+  gated) → `redstrike run --autonomous` (budget/turn-capped, deny-by-default + scope gate, `--allow Bash`,
+  benign-PoC prompt) → capture `/api/Challenges` → score + gate. Needs a repo secret **`ANTHROPIC_API_KEY`**
+  (or `CLAUDE_CODE_OAUTH_TOKEN`); without it the engagement run and gate are skipped and only the tooling is
+  validated.
+
+  **Record the autonomous baseline first.** The committed baseline (40/116) is an *assisted* ceiling, so a
+  `mode=check` run would fail honestly. Dispatch once with **`mode=baseline`** to record the true autonomous
+  floor (it's uploaded as an artifact — commit it to `benchmark/baselines/juice-shop.json`). Then `mode=check`
+  gates future runs within `tolerance` (default 0.05, to absorb run-to-run LLM variance). Tune `max_turns` /
+  `max_budget_usd` to trade cost for depth.
 
 ## Targets roadmap
 
