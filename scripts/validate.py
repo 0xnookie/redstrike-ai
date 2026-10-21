@@ -120,6 +120,52 @@ try:
 except ImportError as e:
     err(f"cvss: cannot import scripts/cvss.py: {e}")
 
+# 7 — routing map covers every executor exactly once (so a new class can't silently become an orphan)
+map_path = ROOT / "skills" / "_contract" / "routing-map.json"
+if not map_path.is_file():
+    err("skills/_contract/routing-map.json missing")
+else:
+    try:
+        rmap = json.loads(map_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        rmap = None
+        err(f"routing-map.json: invalid JSON: {e}")
+    if rmap:
+        checked["routing"] = 1
+        executors = {p.name for p in skills_dir.iterdir()
+                     if p.is_dir() and (p / "verify.md").is_file()}
+        mapped = [a for c in rmap.get("categories", []) for a in c.get("agents", [])]
+        mapped_set = set(mapped)
+        for miss in sorted(executors - mapped_set):
+            err(f"routing-map.json: executor '{miss}' is routed by no category (orphan — wire a trigger)")
+        for extra in sorted(mapped_set - executors):
+            err(f"routing-map.json: agent '{extra}' has no skills/{extra}/ dir")
+        if len(mapped) != len(mapped_set):
+            dups = sorted({a for a in mapped if mapped.count(a) > 1})
+            err(f"routing-map.json: executor(s) mapped to >1 category: {', '.join(dups)}")
+        vocab = set(rmap.get("signals", {}))
+        for c in rmap.get("categories", []):
+            for t in c.get("triggers", []):
+                if t not in vocab:
+                    err(f"routing-map.json: category '{c['id']}' uses undefined signal '{t}'")
+            if not c.get("baseline") and c.get("phase") != "capability" and not c.get("skip_reason"):
+                err(f"routing-map.json: category '{c['id']}' is non-baseline but has no skip_reason")
+
+# 8 — coverage.py routing/ledger self-test
+try:
+    import importlib.util
+    _cp = ROOT / "scripts" / "coverage.py"
+    _spec = importlib.util.spec_from_file_location("rs_coverage_lint", _cp)
+    _cov = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_cov)
+    import io
+    import contextlib
+    with contextlib.redirect_stdout(io.StringIO()):
+        _cov.selftest()
+    checked["coverage"] = 1
+except BaseException as e:  # noqa: BLE001 — selftest may sys.exit on a bad map
+    err(f"coverage.py selftest failed: {e}")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
