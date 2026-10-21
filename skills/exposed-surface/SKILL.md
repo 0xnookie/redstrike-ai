@@ -67,4 +67,10 @@ never DoS. **Rate-limit** to `scope.yaml` `rate_limit_rps`; in-scope hosts only;
 signature read (one `/.git/HEAD`, one `.env` line); note reconstructability instead of mirroring the whole
 repo/DB/heapdump. **Redact** any secret to a fingerprint in evidence and hand live-secret validation to
 `secrets`. Prefer the custom/sensitive wordlists (fewer, smarter requests) over mega-lists on prod.
+**nuclei detection-only:** scope nuclei to the exposure template dirs (`http/exposures/`,
+`http/misconfiguration/`, `http/exposed-panels/`, `http/backups/`) and defensively exclude active-exploit
+classes with `-etags rce,intrusive,dos,oast`. **Never** `-tags <product>` (e.g. `weblogic`) here — that
+pulls the product's CVE *exploit* templates (some fire real RCE, e.g. `CVE-2020-14883`) and silently crosses
+the exploitation approval gate. CVE confirmation belongs to `cve-intelligence` (also detection-only);
+actually firing an exploit is `exploit-generator`, approval-gated.
 Audit-log.

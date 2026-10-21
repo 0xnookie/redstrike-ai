@@ -89,6 +89,11 @@ def check_artifact(a: dict, out: Path):
                 return False, f"{rel} is an empty array"
             if isinstance(data, dict) and not data and not a.get("allow_empty_object", False):
                 return False, f"{rel} is an empty object"
+            sch = a.get("schema")
+            if sch:
+                ok, note = _validate_against_schema(data, sch)
+                if not ok:
+                    return False, f"{rel} fails schema {sch}: {note}"
         else:  # jsonl
             lines = [ln for ln in raw.splitlines() if ln.strip()]
             need = a.get("min_items", 1)
@@ -116,6 +121,29 @@ _REVIEWED_STATUSES = {"verified", "rejected", "remediated"}
 def _repo_root() -> Path:
     # skills/_contract/verify_completion.py -> repo root is two levels up.
     return Path(__file__).resolve().parents[2]
+
+
+def _validate_against_schema(data, schema_rel: str):
+    """Best-effort JSON-Schema validation for an artifact that declares `schema`.
+    Returns (ok, note). Degrades gracefully: a missing schema file or a missing
+    `jsonschema` dependency SKIPS (ok=True) rather than failing the gate, so CI
+    without the dep still runs; a real schema violation FAILS (ok=False)."""
+    schema_path = _repo_root() / schema_rel
+    if not schema_path.is_file():
+        return True, f"schema {schema_rel} not found (skipped)"
+    try:
+        import jsonschema  # type: ignore
+    except ImportError:
+        return True, "jsonschema not installed (skipped)"
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(data, schema)
+    except jsonschema.ValidationError as e:  # type: ignore
+        loc = "/".join(str(x) for x in e.absolute_path) or "<root>"
+        return False, f"{e.message} (at {loc})"
+    except Exception as e:  # malformed schema etc. — don't block the gate
+        return True, f"schema check error: {e} (skipped)"
+    return True, "schema ok"
 
 
 def _try_import_cvss():
