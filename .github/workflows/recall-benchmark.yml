@@ -1,0 +1,46 @@
+name: recall-benchmark
+
+# Phase 2: measure recall against a labelled target (OWASP Juice Shop) and gate on regressions.
+# Manual for now — the engagement-run step needs the agent runtime + model credentials.
+on:
+  workflow_dispatch:
+    inputs:
+      tolerance:
+        description: "allowed recall drop (0.0 = any drop is a regression)"
+        default: "0.0"
+
+jobs:
+  juice-shop:
+    runs-on: ubuntu-latest
+    services:
+      juice-shop:
+        image: bkimminich/juice-shop
+        ports: ["3000:3000"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Wait for Juice Shop
+        run: timeout 180 bash -c 'until curl -sf http://localhost:3000/rest/admin/application-version; do sleep 3; done'
+
+      - name: Validate benchmark specs (no network)
+        run: python scripts/benchmark.py --selftest
+
+      # ---------------------------------------------------------------------------------------------
+      # PLUGGABLE: run the Redstrike engagement against http://localhost:3000 here. It needs the agent
+      # runtime + model credentials (repo/org secrets) and solves challenges in the live instance.
+      # Until this is wired, the check below scores a FRESH (0-solved) instance and will fail — which
+      # is the correct "no engagement actually ran" signal, not a benchmark bug.
+      # - name: Run Redstrike engagement
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      #   run: <invoke the orchestrator against http://localhost:3000, autonomous benign-PoC mode>
+      # ---------------------------------------------------------------------------------------------
+
+      - name: Score recall
+        run: python scripts/benchmark.py --score --target juice-shop --base-url http://localhost:3000
+
+      - name: Regression check vs baseline
+        run: python scripts/benchmark.py --check --target juice-shop --base-url http://localhost:3000 --tolerance "${{ inputs.tolerance }}"
