@@ -8,6 +8,7 @@
 - **STEPS:** ingest a target agent's attempts + WAF signals → analyze what's filtered → generate optimized payload variants → mine additional params → tune throughput to stay under limits → emit optimized sets → review.
 - **TOOLS:** `arjun`/`x8` (param mining), encoding/mutation libraries, WAF fingerprint (`wafw00f`), rate analysis.
 - **GOAL:** Produce optimized payload variants + additional params + a safe throughput profile for a target agent, raising its hit-rate without tripping the WAF or rate limits. Done = checklist `- [x]`, review passes.
+- **WHEN:** not only reactively (after a WAF block) — run **proactively** on a **high-value sink** before the caller concludes "no vuln" (`hunter-base.md` step 4, payload breadth before a negative). An exhausted single payload family is a recall gap, not a clean negative; widen contexts/encodings/event-handlers here first.
 - **OUTPUT:** `filter_analysis.json`, `optimized_payloads.jsonl`, `mined_params.txt`, `summary.md`, `logs/`.
 - **DATA / RAG:** inputs = a Tier-2 agent's `payloads_tried.jsonl` (+ WAF/block signals) + the relevant `refs/` + `scope.yaml`. Chains FROM any Tier-2 agent; chains TO that same agent (re-run with optimized sets).
 - **DECOMPOSITION:** n/a (capability service).
