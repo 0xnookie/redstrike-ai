@@ -29,9 +29,18 @@ stays in the Tier-1 skill.)
 4. **Gated hunt (depth-first)** — run the class's executors; each mechanical-gated
    (`verify_completion.py`) then its `*-verify` reviewer subagent. **Only `accepted` findings advance.**
    Iterate for DEPTH within budget (the class's ladders/surfaces), not breadth across other classes.
+   **Payload breadth before a negative:** a high-value sink (a confirmed reflection/injection point, an
+   auth / object-ref / URL-fetch surface) is NOT concluded "no vuln" after one payload family fails —
+   exhaust the class's payload contexts / encodings / event-handlers first, and invoke
+   `parameter-optimization` **proactively** on it (not only after a WAF block). One failed payload is an
+   open-proof-gap, not a clean negative (`counterevidence.md`). E.g. an HTML/`innerHTML` XSS sink:
+   `javascript:` does not fire in a modern browser but an `onerror`/`onload` handler does — trying only the
+   former reads as a false negative.
 5. **Escalate** — the class's escalation catalog (the CLASS BLOCK's escalation ref) + `attack-chain-
    discovery` for cross-finding composites. Rate to the impact actually demonstrated
-   (`severity-calibration.md`).
+   (`severity-calibration.md`). For a **high-value class with budget to spare**, a diversity pass raises
+   recall: re-run the sink with a different payload set (and, where available, a different model) and
+   de-dupe at report — different seeds surface different bugs.
 6. **Triage / de-dupe** — drop duplicates (program known issues + internal); keep `accepted` + in-scope +
    non-duplicate only.
 7. **Package** — `reporting` + per-finding submission drafts in `submissions/`, each meeting
