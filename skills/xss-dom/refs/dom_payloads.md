@@ -19,6 +19,11 @@ postMessage: attacker page -> target iframe:  frame.postMessage(PAYLOAD, '*')
 <svg onload=print()>
 ```
 Note: `<script>` injected via `innerHTML` does NOT execute — use `img`/`svg`/event handlers.
+Note: a `javascript:` scheme (including `<iframe src="javascript:alert()">`) does NOT execute for an
+HTML/`innerHTML` sink in a current browser — Chromium/Firefox block `javascript:` navigation inside frames.
+The classic `<iframe src="javascript:alert()">` therefore fires nothing and reads as a FALSE NEGATIVE
+(e.g. against an Angular `bypassSecurityTrustHtml` → `[innerHTML]` sink). Confirm HTML sinks with an event
+handler (`onerror`/`onload`); reserve `javascript:` for navigation sinks (`location`/`a.href`) only.
 
 ### Code-exec sinks (`eval`, `Function`, `setTimeout(string)`)
 ```
