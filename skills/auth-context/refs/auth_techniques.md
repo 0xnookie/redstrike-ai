@@ -14,6 +14,15 @@
 - **2FA/MFA bypass:** skip the 2FA step (go straight to the post-2FA endpoint), reuse/brute the OTP
   (rate-limit permitting — few attempts only), backup-code abuse.
 - Password-reset: token predictability, host-header poisoning (→ host-header agent), reuse, no expiry.
+- **Password CHANGE without the current password:** a `change-password` endpoint that doesn't verify the
+  CURRENT password lets anyone holding the victim's *session* (or a CSRF) set a new one. Test on a TEST
+  account: call the change with `new`/`repeat` only (omit/blank `current`, or send a wrong `current`) —
+  if it succeeds, it's broken (CWE-620). Combine with a session you shouldn't have (e.g. a SQLi-obtained
+  login for another test user) to show cross-account takeover.
+- **Security-question reset abuse:** the "answer" is low-entropy and often OSINT-derivable (pet, school,
+  city) or guessable from a small set; a distinct response for right-vs-wrong answers is a guessing oracle.
+  Enumerate the question, try a bounded set of likely answers on a TEST account (lockout-aware, few tries),
+  and if it resets the password it's a weak second factor. Never brute a real user's answer.
 
 ## jwt
 - `alg:none` (strip signature); accept `{"alg":"none"}`.
