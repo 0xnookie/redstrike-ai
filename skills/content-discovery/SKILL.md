@@ -5,7 +5,8 @@
 > crawl + JS. ACTIVE → honors `_contract/roe-gate.md`. Emits NO findings → `review.md` only.
 
 ## Interview
-- **STEPS:** ingest live hosts → crawl → historical URLs → BUILD custom wordlist (osint terms + crawl + js) → directory/file brute-force → parameter discovery → virtual-host/bucket check → consolidate → review.
+- **STEPS:** ingest live hosts + any provided identities → crawl **unauth AND authenticated (per identity)** → historical URLs → BUILD custom wordlist (osint terms + crawl + js) → directory/file brute-force → parameter discovery → **authed-vs-unauth surface diff + multi-step flow map** → virtual-host/bucket check → consolidate → review.
+- **AUTHENTICATED & STATE-AWARE (don't leave the post-login surface unmapped):** most access-control, BOLA/BFLA, workflow and business-logic bugs live *behind auth* and *across steps*. With provided credentials (or self-registered test accounts), **log in and crawl the authenticated surface**, then **diff authed-vs-unauth** to surface role-gated/hidden endpoints, and **map multi-step workflows** (checkout, password-reset, upload, admin, cart/coupon) as state transitions. Unauth-only recon starves `authz-context`/`api-context` and misses that surface entirely. Use TEST accounts only; never authenticate with found/real creds.
 - **TOOLS:** `katana`/`hakrawler`/`gospider` (crawl), `gau`/`waymore` (historical), `cewl` + synth (wordlist), `ffuf`/`feroxbuster`/`gobuster`/`dirsearch` (brute-force), `arjun`/`paramspider`/`x8` (params), `wafw00f` (WAF fingerprint). Tool-first — `_contract/tooling.md`.
 - **GOAL:** Produce the content map per host — crawled + brute-forced endpoints, discovered params, and a **custom wordlist** — feeding js-analysis and the vuln agents. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `crawl.txt`, `endpoints.txt`, `params.txt`, `custom_wordlist.txt`, `content.json`, `summary.md`, `logs/`.
