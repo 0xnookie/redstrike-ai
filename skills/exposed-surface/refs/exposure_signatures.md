@@ -35,7 +35,8 @@ gobuster dir -u https://HOST -w refs/sensitive_paths.txt -b 404,403 -q -o gobust
 dirsearch -u https://HOST -w refs/sensitive_paths.txt --format=jsonl -o dirsearch.jsonl
 
 # Templated exposures (info leak / misconfig / panels / backups)
-nuclei -u https://HOST -t http/exposures/ -t http/misconfiguration/ -t http/exposed-panels/ -t http/backups/ -rl <rps> -jsonl -o nuclei.jsonl
+# detection-only: scope to exposure dirs AND exclude active-exploit classes (-etags). NEVER -tags <product> (pulls CVE exploit templates that fire real RCE, crossing the approval gate).
+nuclei -u https://HOST -t http/exposures/ -t http/misconfiguration/ -t http/exposed-panels/ -t http/backups/ -etags rce,intrusive,dos,oast -rl <rps> -jsonl -o nuclei.jsonl
 
 # Fingerprint (tune lists + pace)
 wafw00f https://HOST ; httpx -u https://HOST -td -sc -title -json
