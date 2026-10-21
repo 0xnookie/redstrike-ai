@@ -36,5 +36,7 @@ succeeds → the difference is attributable to the bug, not to noise.
 - **confirmed** — demonstrated per the skill's `verify.md`.
 - **ruled out** — disproven WITH evidence (a negative control, or a verified in-path control). "I didn't
   see it" is not ruling out.
-- **open proof-gap** — real-looking but undemonstrable here (env / creds / WAF). Carry it as a caveat
-  (finding `status: blocked`, or a `needs-evidence` note) — never silently drop it.
+- **open proof-gap** — real-looking but undemonstrable here (env / creds / WAF / time). Carry it as a caveat:
+  finding `status: blocked` when you are confident it is real, or `rejected` with
+  `review.rejection_class: open-proof-gap` when unsure — the engagement gate surfaces the open-proof-gap
+  count so it stays visible. **Never a silent `rejected` as false-positive** (`verify-base.md` recall audit).
