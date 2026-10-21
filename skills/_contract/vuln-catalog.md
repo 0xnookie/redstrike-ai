@@ -33,9 +33,11 @@ on an OPTIONAL second pass — an enrichment, **not** a precedence, so recon sta
 
 Global recon runs once per engagement. Each `<class>-context` feeder specializes that surface for
 its class (injectable params, URL-fetching sinks, object references, XML endpoints, …). Variant
-agents consume the feeder and produce findings. The **orchestrator** routes targets to the
-relevant class feeders based on global-recon signals (a `url=` param → `ssrf-context`; a login
-form → `auth-context`; a GraphQL endpoint → `api-context`; a DOM sink → `xss-context`).
+agents consume the feeder and produce findings. The **orchestrator** routes targets to the relevant
+class feeders **deterministically** from [`routing-map.json`](routing-map.json) — each category declares
+the recon signals that trigger it — and `scripts/coverage.py --plan` records the result in a per-engagement
+`coverage_ledger.json`, so every category is `attempted` / `skipped (reason)` / `n/a` and **none is skipped
+silently**. See **Deterministic routing & coverage ledger** below.
 
 ## Contract
 
@@ -43,6 +45,26 @@ Every agent — feeder or variant, every category — is built on `_contract/REA
 interview header, `checklist.md` (load-bearing), `review.md` (+ manifest, `verify_completion.py`),
 and `verify.md` **iff** it emits `findings.json`. Active categories import `_contract/roe-gate.md`.
 Findings use `_contract/finding.schema.json`; feeders define a `<class>_context.schema.json`.
+
+## Deterministic routing & coverage ledger
+
+Routing is a function, not a judgment call. [`routing-map.json`](routing-map.json) is the single source of
+truth: each catalog category declares the recon **signals** that route it, its **phase** (`web` / `ai-llm` /
+`web3` / `internal-ad` / `post-exploitation` / `cloud` / …), and whether it is **baseline** (always run).
+[`scripts/coverage.py`](../../scripts/coverage.py):
+
+- `--plan --signals <file|-> --phases web[,…] --engagement <dir>` → writes `<dir>/coverage_ledger.json`
+  (schema: [`coverage_ledger.schema.json`](coverage_ledger.schema.json)). Every category becomes `pending`
+  (routed → must run), `skipped` (no trigger matched — **with a stated reason**), or `n/a` (phase out of
+  scope). No signals ⇒ attempt everything in scope (recall-safe default). This wired the formerly
+  un-triggered executors — `nosql-injection`, `ldap-injection`, `prototype-pollution`, `race-condition`,
+  `parameter-pollution`, `crypto-attacks`, `tls-attacks`, `supply-chain` — into real triggers.
+- `--validate --engagement <dir>` → **fails** if any map category is missing from the ledger or left
+  `pending` (a routed class that never ran). `verify_completion.py --engagement` also surfaces gaps as
+  warnings; `scripts/validate.py` (CI) keeps the map in sync with the skill set and runs the self-test.
+
+The rule: **"not attempted" is a first-class, visible state.** A class that never ran and a class that
+ran-and-found-nothing must not look the same.
 
 ## Catalog (OWASP-aligned)
 

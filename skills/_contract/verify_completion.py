@@ -132,6 +132,43 @@ def _scope_text(eng: Path) -> str:
     return sp.read_text(encoding="utf-8", errors="replace") if sp.is_file() else ""
 
 
+def _try_import_coverage():
+    # import scripts/coverage.py by PATH (not name) so the pip 'coverage' package can't shadow it
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "coverage.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_coverage", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def _coverage_warnings(eng: Path) -> list:
+    """Soft, non-fatal coverage-ledger check folded into the engagement gate. The hard gate is the
+    dedicated `scripts/coverage.py --validate`; here a gap is surfaced as a warning only."""
+    cov = _try_import_coverage()
+    if not cov:
+        return []
+    try:
+        m = cov.load_map()
+    except SystemExit:
+        return []
+    if not (eng / "coverage_ledger.json").is_file():
+        return ["no coverage_ledger.json — category coverage untracked "
+                "(run scripts/coverage.py --plan --engagement <dir>)"]
+    try:
+        ok, _lines, msgs = cov.validate(eng, m, strict=False)
+    except Exception:
+        return []
+    if not ok:
+        return [f"coverage: {msg}" for msg in msgs if not str(msg).startswith("no coverage_ledger")]
+    return []
+
+
 def _asset_host(asset: str) -> str:
     """Best-effort registrable host from an asset URL/endpoint (for a soft scope check)."""
     s = re.sub(r"^[a-z]+://", "", str(asset)).strip()
@@ -203,6 +240,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     top_warnings = []
     if not scope_text:
         top_warnings.append("scope.yaml absent — scope compliance cannot be auto-checked (flagged, not failed)")
+    top_warnings.extend(_coverage_warnings(eng))
 
     if not fj.is_file():
         msg = f"no findings.json at {fj}"
