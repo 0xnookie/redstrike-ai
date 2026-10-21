@@ -2,8 +2,11 @@
 # `- [ ]` = NOT done, MUST be re-run · `- [x]` = done.
 
 ## Crawl
-- [ ] Live hosts + osint terms ingested
+- [ ] Live hosts + osint terms + provided identities ingested
 - [ ] Crawled each live host (spider, JS-aware)
+- [ ] Authenticated crawl per provided/registered identity (login → spider post-login surface)
+- [ ] Authed-vs-unauth diff (role-gated / hidden endpoints surfaced → authed_endpoints.txt)
+- [ ] Multi-step workflows mapped as state transitions (checkout/reset/upload/admin → state_flows.md)
 - [ ] Historical URLs merged (gau/waymore)
 
 ## Wordlist
