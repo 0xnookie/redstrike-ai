@@ -42,40 +42,6 @@ The problem with LLM-driven offensive tooling is two failure modes: it **halluci
 
 ---
 
-## 🖥️ Console
-
-A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the real JSON the skills emit — `findings_consolidated.json` (reporting), `host_discovery.json` (host-discovery), `chains.json` (attack-chain-discovery) and `scope.yaml` — with **no demo data**. Point `scripts/console.py` at your `engagements/` directory and it serves **every** engagement at once (switch between them in the UI); point it at a single engagement dir for just that one. It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, derives the agent/activity views from each finding's reviewer record, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
-
-```sh
-python scripts/console.py                                # build (first run) + serve ALL engagements/ → :8787
-python scripts/console.py engagements/<client>-<date>/   # or just one engagement
-cd console && npm install && npm run dev                 # or: dev server for UI work (empty state)
-```
-
-<p align="center">
-  <img src="assets/console/dashboard.png" alt="Redstrike console — dashboard" width="100%" />
-</p>
-
-<table>
-  <tr>
-    <td width="50%"><img src="assets/console/findings.png" alt="Findings" width="100%" /><br/><sub><b>Findings</b> — filter, sort, severity-coded; full write-up drawer with evidence &amp; CVSS</sub></td>
-    <td width="50%"><img src="assets/console/attack-chains.png" alt="Attack chains" width="100%" /><br/><sub><b>Attack chains</b> — kill-chain graph composed from accepted findings</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — force-directed coverage map (tested / in-progress / out-of-scope)</sub></td>
-    <td width="50%"><img src="assets/console/agents.png" alt="Agent fleet" width="100%" /><br/><sub><b>Agents</b> — the executor + independent-reviewer fleet, by family &amp; tier</sub></td>
-  </tr>
-</table>
-
-<p align="center">
-  <img src="assets/console/report.png" alt="Report" width="100%" />
-  <br/><sub><b>Report</b> — executive summary, risk-ordered findings, export / print</sub>
-</p>
-
-> Theme toggles light/dark; everything is monochrome chrome with color reserved for data (severity, verdict, coverage, graphs). See [`console/`](console/) for the full view list and how to load real engagement data.
-
----
-
 ## 🏗️ Architecture
 
 Three tiers. Lower tiers produce typed artifacts; higher tiers consume and orchestrate them — all coordination happens through shared contracts on disk (`finding.schema.json`, `<class>_context.schema.json`, the evidence vault), never ad-hoc chatter, so the whole engagement is auditable and replayable.
@@ -246,6 +212,38 @@ files; `scope.yaml` is the signed record, `runtime/scope.json` its machine proje
 runs `dontAsk` + an allowlist (deny-by-default), budget/turn-capped, MCP-isolated; shell the operator
 didn't pre-allow is **deferred for approval** (`redstrike approve` → `--resume`) rather than run. The hook
 is a safety net over the OS sandbox (WSL2/Linux), not a replacement. Full docs: [`cli/README.md`](cli/README.md).
+
+### 🖥️ Console
+
+A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the real JSON the skills emit — `findings_consolidated.json` (reporting), `host_discovery.json` (host-discovery), `chains.json` (attack-chain-discovery) and `scope.yaml` — with **no demo data**. Point `scripts/console.py` at your `engagements/` directory and it serves **every** engagement at once (switch between them in the UI); point it at a single engagement dir for just that one. It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, derives the agent/activity views from each finding's reviewer record, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
+
+```sh
+python scripts/console.py                                # build (first run) + serve ALL engagements/ → :8787
+python scripts/console.py engagements/<client>-<date>/   # or just one engagement
+cd console && npm install && npm run dev                 # or: dev server for UI work (empty state)
+```
+
+<p align="center">
+  <img src="assets/console/dashboard.png" alt="Redstrike console — dashboard" width="100%" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/console/findings.png" alt="Findings" width="100%" /><br/><sub><b>Findings</b> — filter, sort, severity-coded; full write-up drawer with evidence &amp; CVSS</sub></td>
+    <td width="50%"><img src="assets/console/attack-chains.png" alt="Attack chains" width="100%" /><br/><sub><b>Attack chains</b> — kill-chain graph composed from accepted findings</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — force-directed coverage map (tested / in-progress / out-of-scope)</sub></td>
+    <td width="50%"><img src="assets/console/agents.png" alt="Agent fleet" width="100%" /><br/><sub><b>Agents</b> — the executor + independent-reviewer fleet, by family &amp; tier</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="assets/console/report.png" alt="Report" width="100%" />
+  <br/><sub><b>Report</b> — executive summary, risk-ordered findings, export / print</sub>
+</p>
+
+> Theme toggles light/dark; everything is monochrome chrome with color reserved for data (severity, verdict, coverage, graphs). See [`console/`](console/) for the full view list and how to load real engagement data.
 
 ---
 
