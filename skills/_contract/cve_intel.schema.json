@@ -40,6 +40,10 @@
           "exploit_ref": { "type": "string", "description": "exploit-db / metasploit / PoC url" },
           "reachable": { "enum": ["yes", "no", "unknown"] },
           "confidence": { "enum": ["confirmed", "probable", "tentative"] },
+          "source": { "type": "array", "items": { "enum": ["osv", "ghsa", "nvd", "retire.js", "grype", "trivy", "osv-scanner", "nuclei"] }, "description": "advisory feed(s) the match came from — prefer >1." },
+          "kev": { "type": "boolean", "description": "listed in the CISA Known Exploited Vulnerabilities catalog — test first." },
+          "epss": { "type": "number", "minimum": 0, "maximum": 1, "description": "FIRST EPSS 30-day exploitation probability (0..1)." },
+          "priority_rank": { "type": "integer", "minimum": 1, "description": "1-based rank from scripts/cve_prioritize.py (KEV > EPSS > reachability > CVSS)." },
           "notes": { "type": "string" }
         }
       }

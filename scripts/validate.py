@@ -182,6 +182,22 @@ if bench_py.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"benchmark.py selftest failed: {e}")
 
+# 10 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
+cvep = ROOT / "scripts" / "cve_prioritize.py"
+if cvep.is_file():
+    try:
+        import importlib.util
+        _cspec = importlib.util.spec_from_file_location("rs_cveprio_lint", cvep)
+        _cve = importlib.util.module_from_spec(_cspec)
+        _cspec.loader.exec_module(_cve)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _cve.selftest()
+        checked["cve_prioritize"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"cve_prioritize.py selftest failed: {e}")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
