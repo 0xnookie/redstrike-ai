@@ -56,6 +56,8 @@ it with a **clean autonomous-run** score once the engagement run is wired into C
   gates future runs within `tolerance` (default 0.05, to absorb run-to-run LLM variance). Tune `max_turns` /
   `max_budget_usd` to trade cost for depth.
 
+  **One-time setup (secret → baseline → check), with exact commands: [`RUNBOOK.md`](RUNBOOK.md).**
+
 ## Two answer-key types (how targets stay general, not Juice-Shop-overfit)
 
 A `targets/<name>.json` declares one of:
