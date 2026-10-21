@@ -1,0 +1,1068 @@
+{
+  "version": 1,
+  "description": "Deterministic routing map for the Redstrike orchestrator. Each category lists the recon SIGNALS that route it; scripts/coverage.py --plan turns (map + signals + active phases) into a coverage_ledger.json so that EVERY category is recorded as attempted, skipped (with a reason) or n/a (phase not in scope). This replaces model-interpreted routing and wires the formerly un-triggered executors (nosql-injection, ldap-injection, prototype-pollution, race-condition, parameter-pollution, crypto-attacks, tls-attacks, supply-chain) into triggers.",
+  "phases": {
+    "web": {
+      "default": true,
+      "desc": "standard black/grey-box web application testing"
+    },
+    "ai-llm": {
+      "default": false,
+      "auto_on": "feature:llm-chat|feature:ml-pipeline|feature:agent-tools",
+      "desc": "LLM/AI application testing (OWASP LLM Top 10)"
+    },
+    "web3": {
+      "default": false,
+      "auto_on": "asset:smart-contract",
+      "desc": "smart-contract testing"
+    },
+    "internal-ad": {
+      "default": false,
+      "auto_on": "foothold:domain",
+      "desc": "internal / assumed-breach / Active Directory"
+    },
+    "post-exploitation": {
+      "default": false,
+      "auto_on": "foothold:host",
+      "desc": "on a landed host; approval-gated"
+    },
+    "cloud": {
+      "default": false,
+      "auto_on": "asset:cloud",
+      "desc": "cloud exploitation; approval-gated"
+    },
+    "mobile": {
+      "default": false,
+      "auto_on": "asset:mobile-app",
+      "desc": "mobile application"
+    },
+    "iot": {
+      "default": false,
+      "auto_on": "asset:firmware",
+      "desc": "IoT/embedded; approval-gated"
+    },
+    "wireless": {
+      "default": false,
+      "auto_on": "asset:wireless",
+      "desc": "wireless; approval-gated"
+    },
+    "social": {
+      "default": false,
+      "auto_on": "scope:social-authorized",
+      "desc": "social engineering; written authorization required"
+    },
+    "binary": {
+      "default": false,
+      "auto_on": "asset:binary",
+      "desc": "memory-safety fuzzing/exploit-dev"
+    },
+    "capability": {
+      "default": true,
+      "desc": "pipeline stages (chaining, exploit generation) over findings"
+    }
+  },
+  "signals": {
+    "param:any": "the target exposes request parameters (query/body/path/header)",
+    "param:injectable": "a parameter reaches a backend query/interpreter (error/behaviour differential)",
+    "param:url-fetching": "a parameter takes a URL/host the server then fetches",
+    "param:file-path": "a parameter names a file or path the server reads/includes",
+    "param:redirect": "a parameter controls a redirect/forward destination",
+    "param:json": "JSON request bodies or structured object parameters are accepted",
+    "param:search": "a search/filter/lookup parameter backed by a datastore or directory",
+    "sink:template": "user input reaches a server-side template engine",
+    "sink:command": "user input can reach an OS command",
+    "sink:dom": "a client-side DOM sink consumes URL/input (from js-analysis)",
+    "sink:html-reflect": "input is reflected into an HTML response",
+    "endpoint:xml": "an endpoint parses XML (SOAP, SAML, upload, API)",
+    "endpoint:upload": "a file-upload endpoint exists",
+    "endpoint:api": "REST/JSON API endpoints exist",
+    "endpoint:graphql": "a GraphQL endpoint exists",
+    "endpoint:https": "the target serves TLS/HTTPS",
+    "flow:auth": "a login / session / token flow exists",
+    "flow:login-form": "a login form is present",
+    "flow:password-reset": "a password-reset / forgot-password flow exists",
+    "flow:state-change": "cookie-authenticated state-changing actions exist",
+    "flow:multi-step": "multi-step workflows / business processes exist",
+    "action:limited-state-change": "single-use or quota-limited actions (coupon, purchase, vote, withdraw)",
+    "identities:multi": "two or more test identities are available",
+    "objref:enumerable": "enumerable object references (sequential/guessable ids)",
+    "tech:js-node": "a JavaScript/Node.js stack",
+    "tech:nosql": "a NoSQL datastore (MongoDB, CouchDB, ...)",
+    "tech:ldap": "an LDAP/directory backend",
+    "tech:wordpress": "WordPress fingerprinted",
+    "tech:nextjs": "Next.js fingerprinted",
+    "token:opaque-nonjwt": "opaque signed/encrypted non-JWT tokens or cookies",
+    "infra:cache-cdn": "a cache or CDN sits in front of the app",
+    "infra:proxy-chain": "a front-end/back-end proxy chain (smuggling surface)",
+    "asset:dangling-dns": "a DNS record points to a claimable/unclaimed resource",
+    "artifact:dependency-manifest": "a dependency manifest/lockfile was obtained (incl. recovered backups)",
+    "registry:private-scope": "private package scopes / internal registry references",
+    "source:available": "application source code is available (white-box)",
+    "feature:llm-chat": "an LLM / chatbot / assistant feature is reachable",
+    "feature:ml-pipeline": "a training / fine-tune / RAG-ingestion pipeline is reachable",
+    "feature:agent-tools": "the LLM can call tools / has agency",
+    "asset:smart-contract": "smart contracts are in scope",
+    "foothold:domain": "an authenticated Active Directory foothold exists",
+    "foothold:host": "a landed host (shell/session) exists",
+    "asset:cloud": "cloud credentials or an instance-metadata path are reachable",
+    "asset:mobile-app": "a mobile application build is in scope",
+    "asset:firmware": "a firmware image / IoT device is in scope",
+    "asset:wireless": "a wireless network/device is in scope",
+    "asset:binary": "a native binary / network service is in scope for memory-safety testing",
+    "scope:social-authorized": "an approved, named social-engineering population is in scope",
+    "finding:accepted": "at least one accepted finding exists (pipeline input)"
+  },
+  "categories": [
+    {
+      "id": "xss",
+      "name": "Cross-site scripting",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "xss-context",
+      "agents": [
+        "xss-reflected",
+        "xss-stored",
+        "xss-dom",
+        "xss-blind"
+      ],
+      "baseline": false,
+      "triggers": [
+        "sink:html-reflect",
+        "sink:dom",
+        "param:any"
+      ],
+      "skip_reason": "no HTML-reflection, DOM sink, or injectable parameter surfaced"
+    },
+    {
+      "id": "sqli",
+      "name": "SQL injection",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "sqli-context",
+      "agents": [
+        "sqli-inband",
+        "sqli-blind"
+      ],
+      "baseline": false,
+      "triggers": [
+        "param:injectable",
+        "param:search"
+      ],
+      "skip_reason": "no injectable parameter reaching a SQL backend surfaced"
+    },
+    {
+      "id": "injection",
+      "name": "Command / code / template injection",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "injection-context",
+      "agents": [
+        "ssti",
+        "command-injection",
+        "deserialization"
+      ],
+      "baseline": false,
+      "triggers": [
+        "sink:template",
+        "sink:command",
+        "param:injectable"
+      ],
+      "skip_reason": "no template/command/deserialization sink surfaced"
+    },
+    {
+      "id": "ssrf",
+      "name": "Server-side request forgery",
+      "owasp": "A10",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "ssrf-context",
+      "agents": [
+        "ssrf-inband",
+        "ssrf-blind",
+        "ssrf-cloud"
+      ],
+      "baseline": false,
+      "triggers": [
+        "param:url-fetching"
+      ],
+      "skip_reason": "no URL-fetching parameter surfaced"
+    },
+    {
+      "id": "authz",
+      "name": "Broken access control / IDOR",
+      "owasp": "A01",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "authz-context",
+      "agents": [
+        "idor",
+        "privesc"
+      ],
+      "baseline": false,
+      "triggers": [
+        "objref:enumerable",
+        "identities:multi"
+      ],
+      "skip_reason": "no enumerable object references and <2 identities to test authz"
+    },
+    {
+      "id": "xxe",
+      "name": "XML external entity",
+      "owasp": "A05",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "xxe-context",
+      "agents": [
+        "xxe-inband",
+        "xxe-blind"
+      ],
+      "baseline": false,
+      "triggers": [
+        "endpoint:xml"
+      ],
+      "skip_reason": "no XML-parsing endpoint surfaced"
+    },
+    {
+      "id": "file",
+      "name": "File / path (traversal, LFI, upload-RCE)",
+      "owasp": "A01/A05",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "file-context",
+      "agents": [
+        "path-traversal-lfi",
+        "upload-rce"
+      ],
+      "baseline": false,
+      "triggers": [
+        "param:file-path",
+        "endpoint:upload"
+      ],
+      "skip_reason": "no file-path parameter or upload endpoint surfaced"
+    },
+    {
+      "id": "auth",
+      "name": "Authentication & session",
+      "owasp": "A07",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "auth-context",
+      "agents": [
+        "auth-bypass",
+        "jwt",
+        "oauth"
+      ],
+      "baseline": false,
+      "triggers": [
+        "flow:auth"
+      ],
+      "skip_reason": "no authentication/session flow surfaced"
+    },
+    {
+      "id": "api",
+      "name": "API object/function-level authz",
+      "owasp": "API",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "api-context",
+      "agents": [
+        "bola-bfla",
+        "graphql"
+      ],
+      "baseline": false,
+      "triggers": [
+        "endpoint:api",
+        "endpoint:graphql"
+      ],
+      "skip_reason": "no REST/GraphQL API surface (or <2 identities) surfaced",
+      "notes": "needs >=2 identities for BOLA/BFLA depth"
+    },
+    {
+      "id": "open-redirect",
+      "name": "Open redirect",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "open-redirect"
+      ],
+      "baseline": false,
+      "triggers": [
+        "param:redirect"
+      ],
+      "skip_reason": "no redirect-controlling parameter surfaced"
+    },
+    {
+      "id": "csrf",
+      "name": "Cross-site request forgery",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "csrf"
+      ],
+      "baseline": false,
+      "triggers": [
+        "flow:state-change"
+      ],
+      "skip_reason": "no cookie-authenticated state-changing action surfaced"
+    },
+    {
+      "id": "cors",
+      "name": "CORS misconfiguration",
+      "owasp": "A05",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "cors"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: checked on any origin-reflecting endpoint"
+    },
+    {
+      "id": "clickjacking",
+      "name": "Clickjacking",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "clickjacking"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: frame-ancestors/XFO posture is universal"
+    },
+    {
+      "id": "host-header",
+      "name": "Host-header injection",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "host-header"
+      ],
+      "baseline": false,
+      "triggers": [
+        "flow:password-reset",
+        "infra:cache-cdn"
+      ],
+      "skip_reason": "no reset-link/redirect/cache sink consuming the Host header surfaced"
+    },
+    {
+      "id": "cache-poisoning",
+      "name": "Web cache poisoning/deception",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "cache-poisoning"
+      ],
+      "baseline": false,
+      "triggers": [
+        "infra:cache-cdn"
+      ],
+      "skip_reason": "no cache/CDN layer surfaced"
+    },
+    {
+      "id": "request-smuggling",
+      "name": "HTTP request smuggling",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "request-smuggling"
+      ],
+      "baseline": false,
+      "triggers": [
+        "infra:proxy-chain"
+      ],
+      "skip_reason": "no front-end/back-end proxy chain surfaced",
+      "risk": "high",
+      "notes": "HIGH-RISK, approval-gated; confirm via self-canary only"
+    },
+    {
+      "id": "subdomain-takeover",
+      "name": "Subdomain takeover",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "subdomain-takeover"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:dangling-dns"
+      ],
+      "skip_reason": "no dangling DNS record surfaced"
+    },
+    {
+      "id": "security-headers",
+      "name": "Security misconfiguration / headers",
+      "owasp": "A05",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "security-headers"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: header posture is universal"
+    },
+    {
+      "id": "secrets",
+      "name": "Secrets / sensitive data",
+      "owasp": "A02",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "secrets"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: consumes js-analysis secrets.jsonl"
+    },
+    {
+      "id": "exposed-surface",
+      "name": "Exposed surface / sensitive files",
+      "owasp": "A05/A01",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "exposed-surface"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: dir/file/VCS/backup/actuator fuzzing"
+    },
+    {
+      "id": "business-logic",
+      "name": "Business logic",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "business-logic"
+      ],
+      "baseline": false,
+      "triggers": [
+        "flow:multi-step",
+        "action:limited-state-change"
+      ],
+      "skip_reason": "no modellable multi-step workflow surfaced",
+      "notes": "bespoke; model invariants per workflow"
+    },
+    {
+      "id": "nosql-injection",
+      "name": "NoSQL injection",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "nosql-injection"
+      ],
+      "baseline": false,
+      "triggers": [
+        "param:injectable",
+        "tech:nosql",
+        "param:json",
+        "param:search"
+      ],
+      "skip_reason": "no injectable parameter and no NoSQL datastore indicator surfaced",
+      "notes": "ORPHAN-NOW-WIRED: test alongside sqli whenever params are injectable"
+    },
+    {
+      "id": "ldap-injection",
+      "name": "LDAP injection",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "ldap-injection"
+      ],
+      "baseline": false,
+      "triggers": [
+        "tech:ldap",
+        "flow:login-form",
+        "param:search"
+      ],
+      "skip_reason": "no directory-backed login/search surface surfaced",
+      "notes": "ORPHAN-NOW-WIRED: route on any login/search form"
+    },
+    {
+      "id": "prototype-pollution",
+      "name": "Prototype pollution",
+      "owasp": "A03/A08",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "prototype-pollution"
+      ],
+      "baseline": false,
+      "triggers": [
+        "tech:js-node",
+        "param:json"
+      ],
+      "skip_reason": "no JS/Node merge-sink surface (JSON params) surfaced",
+      "notes": "ORPHAN-NOW-WIRED: route for any JS/Node app taking object params"
+    },
+    {
+      "id": "race-condition",
+      "name": "Race condition",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "race-condition"
+      ],
+      "baseline": false,
+      "triggers": [
+        "action:limited-state-change"
+      ],
+      "skip_reason": "no single-use/limited state-changing action surfaced",
+      "notes": "ORPHAN-NOW-WIRED: route on coupon/purchase/vote/withdraw-style actions"
+    },
+    {
+      "id": "parameter-pollution",
+      "name": "HTTP parameter pollution",
+      "owasp": "A03/A05",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "parameter-pollution"
+      ],
+      "baseline": false,
+      "triggers": [
+        "param:any"
+      ],
+      "skip_reason": "the target exposes no request parameters",
+      "notes": "ORPHAN-NOW-WIRED: route whenever the app takes parameters"
+    },
+    {
+      "id": "crypto-attacks",
+      "name": "Cryptographic attacks (non-JWT)",
+      "owasp": "A02",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "crypto-attacks"
+      ],
+      "baseline": false,
+      "triggers": [
+        "token:opaque-nonjwt"
+      ],
+      "skip_reason": "no opaque signed/encrypted non-JWT token surfaced (JWT crypto -> auth/jwt)",
+      "notes": "ORPHAN-NOW-WIRED: padding-oracle/ECB/IV/bit-flip/length-extension on opaque tokens"
+    },
+    {
+      "id": "tls-attacks",
+      "name": "TLS / cipher attacks",
+      "owasp": "A02",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "tls-attacks"
+      ],
+      "baseline": false,
+      "triggers": [
+        "endpoint:https"
+      ],
+      "skip_reason": "the target does not serve TLS/HTTPS",
+      "notes": "ORPHAN-NOW-WIRED: benign protocol/cipher/cert checks on any HTTPS endpoint"
+    },
+    {
+      "id": "supply-chain",
+      "name": "Software supply chain",
+      "owasp": "A06",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "supply-chain"
+      ],
+      "baseline": false,
+      "triggers": [
+        "artifact:dependency-manifest",
+        "registry:private-scope",
+        "tech:js-node"
+      ],
+      "skip_reason": "no dependency manifest or private-registry indicator surfaced",
+      "notes": "ORPHAN-NOW-WIRED: route when a manifest/lockfile (incl. recovered backups) is found"
+    },
+    {
+      "id": "cve-intelligence",
+      "name": "Component -> CVE mapping",
+      "owasp": "A06",
+      "phase": "web",
+      "pattern": "capability",
+      "feeder": "-",
+      "agents": [
+        "cve-intelligence"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: always correlate detected components to version-matched, reachable CVEs"
+    },
+    {
+      "id": "framework-wordpress",
+      "name": "Framework: WordPress",
+      "owasp": "A06",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "framework-base",
+      "agents": [
+        "wordpress"
+      ],
+      "baseline": false,
+      "triggers": [
+        "tech:wordpress"
+      ],
+      "skip_reason": "WordPress not fingerprinted",
+      "notes": "specializes cve-intelligence for the WP stack"
+    },
+    {
+      "id": "framework-nextjs",
+      "name": "Framework: Next.js",
+      "owasp": "A06",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "framework-base",
+      "agents": [
+        "nextjs"
+      ],
+      "baseline": false,
+      "triggers": [
+        "tech:nextjs"
+      ],
+      "skip_reason": "Next.js not fingerprinted",
+      "notes": "specializes cve-intelligence for the Next.js stack"
+    },
+    {
+      "id": "llm",
+      "name": "LLM application (OWASP LLM Top 10)",
+      "owasp": "LLM",
+      "phase": "ai-llm",
+      "pattern": "family",
+      "feeder": "llm-context",
+      "agents": [
+        "prompt-injection",
+        "sensitive-disclosure",
+        "excessive-agency",
+        "llm-output-handling"
+      ],
+      "baseline": false,
+      "triggers": [
+        "feature:llm-chat",
+        "feature:agent-tools"
+      ],
+      "skip_reason": "no LLM/chat feature reachable",
+      "notes": "agent-recon feeds agent-protocol surface"
+    },
+    {
+      "id": "ai-supply-chain",
+      "name": "AI/ML supply chain (LLM03)",
+      "owasp": "LLM",
+      "phase": "ai-llm",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "ai-supply-chain"
+      ],
+      "baseline": false,
+      "triggers": [
+        "feature:ml-pipeline",
+        "artifact:dependency-manifest"
+      ],
+      "skip_reason": "no model-artifact/model-hub surface reachable"
+    },
+    {
+      "id": "data-poisoning",
+      "name": "Data poisoning (LLM04)",
+      "owasp": "LLM",
+      "phase": "ai-llm",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "data-poisoning"
+      ],
+      "baseline": false,
+      "triggers": [
+        "feature:ml-pipeline"
+      ],
+      "skip_reason": "no training/fine-tune/RAG-ingestion surface reachable"
+    },
+    {
+      "id": "sc",
+      "name": "Smart contract (OWASP SC Top 10)",
+      "owasp": "SC",
+      "phase": "web3",
+      "pattern": "family",
+      "feeder": "web3-context",
+      "agents": [
+        "sc-access-control",
+        "sc-accounting",
+        "sc-oracle-mev",
+        "sc-reentrancy",
+        "sc-signature",
+        "sc-upgradeability"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:smart-contract"
+      ],
+      "skip_reason": "no smart contracts in scope",
+      "notes": "proven on a local Foundry fork; no live tx"
+    },
+    {
+      "id": "ad",
+      "name": "Active Directory",
+      "owasp": "ATT&CK",
+      "phase": "internal-ad",
+      "pattern": "family",
+      "feeder": "ad-context",
+      "agents": [
+        "ad-kerberos",
+        "ad-acl-abuse",
+        "ad-adcs",
+        "ad-lateral-movement"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:domain"
+      ],
+      "skip_reason": "no Active Directory foothold in scope",
+      "notes": "assumed-breach; approval-gated"
+    },
+    {
+      "id": "ad-initial-access",
+      "name": "AD initial access (unauth -> first cred)",
+      "owasp": "ATT&CK",
+      "phase": "internal-ad",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "ad-initial-access"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:domain"
+      ],
+      "skip_reason": "no internal network foothold to capture/spray from",
+      "risk": "high",
+      "notes": "policy-safe spray; approval-gated"
+    },
+    {
+      "id": "sccm-exploitation",
+      "name": "SCCM / ConfigMgr exploitation",
+      "owasp": "ATT&CK",
+      "phase": "internal-ad",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "sccm-exploitation"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:domain"
+      ],
+      "skip_reason": "no SCCM/ConfigMgr in the internal scope"
+    },
+    {
+      "id": "linux-privesc",
+      "name": "Linux privilege escalation",
+      "owasp": "-",
+      "phase": "post-exploitation",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "linux-privesc"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:host"
+      ],
+      "skip_reason": "no landed Linux host",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "windows-privesc",
+      "name": "Windows privilege escalation",
+      "owasp": "-",
+      "phase": "post-exploitation",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "windows-privesc"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:host"
+      ],
+      "skip_reason": "no landed Windows host",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "persistence",
+      "name": "Persistence (reversible, benign)",
+      "owasp": "-",
+      "phase": "post-exploitation",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "persistence"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:host"
+      ],
+      "skip_reason": "no landed host",
+      "risk": "high",
+      "notes": "benign+reversible; approval-gated"
+    },
+    {
+      "id": "credential-access",
+      "name": "Credential access",
+      "owasp": "-",
+      "phase": "post-exploitation",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "credential-access"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:host"
+      ],
+      "skip_reason": "no landed host",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "container-escape",
+      "name": "Container escape",
+      "owasp": "-",
+      "phase": "post-exploitation",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "container-escape"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:host"
+      ],
+      "skip_reason": "no container foothold",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "k8s-attacks",
+      "name": "Kubernetes attacks",
+      "owasp": "-",
+      "phase": "post-exploitation",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "k8s-attacks"
+      ],
+      "baseline": false,
+      "triggers": [
+        "foothold:host",
+        "asset:cloud"
+      ],
+      "skip_reason": "no Kubernetes/cluster access",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "cloud",
+      "name": "Cloud exploitation",
+      "owasp": "-",
+      "phase": "cloud",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "cloud"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:cloud"
+      ],
+      "skip_reason": "no cloud credentials/metadata reachable",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "mobile",
+      "name": "Mobile application",
+      "owasp": "-",
+      "phase": "mobile",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "mobile"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:mobile-app"
+      ],
+      "skip_reason": "no mobile build in scope",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "iot",
+      "name": "IoT / embedded",
+      "owasp": "-",
+      "phase": "iot",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "iot"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:firmware"
+      ],
+      "skip_reason": "no firmware/device in scope",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "wireless",
+      "name": "Wireless",
+      "owasp": "-",
+      "phase": "wireless",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "wireless"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:wireless"
+      ],
+      "skip_reason": "no wireless network/device in scope",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "social-engineering",
+      "name": "Social engineering",
+      "owasp": "-",
+      "phase": "social",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "social-engineering"
+      ],
+      "baseline": false,
+      "triggers": [
+        "scope:social-authorized"
+      ],
+      "skip_reason": "no approved social-engineering population in scope",
+      "risk": "high",
+      "notes": "written authorization required"
+    },
+    {
+      "id": "fuzzing",
+      "name": "Coverage-guided fuzzing",
+      "owasp": "-",
+      "phase": "binary",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "fuzzing"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:binary"
+      ],
+      "skip_reason": "no native binary/service in scope",
+      "risk": "high",
+      "notes": "approval-gated"
+    },
+    {
+      "id": "exploit-dev",
+      "name": "Exploit development (benign PoC)",
+      "owasp": "-",
+      "phase": "binary",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "exploit-dev"
+      ],
+      "baseline": false,
+      "triggers": [
+        "asset:binary"
+      ],
+      "skip_reason": "no triaged crash to develop",
+      "risk": "high",
+      "notes": "benign IP-control only; approval-gated"
+    },
+    {
+      "id": "attack-chain-discovery",
+      "name": "Attack-chain discovery",
+      "owasp": "-",
+      "phase": "capability",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "attack-chain-discovery"
+      ],
+      "baseline": false,
+      "triggers": [
+        "finding:accepted"
+      ],
+      "skip_reason": "no accepted findings to compose",
+      "notes": "pipeline stage over accepted findings"
+    },
+    {
+      "id": "exploit-generator",
+      "name": "Exploit generation (benign PoC)",
+      "owasp": "-",
+      "phase": "capability",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "exploit-generator"
+      ],
+      "baseline": false,
+      "triggers": [
+        "finding:accepted"
+      ],
+      "skip_reason": "no accepted finding to weaponize benignly",
+      "risk": "high",
+      "notes": "per high-value finding; approval-gated"
+    }
+  ]
+}

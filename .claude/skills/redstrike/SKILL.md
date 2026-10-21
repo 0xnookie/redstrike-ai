@@ -34,17 +34,38 @@ missing/incomplete, the window is closed, or a target falls outside scope.
 client-side JS; for a pure API / JS-less target, skip it with an explicit N/A note)*.
 Run `redstrike-cve-intelligence` to prioritize.
 
-## 2. Vuln categories (Tier 2)  → route per `skills/_contract/vuln-catalog.md` from what recon found
-For each applicable class, run its `<class>-context` feeder then its variant/category agents. Routing hints:
+## 2. Vuln categories (Tier 2)  → route DETERMINISTICALLY, then track coverage
+Routing is **deterministic, not improvised.** The authoritative source is
+`skills/_contract/routing-map.json` (every category, the recon **signals** that trigger it, its phase).
+
+**a. Plan the coverage ledger.** After recon, gather the recon signals and run:
+`python scripts/coverage.py --plan --signals <signals.json|-> --phases web[,ai-llm,web3,…] --engagement <dir>`
+→ writes `<dir>/coverage_ledger.json`, marking every category `pending` (routed → **must run**),
+`skipped` (no trigger matched — **with a stated reason**), or `n/a` (phase not in scope). With no signals
+it attempts every in-scope category (recall-safe default). **A category is never skipped silently** — only
+with a recorded reason. The formerly un-triggered classes are now wired in: `nosql-injection`,
+`ldap-injection`, `prototype-pollution`, `race-condition`, `parameter-pollution`, `crypto-attacks`,
+`tls-attacks`, `supply-chain`. (`ai-llm`/`web3`/internal phases auto-activate from their signal.)
+
+**b. Run every `pending` category.** For each, run its `<class>-context` feeder (families) then its
+variant/category agents, and flip its ledger entry to `attempted` (set `findings_count`) or `blocked`.
+Human-readable mirror of the map:
 - reflected/stored/dom input + sinks → `redstrike-xss-context` → `xss-*`
-- injectable params → `redstrike-sqli-context` → `sqli-*` ; interpreter sinks → `redstrike-injection-context` → `ssti`/`command-injection`/`deserialization`
+- injectable params → `redstrike-sqli-context` → `sqli-*` **and** `redstrike-nosql-injection` ; interpreter sinks → `redstrike-injection-context` → `ssti`/`command-injection`/`deserialization`
 - URL-fetching params → `redstrike-ssrf-context` → `ssrf-*` ; `redstrike-open-redirect`
 - object ids + roles (≥2 accounts) → `redstrike-authz-context` → `idor`/`privesc` ; APIs → `redstrike-api-context` → `bola-bfla`/`graphql`
 - XML endpoints → `redstrike-xxe-context` → `xxe-*` ; file/upload params → `redstrike-file-context` → `path-traversal-lfi`/`upload-rce`
-- auth flows → `redstrike-auth-context` → `auth-bypass`/`jwt`/`oauth`
+- auth flows → `redstrike-auth-context` → `auth-bypass`/`jwt`/`oauth` ; opaque non-JWT tokens → `redstrike-crypto-attacks`
+- login/search forms → `redstrike-ldap-injection` ; JS/Node + object params → `redstrike-prototype-pollution` ; single-use/limited actions → `redstrike-race-condition`
 - exposed files/dirs/panels surfaced by content-discovery (`/.git`, `.env`, backups, actuators, dir listing) → `redstrike-exposed-surface`
-- plus atomic agents as applicable: `csrf`, `cors`, `clickjacking`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `security-headers`, `secrets`, `exposed-surface`, `business-logic`
-- **AI/LLM** (the app has a chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
+- **baseline (always run):** `redstrike-security-headers`, `redstrike-secrets`, `redstrike-exposed-surface`, `redstrike-cors`, `redstrike-clickjacking`, `redstrike-cve-intelligence`, `redstrike-tls-attacks` (if HTTPS), `redstrike-parameter-pollution` (if params)
+- plus as triggered: `csrf`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `business-logic`, `supply-chain`
+- **AI/LLM** (chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
+
+**c. Gate on coverage.** `python scripts/coverage.py --validate --engagement <dir>` must pass before
+reporting: every map category is accounted for and **nothing is left `pending`**. `verify_completion.py
+--engagement` also surfaces any coverage gap as a warning.
+
 **After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
 `<skill>-verify` reviewer subagent. **Only `accepted` findings advance.**
 
