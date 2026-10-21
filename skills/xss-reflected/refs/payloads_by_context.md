@@ -14,6 +14,10 @@ rs7f3q    # unique, greppable; find WHERE and in WHAT context it lands
 <script>alert(1)</script>              <!-- blocked if CSP or tag-stripping -->
 <details open ontoggle=alert(1)>
 ```
+Caveat: in an HTML-body sink, a `javascript:` scheme (incl. `<iframe src="javascript:alert()">`) does NOT
+execute in a current browser — Chromium/Firefox block `javascript:` navigation in frames, so that payload
+fires nothing and reads as a FALSE NEGATIVE. Confirm here with an event handler (`onload`/`onerror`/`ontoggle`);
+`javascript:` belongs only in a URL/`href`/`src` context (section below).
 
 ## 2. HTML attribute — quoted ( value="..." )
 Break out of the quote + tag first:
