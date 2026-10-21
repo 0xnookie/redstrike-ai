@@ -23,7 +23,7 @@
   "skill": "attack-chain-discovery",
   "artifacts": [
     { "id": "A.1", "path": "primitives.json", "type": "json", "allow_empty_array": true },
-    { "id": "B.1", "path": "chains.json", "type": "json", "allow_empty_array": true },
+    { "id": "B.1", "path": "chains.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/attack_chain.schema.json" },
     { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
     { "id": "D.1", "path": "poc", "type": "dir", "required": false },
     { "id": "E.1", "path": "report.md", "type": "text" },

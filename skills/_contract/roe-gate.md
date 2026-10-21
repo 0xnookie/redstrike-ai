@@ -32,6 +32,7 @@ rules:
 
 - `exploitation` and `post-exploitation` phases **pause** for explicit human sign-off before the first active action.
 - Any action that could cause outage or data loss requires per-action approval even inside an approved phase.
+- **Scanners can cross this gate by accident.** Automated scanners (nuclei, metasploit aux, sqlmap `--os-*`, etc.) ship *active-exploit* templates/modules that execute RCE/DoS, not just detect. In any recon/corroboration/CVE-intel phase run them **detection-only** — exclude active-exploit classes (nuclei: `-etags rce,intrusive,dos,oast`; never `-tags <product>`, which pulls that product's exploit templates). Firing an exploit template IS exploitation and needs the approval gate above first, regardless of which skill launches it.
 
 ## 3. Blast-radius controls
 
