@@ -177,6 +177,11 @@ knowable, re-sign as HMAC using the **public-key bytes** as the secret.
 ```bash
 jwt_tool <token> -X k -pk public.pem      # key-confusion: public.pem as the HMAC key
 ```
+**First look for the public key exposed** — it is often served at a predictable path (`/encryptionkeys/jwt.pub`,
+`/.well-known/jwks.json`, `/jwks`, a `kid`-named file, a source map, or the app's public repo). Fetch it and
+use its EXACT bytes as the HMAC secret (see the PEM-format trap below). Only when it is unpublished do you
+need to recover it.
+
 Recover the public key when unpublished — derive the RSA modulus from two tokens signed by the same key:
 ```bash
 rsa_sign2n <token1> <token2>              # emits candidate modulus n -> candidate PEMs
