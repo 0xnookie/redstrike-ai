@@ -26,6 +26,7 @@ Stdlib only. Examples:
 import argparse
 import datetime
 import json
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -86,6 +87,51 @@ def fetch_answer_key(target: dict, base_url: str = None, answer_key_file: str = 
     if not out:
         sys.exit("[!] answer key is empty -- is the target seeded and reachable?")
     return out
+
+
+def _load_findings(eng: Path) -> list:
+    """Accepted (status=verified) findings from an engagement's findings.json, normalized for matching.
+    Lets ANY labelled target be benchmarked from a run's output — no live solved-API needed."""
+    fj = eng / "findings.json"
+    if not fj.is_file():
+        sys.exit(f"[!] no findings.json at {fj}")
+    try:
+        raw = json.loads(fj.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        sys.exit(f"[!] findings.json invalid JSON: {e}")
+    out = []
+    for f in (raw if isinstance(raw, list) else []):
+        if isinstance(f, dict) and f.get("status") == "verified":
+            cat = f.get("category") or {}
+            out.append({"owasp": str(cat.get("owasp", "")), "cwe": str(cat.get("cwe", "")),
+                        "wstg": str(cat.get("wstg", "")), "title": str(f.get("title", ""))})
+    return out
+
+
+def _match_expected(m: dict, f: dict) -> bool:
+    """A finding f satisfies an expected matcher m when EVERY declared key matches."""
+    if m.get("owasp") and not f["owasp"].upper().startswith(m["owasp"].upper()):
+        return False
+    if m.get("cwe") and f["cwe"].upper() != m["cwe"].upper():
+        return False
+    if m.get("wstg") and m["wstg"].upper() not in f["wstg"].upper():
+        return False
+    if m.get("title_regex") and not re.search(m["title_regex"], f["title"], re.I):
+        return False
+    return bool(m)  # an empty matcher never matches (avoids a free pass)
+
+
+def _expected_challenges(target: dict, findings: list) -> list:
+    """Turn an expected-vuln manifest + the run's findings into score()-compatible pseudo-rows,
+    so the existing scorer / baseline / check all work unchanged for findings-match targets."""
+    rows = []
+    for e in target.get("expected", []):
+        found = any(_match_expected(e.get("match") or {}, f) for f in findings)
+        rows.append({"id": e.get("name", e.get("id")), "category": e.get("group", "expected"),
+                     "solved": found, "difficulty": e.get("severity", "-")})
+    if not rows:
+        sys.exit("[!] findings-match target has no 'expected' manifest")
+    return rows
 
 
 def _recall(solved: int, total: int) -> float:
@@ -193,12 +239,20 @@ def selftest() -> int:
     assert specs, "no target specs under benchmark/targets/"
     for p in specs:
         t = json.loads(p.read_text(encoding="utf-8"))
-        for k in ("target", "answer_key", "category_map"):
+        for k in ("target", "answer_key"):
             assert k in t, f"{p.name} missing '{k}'"
-        for k in ("endpoint", "id_field", "category_field", "solved_field"):
-            assert k in t["answer_key"], f"{p.name} answer_key missing '{k}'"
-        errs, _ = _validate_map(t)
-        assert not errs, f"{p.name}: " + "; ".join(errs)
+        ak_type = (t.get("answer_key") or {}).get("type", "http-json")
+        if ak_type == "findings-match":
+            exp = t.get("expected")
+            assert isinstance(exp, list) and exp, f"{p.name} findings-match target needs a non-empty 'expected'"
+            for e in exp:
+                assert e.get("match"), f"{p.name} expected item '{e.get('id')}' has no 'match'"
+        else:
+            assert "category_map" in t, f"{p.name} (http-json) missing 'category_map'"
+            for k in ("endpoint", "id_field", "category_field", "solved_field"):
+                assert k in t["answer_key"], f"{p.name} answer_key missing '{k}'"
+            errs, _ = _validate_map(t)
+            assert not errs, f"{p.name}: " + "; ".join(errs)
     # scoring logic on a tiny synthetic key
     fake = [{"id": "a", "category": "X", "solved": True, "difficulty": 1},
             {"id": "b", "category": "X", "solved": False, "difficulty": 2},
@@ -214,7 +268,16 @@ def selftest() -> int:
     chk = check(worse, base, 0.0)
     assert any(r[0] == "Y" for r in chk["regressions"]), "Y regression not caught"
     assert not chk["ok"]
-    print(f"benchmark.py selftest: OK ({len(specs)} target spec(s), scoring + regression logic verified)")
+    # findings-match path (target-agnostic): expected manifest matched against a run's findings
+    tgt = {"target": "t", "expected": [
+        {"id": "sqli", "name": "SQLi", "group": "injection", "match": {"cwe": "CWE-89"}},
+        {"id": "xss", "name": "XSS", "group": "injection", "match": {"cwe": "CWE-79"}},
+        {"id": "ssrf", "name": "SSRF", "group": "ssrf", "match": {"cwe": "CWE-918"}}]}
+    fnd = [{"owasp": "A03:2021-Injection", "cwe": "CWE-89", "wstg": "", "title": "SQLi in login"}]
+    fm = score(_expected_challenges(tgt, fnd), tgt)
+    assert fm["overall"] == {"solved": 1, "total": 3, "recall": 0.3333}, fm["overall"]
+    assert not _match_expected({}, fnd[0]), "empty matcher must not match"
+    print(f"benchmark.py selftest: OK ({len(specs)} target spec(s), live + findings-match scoring verified)")
     return 0
 
 
@@ -228,6 +291,7 @@ def main() -> int:
     ap.add_argument("--target", help="target name under benchmark/targets/")
     ap.add_argument("--base-url", help="live base URL of the running target")
     ap.add_argument("--answer-key", help="captured answer-key JSON dump (instead of --base-url)")
+    ap.add_argument("--engagement", help="engagement dir (findings-match targets score its findings.json)")
     ap.add_argument("--tolerance", type=float, default=0.0, help="allowed recall drop before it's a regression")
     ap.add_argument("--out", help="write the full result JSON here")
     ap.add_argument("--provenance", default="", help="note stored with a --baseline (how it was produced)")
@@ -253,7 +317,13 @@ def main() -> int:
         print("\nall mapped ids exist in routing-map.json.")
         return 0
 
-    challenges = fetch_answer_key(target, args.base_url, args.answer_key)
+    ak_type = (target.get("answer_key") or {}).get("type", "http-json")
+    if ak_type == "findings-match":
+        if not args.engagement:
+            ap.error("a findings-match target needs --engagement <dir> (the run's output)")
+        challenges = _expected_challenges(target, _load_findings(Path(args.engagement)))
+    else:
+        challenges = fetch_answer_key(target, args.base_url, args.answer_key)
     res = score(challenges, target)
     if args.out:
         op = Path(args.out)
