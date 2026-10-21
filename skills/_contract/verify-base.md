@@ -39,7 +39,15 @@ A review emits this object per finding (schema: `finding.schema.json` → `revie
 ```
 
 - `accepted` → finding `status: verified`.
-- `rejected` → finding `status: rejected`; state why.
+- `rejected` → finding `status: rejected`; **set `rejection_class`** and state why. A `rejected` means *not a
+  real vuln here*: `false-positive` (disproved WITH evidence), `out-of-scope`, or `duplicate` — a clean drop.
+  It must **not** be used for a real-looking finding you simply could not prove here (missing PoC / creds /
+  WAF / time): that is a `blocked` (when you are confident it is real) or `rejection_class: open-proof-gap`
+  (when unsure). An **open-proof-gap is reported as a known gap / recall caveat — never silently dropped.**
+  **Recall audit (the mode-6 guard):** when genuinely unsure between `false-positive` and `open-proof-gap`,
+  choose **open-proof-gap**. A false positive is caught by a later reviewer; a false negative is invisible.
+  `counterevidence.md`: "missing information is not proof of safety." The engagement gate
+  (`verify_completion.py --engagement`) surfaces the open-proof-gap count so these stay visible.
 - `needs-evidence` → a missing artifact the **executor can still produce** → bounce back and re-run that step.
 - `blocked` → **confirmed real, but full demonstration is prevented by target/environment state the executor
   cannot change** (e.g. an unseeded DB blocking SQLi extraction). Set `status: verified`, record the
