@@ -14,6 +14,10 @@ Two jobs, one source of truth (skills/_contract/routing-map.json):
               gap), every skipped/n-a/blocked has a reason, and (soft) categories with findings are
               `attempted`. Exit non-zero on a gap so the orchestrator cannot quietly skip a class.
 
+  --mark      Flip ONE ledger category after running it, in place, instead of hand-editing JSON:
+              `--mark <id> --status attempted --count N [--note "..."]`. Enforces the status enum
+              and the skipped/n-a/blocked-needs-a-reason rule. (Needs --engagement.)
+
 The point of Phase 1: make "not attempted" a first-class, visible state. A category that never ran
 and a category that ran-and-found-nothing must look different.
 
@@ -37,6 +41,7 @@ MAP_PATH = ROOT / "skills" / "_contract" / "routing-map.json"
 LEDGER_NAME = "coverage_ledger.json"
 _OPEN_STATUSES = {"pending"}
 _NEED_REASON = {"skipped", "n/a", "blocked"}
+_MARK_STATUSES = {"pending", "attempted", "blocked", "skipped", "n/a", "pipeline"}
 
 
 def load_map(path: Path = MAP_PATH) -> dict:
@@ -245,10 +250,58 @@ def selftest() -> int:
     return 0
 
 
+def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=False) -> int:
+    """Update one ledger category in place (status / findings_count / reason).
+
+    This is the first-class way an orchestrator flips an entry after running a
+    category, instead of hand-editing the JSON. Enforces the status enum and the
+    'skipped/n/a/blocked need a reason' rule the validator checks for."""
+    ledger_path = eng / LEDGER_NAME
+    if not ledger_path.is_file():
+        print(f"[!] no {LEDGER_NAME} at {eng} (run: scripts/coverage.py --plan --engagement {eng})")
+        return 2
+    if status not in _MARK_STATUSES:
+        print(f"[!] invalid status {status!r}; choose one of {sorted(_MARK_STATUSES)}")
+        return 2
+    try:
+        led = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        print(f"[!] {LEDGER_NAME} invalid JSON: {e}")
+        return 2
+    cats = led.get("categories", [])
+    hit = next((c for c in cats if c.get("id") == cat_id), None)
+    if hit is None:
+        ids = ", ".join(sorted(str(c.get("id")) for c in cats))
+        print(f"[!] no category {cat_id!r} in ledger. known ids: {ids}")
+        return 2
+    if status in _NEED_REASON and not (note or (hit.get("reason") or "").strip()):
+        print(f"[!] status {status!r} requires a reason — pass --note \"...\"")
+        return 2
+    hit["status"] = status
+    if count is not None:
+        hit["findings_count"] = count
+    if note is not None:
+        hit["reason"] = note
+    ledger_path.write_text(json.dumps(led, indent=2) + "\n", encoding="utf-8")
+    if as_json:
+        print(json.dumps({"id": cat_id, "status": status,
+                          "findings_count": hit.get("findings_count"),
+                          "reason": hit.get("reason")}, indent=2))
+    else:
+        tail = (f" findings={count}" if count is not None else "") + (f"  reason={note}" if note else "")
+        print(f"ok: {cat_id} -> status={status}{tail}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Redstrike deterministic routing + coverage ledger.")
     ap.add_argument("--plan", action="store_true", help="emit a coverage ledger from map + signals")
     ap.add_argument("--validate", action="store_true", help="validate an engagement's coverage_ledger.json")
+    ap.add_argument("--mark", metavar="CATEGORY_ID",
+                    help="update one ledger category in the engagement (use with --status; needs --engagement)")
+    ap.add_argument("--status", help="new status for --mark: " + "|".join(sorted(_MARK_STATUSES)))
+    ap.add_argument("--count", type=int, help="findings_count to set for --mark")
+    ap.add_argument("--note", help="reason/note for --mark (required when status is skipped/n/a/blocked)")
     ap.add_argument("--list", action="store_true", help="print the routing map categories")
     ap.add_argument("--selftest", action="store_true", help="internal consistency check (CI)")
     ap.add_argument("--signals", help="signals JSON file, or '-' for stdin (omit = none => attempt all)")
@@ -284,6 +337,14 @@ def main() -> int:
             if not args.as_json:
                 _print_plan_human(led)
         return 0
+
+    if args.mark:
+        if not args.engagement:
+            ap.error("--mark needs --engagement")
+        if not args.status:
+            ap.error("--mark needs --status (" + "|".join(sorted(_MARK_STATUSES)) + ")")
+        return mark(Path(args.engagement), args.mark, args.status,
+                    args.count, args.note, args.as_json)
 
     if args.validate:
         if not args.engagement:
