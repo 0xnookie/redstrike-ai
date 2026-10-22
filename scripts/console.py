@@ -44,6 +44,7 @@ WANTED = {
     "host_discovery.json": ["host_discovery.json"],
     "attack_chains.json": ["attack_chains.json", "chains.json"],
     "coverage_ledger.json": ["coverage_ledger.json"],
+    "cve_intel.json": ["cve_intel.json"],
     "scope.json": ["scope.json"],
 }
 

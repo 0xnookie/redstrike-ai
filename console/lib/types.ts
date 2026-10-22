@@ -210,6 +210,36 @@ export interface CoverageLedger {
   categories: CoverageCategory[];
 }
 
+// Per-engagement CVE intelligence (cve_intel.json from the cve-intelligence capability):
+// detected components mapped to version-matched CVEs, KEV/EPSS-prioritized (scripts/cve_prioritize.py).
+// Distinct from the global CveFeed above — this is THIS target's surface. Some runs emit the entry
+// array as `entries` rather than the schema's `cves`; readers accept either.
+export type Reachable = "yes" | "no" | "unknown";
+export interface CveComponent { name: string; version?: string; source?: string; }
+export interface CveIntelEntry {
+  cve: string;
+  component?: string;
+  version?: string;
+  cvss?: string;
+  title?: string;
+  exploit_available?: boolean | null;
+  exploit_ref?: string;
+  reachable?: Reachable;
+  confidence?: Confidence;
+  source?: string[];
+  kev?: boolean;
+  epss?: number;
+  priority_rank?: number;
+  notes?: string;
+}
+export interface CveIntel {
+  target?: string;
+  generated_at?: string;
+  components?: CveComponent[];
+  cves?: CveIntelEntry[];
+  entries?: CveIntelEntry[];
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -222,4 +252,5 @@ export interface ConsoleData {
   tests: TestRun[];
   cveFeed?: CveFeed;
   coverage?: CoverageLedger;
+  cveIntel?: CveIntel;
 }
