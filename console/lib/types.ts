@@ -188,6 +188,58 @@ export interface CveFeed {
   items: CveItem[];        // newest detections, most-recent first
 }
 
+// Category coverage ledger (coverage_ledger.json from scripts/coverage.py): which vuln
+// categories were attempted vs skipped-with-reason vs out-of-phase. Makes "not attempted" a
+// first-class, visible state instead of indistinguishable from "ran and found nothing".
+export type CoverageStatus = "pending" | "attempted" | "blocked" | "skipped" | "n/a" | "pipeline";
+export interface CoverageCategory {
+  id: string;
+  name?: string;
+  phase: string;
+  status: CoverageStatus;
+  reason?: string;
+  findings_count?: number;
+  skills?: string[];
+  triggers_matched?: string[];
+}
+export interface CoverageLedger {
+  engagement?: string;
+  generated_at?: string;
+  map_version?: number;
+  active_phases?: string[];
+  categories: CoverageCategory[];
+}
+
+// Per-engagement CVE intelligence (cve_intel.json from the cve-intelligence capability):
+// detected components mapped to version-matched CVEs, KEV/EPSS-prioritized (scripts/cve_prioritize.py).
+// Distinct from the global CveFeed above — this is THIS target's surface. Some runs emit the entry
+// array as `entries` rather than the schema's `cves`; readers accept either.
+export type Reachable = "yes" | "no" | "unknown";
+export interface CveComponent { name: string; version?: string; source?: string; }
+export interface CveIntelEntry {
+  cve: string;
+  component?: string;
+  version?: string;
+  cvss?: string;
+  title?: string;
+  exploit_available?: boolean | null;
+  exploit_ref?: string;
+  reachable?: Reachable;
+  confidence?: Confidence;
+  source?: string[];
+  kev?: boolean;
+  epss?: number;
+  priority_rank?: number;
+  notes?: string;
+}
+export interface CveIntel {
+  target?: string;
+  generated_at?: string;
+  components?: CveComponent[];
+  cves?: CveIntelEntry[];
+  entries?: CveIntelEntry[];
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -199,4 +251,6 @@ export interface ConsoleData {
   services: Service[];
   tests: TestRun[];
   cveFeed?: CveFeed;
+  coverage?: CoverageLedger;
+  cveIntel?: CveIntel;
 }

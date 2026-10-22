@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `path-traversal-
 2. Load `skills/_contract/verify-base.md` + `skills/path-traversal-lfi/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the PoC returned the REAL content of a file OUTSIDE the app base dir (e.g. the host hostname) via a reproducible `../`/encoding bypass — not an intended file or echoed text. LFI-RCE claims need benign OOB/marker proof + approval; else report file-read severity.
-5. Write the `review{}` block (reviewer `path-traversal-lfi-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `path-traversal-lfi-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; benign markers; don't edit non-findings artifacts; stay in scope.

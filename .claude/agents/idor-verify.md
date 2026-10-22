@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `idor` skill —
 2. Load `skills/_contract/verify-base.md` + `skills/idor/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: account A's session accessed/modified a resource owned by a DIFFERENT account B (both tester-controlled), returned B-specific data (not own/shared/public), ownership check genuinely missing. Mass-assignment claims must show the privileged field changed state (read-back). Reclassify function-level issues to `privesc`.
-5. Write the `review{}` block (reviewer `idor-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `idor-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; confirm no real-user data was accessed; don't edit non-findings artifacts; stay in scope.

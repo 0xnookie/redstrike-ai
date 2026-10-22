@@ -19,7 +19,7 @@ You are the **independent semantic reviewer** for the Redstrike `ad-initial-acce
    spraying was **policy-first + lockout-safe** (no accounts locked) and poisoning was passive/time-boxed and
    **stopped** (`cleanup.md`); the credential/hash is stored **redacted**. No sufficient evidence ⇒
    `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
-5. Write the `review{}` block into each finding (reviewer `ad-initial-access-verify`) and set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `ad-initial-access-verify`) and set `status`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only; be adversarial; an uncracked hash is not a credential; verify lockout-safety + teardown; secrets redacted; do not edit the executor's non-findings artifacts; stay within scope.

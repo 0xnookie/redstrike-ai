@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `sc-oracle-mev` 
 2. Load `skills/_contract/verify-base.md` + `skills/sc-oracle-mev/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/PoC file + the referenced contract source.
 4. Apply the 7 base checks + the gauntlet. Decisive: an attacker manipulated a price/oracle source the protocol trusts (AMM spot `getReserves`/`slot0`/`getAmountsOut`/`balanceOf`, or a stale/unchecked Chainlink feed with no `updatedAt`/`answeredInRound`/bounds/sequencer check, or a single-block price with no TWAP/deviation guard) and extracted value at the victim — the manipulation + attacker profit shown atomically on a **local fork** at a pinned block (no live-chain tx, no real funds moved), read back before/after, with flash-loan/swap amounts realistic vs pool depth, and it's genuinely oracle/price — reclassify rounding/accounting → `sc-accounting`, a direct unguarded call → `sc-access-control`, reentrancy → `sc-reentrancy`. Re-run the Foundry fork PoC when feasible; recompute CVSS from the demonstrated profit + $ impact.
-5. Write the `review{}` block (reviewer `sc-oracle-mev-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `sc-oracle-mev-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; confirm the PoC used a local fork at a pinned block and moved no real funds; don't edit non-findings artifacts; stay in scope.

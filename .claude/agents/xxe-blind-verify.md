@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `xxe-blind` skil
 2. Load `skills/_contract/verify-base.md` + `skills/xxe-blind/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `callbacks.jsonl`, `xxe_tests.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: an attributable OOB callback (token → sink, from target egress) proving the parser fetched the attacker external DTD/parameter-entity — a malformed-XML 500 is NOT proof. Any file-exfil claim shows the benign file's real content over OOB. Benign; no DoS; scope + approval.
-5. Write the `review{}` block (reviewer `xxe-blind-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `xxe-blind-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; don't edit non-findings artifacts; stay in scope.

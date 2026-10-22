@@ -101,6 +101,18 @@ env_checks() {
   else
     printf '  %s⚙ %-22s%s %snone set (REDSTRIKE_OOB / scope.yaml oob) — blind/OOB checks limited%s\n' "$D" "OOB collaborator" "$X" "$D" "$X"
   fi
+
+  # 5) Python libs for the gate/console. Both optional — the gate ships a built-in validator and
+  #    the console a bundled scope reader — but jsonschema gives full-spec finding validation and
+  #    PyYAML a correct scope.yaml parse (the mini-reader mangles some inline lists like `cidrs: []`).
+  for lib in jsonschema yaml; do
+    name="$lib"; [ "$lib" = yaml ] && name="PyYAML"
+    if python3 -c "import $lib" >/dev/null 2>&1; then
+      printf '  %s✓ %-22s%s %spresent%s\n' "$G" "python: $name" "$X" "$D" "$X"
+    else
+      printf '  %s⚙ %-22s%s %snot installed — built-in fallback in use (pip install '"'"'redstrike-cli[validate]'"'"')%s\n' "$D" "python: $name" "$X" "$D" "$X"
+    fi
+  done
 }
 
 if [ "$ENV_ONLY" = 1 ]; then

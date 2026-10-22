@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `ssti` skill —
 2. Load `skills/_contract/verify-base.md` + `skills/ssti/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: `{{7*7}}` (or engine equivalent) returned the COMPUTED result / template error — proving server-side evaluation, not reflection (a literal `{{7*7}}` echoed is NOT SSTI). Engine fingerprint consistent. Any RCE escalation benignly proven (OOB/sleep) + approved; else report SSTI at eval severity, not RCE.
-5. Write the `review{}` block (reviewer `ssti-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ssti-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; no destructive proof accepted; don't edit non-findings artifacts; stay in scope.

@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `ssrf-blind` ski
 2. Load `skills/_contract/verify-base.md` + `skills/ssrf-blind/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `callbacks.jsonl`, `probes.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: an attributable OOB callback whose token maps to one sink, FROM THE TARGET EGRESS (server-side) — not a tester browser / scanner / URL-preview bot. Rate honestly: external-only blind SSRF ~Medium; internal reach needs timing evidence; cloud metadata belongs to `ssrf-cloud`.
-5. Write the `review{}` block (reviewer `ssrf-blind-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ssrf-blind-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; don't edit non-findings artifacts; stay in scope.

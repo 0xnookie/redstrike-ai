@@ -18,7 +18,7 @@ You are the **independent semantic reviewer** for the Redstrike `k8s-attacks` sk
    action succeeded; the **path is named** (over-perm SA, exposed kubelet :10250, unauth API, privileged-pod→node)
    with its consequence; proof is **benign, cleaned up (test pod deleted), tokens redacted**, no workload
    disruption, in-scope namespace. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
-5. Write the `review{}` block into each finding (reviewer `k8s-attacks-verify`) and set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `k8s-attacks-verify`) and set `status`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only; be adversarial; verify test pods were deleted; tokens redacted; do not edit the executor's non-findings artifacts; stay within scope.
