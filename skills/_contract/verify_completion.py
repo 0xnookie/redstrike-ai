@@ -129,9 +129,12 @@ def _stdlib_schema_errors(data, schema, root=None, path="<root>"):
     """A tiny, dependency-free JSON-Schema *subset* validator used when the
     `jsonschema` package isn't installed. It covers exactly the constraints the
     Redstrike schemas rely on — $ref (local #/$defs/...), type, enum, required,
-    properties, items, anyOf, and `additionalProperties` (both `false` and a
-    sub-schema). Patterns/formats are intentionally NOT enforced (not the source
-    of the defects this guards). Returns a list of human-readable error strings."""
+    properties, items, anyOf, `additionalProperties` (both `false` and a
+    sub-schema), and the scalar/array bounds the schemas declare: `pattern`,
+    `minLength`/`maxLength`, `minItems`/`maxItems`, `minimum`/`maximum`. Only
+    `format` is left advisory (jsonschema doesn't enforce it by default either),
+    so this covers the real constraints even when jsonschema is absent.
+    Returns a list of human-readable error strings."""
     if root is None:
         root = schema
     errs = []
@@ -149,10 +152,27 @@ def _stdlib_schema_errors(data, schema, root=None, path="<root>"):
         return errs
     if "enum" in schema and data not in schema["enum"]:
         errs.append(f"{path}: {data!r} not one of {schema['enum']}")
+    if isinstance(data, str):
+        pat = schema.get("pattern")
+        if pat is not None and re.search(pat, data) is None:
+            errs.append(f"{path}: {data!r} does not match pattern {pat!r}")
+        if isinstance(schema.get("minLength"), int) and len(data) < schema["minLength"]:
+            errs.append(f"{path}: string shorter than minLength {schema['minLength']}")
+        if isinstance(schema.get("maxLength"), int) and len(data) > schema["maxLength"]:
+            errs.append(f"{path}: string longer than maxLength {schema['maxLength']}")
+    elif isinstance(data, (int, float)) and not isinstance(data, bool):
+        if isinstance(schema.get("minimum"), (int, float)) and data < schema["minimum"]:
+            errs.append(f"{path}: {data} below minimum {schema['minimum']}")
+        if isinstance(schema.get("maximum"), (int, float)) and data > schema["maximum"]:
+            errs.append(f"{path}: {data} above maximum {schema['maximum']}")
     t = schema.get("type")
     if t == "array" or (t is None and "items" in schema):
         if not isinstance(data, list):
             return errs + [f"{path}: expected array"]
+        if isinstance(schema.get("minItems"), int) and len(data) < schema["minItems"]:
+            errs.append(f"{path}: array has {len(data)} item(s), need >= {schema['minItems']}")
+        if isinstance(schema.get("maxItems"), int) and len(data) > schema["maxItems"]:
+            errs.append(f"{path}: array has {len(data)} item(s), max {schema['maxItems']}")
         items = schema.get("items")
         if isinstance(items, dict):
             for i, el in enumerate(data):

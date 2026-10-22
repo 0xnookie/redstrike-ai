@@ -9,14 +9,18 @@ description = "Redstrike launcher — runs Claude Code as the engagement engine,
 requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "same-as-repo" }
-# Stdlib-only by design (matches scripts/validate.py, cvss.py, verify_completion.py).
-# PyYAML is used when present and falls back to a bundled reader otherwise.
+# Stdlib-only by design (matches scripts/validate.py, cvss.py, verify_completion.py): the
+# completion gate ships a built-in JSON-Schema-subset validator that enforces the schemas'
+# real constraints (enums, additionalProperties, patterns, min/max) with no dependency.
+# PyYAML (exact scope.yaml parsing) and jsonschema (authoritative full-spec validation) are
+# used when present and fall back to bundled readers otherwise — the `validate` extra adds both.
 dependencies = []
 
 [project.optional-dependencies]
 yaml = ["PyYAML>=6"]
 rich = ["rich>=13"]
-dev = ["PyYAML>=6", "ruff>=0.5"]
+validate = ["PyYAML>=6", "jsonschema>=4"]
+dev = ["PyYAML>=6", "jsonschema>=4", "ruff>=0.5"]
 
 [project.scripts]
 redstrike = "redstrike_cli.__main__:main"
