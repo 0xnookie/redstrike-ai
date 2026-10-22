@@ -20,7 +20,7 @@ You are the **independent semantic reviewer** for the Redstrike `crypto-attacks`
    **rate-limited + reproducible**, **not a JWT finding** (→ `jwt`), **in scope + approved**. A mere "looks
    weak" with no transformation ⇒ `rejected`; primitive plausible but under-evidenced ⇒ `needs-evidence`;
    proven ⇒ `accepted`.
-5. Write the `review{}` block into each finding (reviewer `crypto-attacks-verify`) and set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `crypto-attacks-verify`) and set `status`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only; be adversarial; reject "looks like base64" guesses, bulk decryption, and JWT-class findings; do not edit the executor's non-findings artifacts; stay within scope.

@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `sc-upgradeabili
 2. Load `skills/_contract/verify-base.md` + `skills/sc-upgradeability/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/PoC file + the referenced contract source.
 4. Apply the 7 base checks + the gauntlet. Decisive: an unauthorized signer (no legitimate owner/admin/upgrader role) initialized / re-initialized / upgraded / bricked a proxy or implementation, or a storage-layout collision corrupts state across an upgrade, because the init/upgrade path is unguarded on the FULL reachable path (check inherited modifiers + `_disableInitializers()` in the implementation constructor) or the layout is unsafe, the effect (ownership taken / impl slot changed / proxy bricked / slot corrupted) was read back on a **local fork** (no live-chain tx, no real funds moved), and it's genuinely upgrade-specific — reclassify a plain missing-modifier on a business fn → `sc-access-control`, price/oracle → `sc-oracle-mev`, reentrancy → `sc-reentrancy`. Re-run the Foundry fork PoC when feasible; recompute CVSS from the demonstrated effect + $ impact.
-5. Write the `review{}` block (reviewer `sc-upgradeability-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `sc-upgradeability-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; confirm the PoC used a local fork and moved no real funds; don't edit non-findings artifacts; stay in scope.

@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `xxe-inband` ski
 2. Load `skills/_contract/verify-base.md` + `skills/xxe-inband/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: an EXTERNAL entity (`file://` / internal URL) was resolved and its content reflected (the real file content / internal result) — not merely a benign INTERNAL entity echoed (which only proves entity parsing). SSRF-via-XXE classified; cloud metadata handed to ssrf-cloud. Benign file; no DoS; scope + approval.
-5. Write the `review{}` block (reviewer `xxe-inband-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `xxe-inband-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; don't edit non-findings artifacts; stay in scope.
