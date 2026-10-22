@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
-  deriveAgentStats, deriveActivity, hostRoot,
+  deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
 } from "./data";
 import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 
@@ -149,7 +149,12 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const services = active.services;
   const coverage = active.coverage;
   const cveIntel = active.cveIntel;
-  const assets = useMemo(() => overlayAssetFindings(active.assets, active.findings), [active.assets, active.findings]);
+  const assets = useMemo(() => {
+    // Prefer real host-discovery assets; otherwise derive from scope + findings so the
+    // Assets views aren't empty when recon didn't emit host_discovery.json.
+    const base = active.assets.length ? active.assets : deriveAssetsFromScope(activeEngagement, active.findings);
+    return overlayAssetFindings(base, active.findings);
+  }, [active.assets, active.findings, activeEngagement]);
   const agents = useMemo(() => deriveAgentStats(agentRoster, active.findings), [active.findings]);
   const activity = useMemo(() => deriveActivity(active.findings), [active.findings]);
   const tests: TestRun[] = []; // no per-run source yet; the activity timeline drives the heatmap
