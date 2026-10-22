@@ -115,6 +115,7 @@ export const emptyData: ConsoleData = {
   tests: [],
   cveFeed: undefined,
   coverage: undefined,
+  cveIntel: undefined,
 };
 
 /* ------------------------------------------------------------------ *
