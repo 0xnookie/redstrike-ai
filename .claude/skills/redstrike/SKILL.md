@@ -34,6 +34,11 @@ missing/incomplete, the window is closed, or a target falls outside scope.
 client-side JS; for a pure API / JS-less target, skip it with an explicit N/A note)*.
 Run `redstrike-cve-intelligence` to prioritize.
 
+**Host-discovery MUST persist `<engagement>/host-discovery/host_discovery.json`** (the structured
+`{live_hosts, api_endpoints}` map) — even for a single in-scope host. It is what populates the console's
+Assets/Ports views; a recon pass that only saves pages + `signals.json` leaves them empty, and the
+engagement gate warns when it is missing.
+
 **Provision ≥2 test identities + an authenticated recon pass.** If the app has registration/login, create
 (or have the operator supply) **two test accounts** up front — content-discovery then crawls the
 **authenticated** surface and diffs it against unauth, and `authz-context`/`api-context` get the ≥2 identities
