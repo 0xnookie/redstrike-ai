@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `host-header` sk
 2. Load `skills/_contract/verify-base.md` + `skills/host-header/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: attacker-controlled host reaches a SECURITY-RELEVANT sink (reset-link poisoning is the headline — the reset link must point to the injected host). Benign reflection ⇒ reject/down-rate.
-5. Write the `review{}` block (reviewer `host-header-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `host-header-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; a test account should have been used; don't edit non-findings artifacts; stay in scope.

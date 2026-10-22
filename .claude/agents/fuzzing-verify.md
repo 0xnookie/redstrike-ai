@@ -18,7 +18,7 @@ You are the **independent semantic reviewer** for the Redstrike `fuzzing` skill 
    TARGET (not the harness, not an OOM/assert); crashes are **deduped to unique root causes**; the proof is a
    **benign crash only** (weaponization is `exploit-dev`'s job); **in scope + approved**. Not reproducible or
    harness-caused ⇒ `rejected`; insufficient trace/minimization ⇒ `needs-evidence`; proven ⇒ `accepted`.
-5. Write the `review{}` block into each finding (reviewer `fuzzing-verify`) and set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `fuzzing-verify`) and set `status`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only; be adversarial; reject flaky/harness/OOM crashes and weaponized payloads; do not edit the executor's non-findings artifacts; stay within scope.

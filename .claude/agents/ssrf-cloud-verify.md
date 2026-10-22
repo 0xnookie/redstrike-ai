@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `ssrf-cloud` ski
 2. Load `skills/_contract/verify-base.md` + `skills/ssrf-cloud/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `metadata_probes.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: metadata reached THROUGH the sink (server-side) AND sensitive creds/token actually retrieved (REDACTED in artifacts) → Critical. If IMDSv2 was enforced and the sink couldn't PUT-token, metadata is effectively blocked → down-rate / `needs-evidence`. Verify creds were NOT used to touch cloud resources; scope + approval.
-5. Write the `review{}` block (reviewer `ssrf-cloud-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ssrf-cloud-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; never echo a full credential; be adversarial; don't edit non-findings artifacts; stay in scope.

@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `sqli-inband` sk
 2. Load `skills/_contract/verify-base.md` + `skills/sqli-inband/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the injection RETURNED DATA (a DB-sourced value: `version()`, db name, a UNION marker) in the response, reproducibly — not a generic 500/error. Confirm the breakout matches the query context and that proof is minimal/read-only (no PII dump). Scope + approval.
-5. Write the `review{}` block (reviewer `sqli-inband-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `sqli-inband-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; flag over-collection of real data; don't edit non-findings artifacts; stay in scope.

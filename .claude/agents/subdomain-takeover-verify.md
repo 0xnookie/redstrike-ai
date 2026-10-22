@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `subdomain-takeo
 2. Load `skills/_contract/verify-base.md` + `skills/subdomain-takeover/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `takeover_candidates.jsonl` + evidence; optionally re-resolve the record.
 4. Apply the 7 base checks + the gauntlet. Decisive: the record is actually dangling AND the service fingerprint matches a KNOWN claimable state (not a generic 404/parked page) AND claimability is real. Confirm the subdomain is in scope and any actual claim was authorized.
-5. Write the `review{}` block (reviewer `subdomain-takeover-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `subdomain-takeover-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; don't edit non-findings artifacts; stay in scope.
