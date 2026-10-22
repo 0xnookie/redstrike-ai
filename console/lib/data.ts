@@ -246,6 +246,51 @@ export function overlayAssetFindings(assets: Asset[], findings: Finding[]): Asse
   });
 }
 
+/**
+ * Fallback asset list when host-discovery didn't emit host_discovery.json (the common
+ * case today — recon often runs ad-hoc). Built from data that always exists: the
+ * engagement's in-scope domains/urls + the hosts and endpoints the findings reference,
+ * so the Assets map/table/coverage are populated instead of empty. Port/service detail
+ * still needs host_discovery.json (the Ports table stays empty until recon persists it).
+ */
+export function deriveAssetsFromScope(eng: Engagement, findings: Finding[]): Asset[] {
+  const assets: Asset[] = [];
+  const seen = new Set<string>();
+  const tested = new Set<string>();
+  for (const f of findings) if (isReportable(f)) tested.add(hostOf(f.asset));
+  const norm = (raw: string) =>
+    (raw || "").replace(/^\*\./, "").replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
+  const addHost = (raw: string) => {
+    const host = norm(raw);
+    if (!host || seen.has(host)) return;
+    seen.add(host);
+    assets.push({
+      id: `a-scope-${assets.length}`,
+      value: host,
+      kind: isIpLike(host) ? "ip" : host.includes(".") ? "subdomain" : "domain",
+      scope: "in",
+      coverage: tested.has(host) ? "tested" : "untested",
+      findings: 0,
+    });
+  };
+  (eng.in_scope?.domains ?? []).forEach(addHost);
+  (eng.in_scope?.urls ?? []).forEach((u) => addHost(hostFromUrl(u)));
+  tested.forEach(addHost);
+
+  const primary = assets[0]?.value;
+  const epSeen = new Set<string>();
+  for (const f of findings) {
+    if (!isReportable(f)) continue;
+    let path = "";
+    try { path = new URL(f.asset).pathname; } catch { continue; }
+    if (path && path !== "/" && !epSeen.has(path)) {
+      epSeen.add(path);
+      assets.push({ id: `a-ep-${assets.length}`, value: path, kind: "endpoint", scope: "in", coverage: "tested", findings: 0, parent: primary });
+    }
+  }
+  return assets;
+}
+
 /* ------------------------------------------------------------------ *
  * Derivations from the real findings — the engagement never emits a
  * separate agents.json / activity.json, so we compute them.
