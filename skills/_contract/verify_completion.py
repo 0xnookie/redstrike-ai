@@ -16,11 +16,13 @@ Stdlib only. Usage:
   python verify_completion.py --review skills/js-analysis/review.md --out <dir> --json
   python verify_completion.py --engagement engagements/<client>-<date>   # consolidated mode
 
-Consolidated (`--engagement`) mode validates an orchestrator-led engagement that keeps ONE shared
-findings.json + a single evidence vault (findings/evidence|poc/) + reviews/<id>.verdict.json, instead of
-the per-skill OUT scaffolding above. It is the deterministic altitude for that layout: every finding must
-cite at least one evidence artifact that actually exists and is non-empty (the pre-review hygiene lint), and
-it soft-warns on CVSS/severity drift (via scripts/cvss.py) and missing reviewer verdicts.
+Consolidated (`--engagement`) mode validates an orchestrator-led engagement regardless of which layout
+it uses — it discovers findings from `<eng>/findings.json` (single shared vault), else the union of
+`<eng>/*/findings.json` (the per-skill executor layout), else `<eng>/report/findings_consolidated.json`
+(reporting output). For every finding it HARD-fails on a missing required field, missing/empty evidence,
+or a finding/`review{}` schema violation (enum + additionalProperties, validated against finding.schema.json
+via `jsonschema` when present, else a stdlib subset validator), and soft-warns on CVSS/severity drift
+(via scripts/cvss.py), out-of-scope assets, and missing reviewer verdicts.
 """
 import argparse
 import glob as globmod
@@ -123,27 +125,102 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _stdlib_schema_errors(data, schema, root=None, path="<root>"):
+    """A tiny, dependency-free JSON-Schema *subset* validator used when the
+    `jsonschema` package isn't installed. It covers exactly the constraints the
+    Redstrike schemas rely on — $ref (local #/$defs/...), type, enum, required,
+    properties, items, anyOf, and `additionalProperties` (both `false` and a
+    sub-schema). Patterns/formats are intentionally NOT enforced (not the source
+    of the defects this guards). Returns a list of human-readable error strings."""
+    if root is None:
+        root = schema
+    errs = []
+    if not isinstance(schema, dict):
+        return errs
+    if "$ref" in schema:
+        target = root
+        for part in schema["$ref"].lstrip("#/").split("/"):
+            if part:
+                target = (target or {}).get(part, {})
+        return _stdlib_schema_errors(data, target, root, path)
+    if "anyOf" in schema:
+        if not any(not _stdlib_schema_errors(data, s, root, path) for s in schema["anyOf"]):
+            errs.append(f"{path}: does not satisfy anyOf")
+        return errs
+    if "enum" in schema and data not in schema["enum"]:
+        errs.append(f"{path}: {data!r} not one of {schema['enum']}")
+    t = schema.get("type")
+    if t == "array" or (t is None and "items" in schema):
+        if not isinstance(data, list):
+            return errs + [f"{path}: expected array"]
+        items = schema.get("items")
+        if isinstance(items, dict):
+            for i, el in enumerate(data):
+                errs += _stdlib_schema_errors(el, items, root, f"{path}[{i}]")
+        return errs
+    if t == "object" or "properties" in schema or "required" in schema:
+        if not isinstance(data, dict):
+            return errs + [f"{path}: expected object"]
+        props = schema.get("properties", {})
+        for req in schema.get("required", []):
+            if req not in data:
+                errs.append(f"{path}: missing required '{req}'")
+        ap = schema.get("additionalProperties", True)
+        for k, v in data.items():
+            if k in props:
+                errs += _stdlib_schema_errors(v, props[k], root, f"{path}/{k}")
+            elif ap is False:
+                errs.append(f"{path}: unexpected property '{k}'")
+            elif isinstance(ap, dict):
+                errs += _stdlib_schema_errors(v, ap, root, f"{path}/{k}")
+    return errs
+
+
 def _validate_against_schema(data, schema_rel: str):
     """Best-effort JSON-Schema validation for an artifact that declares `schema`.
-    Returns (ok, note). Degrades gracefully: a missing schema file or a missing
-    `jsonschema` dependency SKIPS (ok=True) rather than failing the gate, so CI
-    without the dep still runs; a real schema violation FAILS (ok=False)."""
+    Returns (ok, note). Prefers the `jsonschema` package; falls back to a stdlib
+    subset validator (`_stdlib_schema_errors`) so a real violation still FAILS even
+    without the dependency. A missing schema file SKIPS (ok=True)."""
     schema_path = _repo_root() / schema_rel
     if not schema_path.is_file():
         return True, f"schema {schema_rel} not found (skipped)"
     try:
-        import jsonschema  # type: ignore
-    except ImportError:
-        return True, "jsonschema not installed (skipped)"
-    try:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        jsonschema.validate(data, schema)
-    except jsonschema.ValidationError as e:  # type: ignore
-        loc = "/".join(str(x) for x in e.absolute_path) or "<root>"
-        return False, f"{e.message} (at {loc})"
-    except Exception as e:  # malformed schema etc. — don't block the gate
+    except Exception as e:  # malformed schema — don't block the gate
+        return True, f"schema unreadable: {e} (skipped)"
+    try:
+        import jsonschema  # type: ignore
+        try:
+            jsonschema.validate(data, schema)
+        except jsonschema.ValidationError as e:  # type: ignore
+            loc = "/".join(str(x) for x in e.absolute_path) or "<root>"
+            return False, f"{e.message} (at {loc})"
+        return True, "schema ok"
+    except ImportError:
+        errs = _stdlib_schema_errors(data, schema)
+        if errs:
+            return False, "; ".join(errs[:4]) + (" …" if len(errs) > 4 else "") + " (stdlib check)"
+        return True, "schema ok (stdlib check)"
+    except Exception as e:
         return True, f"schema check error: {e} (skipped)"
-    return True, "schema ok"
+
+
+def _finding_schema_def():
+    """Return the single-finding sub-schema ($defs/finding) + the full root schema,
+    or (None, None) if unavailable. Cached on the function object."""
+    cache = getattr(_finding_schema_def, "_cache", False)
+    if cache is not False:
+        return cache
+    result = (None, None)
+    sp = _repo_root() / "skills" / "_contract" / "finding.schema.json"
+    if sp.is_file():
+        try:
+            root = json.loads(sp.read_text(encoding="utf-8"))
+            result = (root.get("$defs", {}).get("finding"), root)
+        except Exception:
+            result = (None, None)
+    _finding_schema_def._cache = result
+    return result
 
 
 def _try_import_cvss():
@@ -218,6 +295,23 @@ def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: se
     if not _RS_ID_RE.match(str(fid)):
         warns.append(f"{fid}: id does not match RS-YYYY-NNN")
 
+    # schema conformance (enums + review-block additionalProperties/enums) — HARD.
+    # This is the altitude that catches reviewer-written `review{}` defects
+    # (stray keys, bad confidence/verdict/rubric enums) the per-skill gate can't see.
+    fdef, froot = _finding_schema_def()
+    if fdef:
+        try:
+            import jsonschema  # type: ignore
+            try:
+                jsonschema.validate(f, {**froot, **fdef})  # validate as a finding object
+                serrs = []
+            except jsonschema.ValidationError as e:  # type: ignore
+                serrs = [f"{'/'.join(str(x) for x in e.absolute_path) or '<finding>'}: {e.message}"]
+        except ImportError:
+            serrs = _stdlib_schema_errors(f, fdef, froot, path=fid)
+        if serrs:
+            return False, "schema violation: " + "; ".join(serrs[:4]) + (" …" if len(serrs) > 4 else ""), warns
+
     ev = f.get("evidence") or []
     if not isinstance(ev, list) or not ev:
         return False, "no evidence items", warns
@@ -260,9 +354,64 @@ def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: se
     return True, f"{len(ev)} evidence artifact(s) ok", warns
 
 
+def _load_findings_array(path: Path):
+    """Load a findings file as a flat list. Accepts a bare array, or a reporting
+    object {findings:[...], attack_chains:[...]}. Returns None on parse failure."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return list(data.get("findings") or []) + list(data.get("attack_chains") or [])
+    return None
+
+
+def _discover_engagement_findings(eng: Path):
+    """Find the engagement's findings across the layouts the framework actually
+    produces, in priority order:
+      1. <eng>/findings.json                     (single shared-vault layout)
+      2. union of <eng>/*/findings.json          (per-skill executor layout — the common case)
+      3. <eng>/report/findings_consolidated.json (reporting output; may be {findings, attack_chains})
+    Returns (findings_list, source_description) or (None, reason)."""
+    root_fj = eng / "findings.json"
+    if root_fj.is_file():
+        arr = _load_findings_array(root_fj)
+        return (arr, "findings.json") if arr is not None else (None, f"{root_fj} is not a findings array")
+
+    per = sorted(p for p in eng.glob("*/findings.json"))
+    if per:
+        findings = []
+        bad = []
+        for p in per:
+            arr = _load_findings_array(p)
+            if arr is None:
+                bad.append(str(p.relative_to(eng)))
+            else:
+                findings.extend(arr)
+        if bad:
+            return None, "invalid JSON in: " + ", ".join(bad)
+        return findings, f"{len(per)} per-skill findings.json file(s)"
+
+    cons = eng / "report" / "findings_consolidated.json"
+    if cons.is_file():
+        arr = _load_findings_array(cons)
+        return (arr, "report/findings_consolidated.json") if arr is not None else (None, f"{cons} unparseable")
+
+    return None, "no findings.json (root, per-skill, or report/findings_consolidated.json)"
+
+
+def _collect_verdict_ids(eng: Path) -> set:
+    """Reviewer verdict ids from the root vault AND every per-skill reviews/ dir."""
+    ids = set()
+    for rd in [eng / "reviews"] + list(eng.glob("*/reviews")):
+        if rd.is_dir():
+            ids |= {p.stem.replace(".verdict", "") for p in rd.glob("*.verdict.json")}
+    return ids
+
+
 def validate_engagement(eng: Path, as_json: bool) -> bool:
-    fj = eng / "findings.json"
-    reviews_dir = eng / "reviews"
     cvss_mod = _try_import_cvss()
     scope_text = _scope_text(eng)
     top_warnings = []
@@ -270,23 +419,14 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         top_warnings.append("scope.yaml absent — scope compliance cannot be auto-checked (flagged, not failed)")
     top_warnings.extend(_coverage_warnings(eng))
 
-    if not fj.is_file():
-        msg = f"no findings.json at {fj}"
-        print(json.dumps({"engagement": str(eng), "pass": False, "error": msg}) if as_json else f"[!] {msg}")
+    findings, source = _discover_engagement_findings(eng)
+    if findings is None:
+        print(json.dumps({"engagement": str(eng), "pass": False, "error": source}) if as_json else f"[!] {source}")
         return False
-    try:
-        findings = json.loads(fj.read_text(encoding="utf-8", errors="replace"))
-    except json.JSONDecodeError as e:
-        msg = f"findings.json invalid JSON: {e}"
-        print(json.dumps({"engagement": str(eng), "pass": False, "error": msg}) if as_json else f"[!] {msg}")
-        return False
-    if not isinstance(findings, list):
-        msg = "findings.json is not a JSON array"
-        print(json.dumps({"engagement": str(eng), "pass": False, "error": msg}) if as_json else f"[!] {msg}")
-        return False
+    if not as_json:
+        top_warnings.append(f"findings source: {source} ({len(findings)} finding(s))")
 
-    verdict_ids = {p.stem.replace(".verdict", "")
-                   for p in reviews_dir.glob("*.verdict.json")} if reviews_dir.is_dir() else set()
+    verdict_ids = _collect_verdict_ids(eng)
 
     results = []
     for f in findings:
