@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `jwt` skill — 
 2. Load `skills/_contract/verify-base.md` + `skills/jwt/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the server ACCEPTED a token with a broken/forged signature or tampered claims (authed action/data returned, 200 not 401) — decoding/tampering alone is not a finding. The specific flaw is identified; any privilege gained is verified (not echoed). Test account; offline cracking; approved.
-5. Write the `review{}` block (reviewer `jwt-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `jwt-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; don't edit non-findings artifacts; stay in scope.

@@ -17,7 +17,7 @@ You are the **independent semantic reviewer** for the Redstrike `llm-output-hand
    relevant web agent's criteria: xss/sqli/ssrf/command-injection) — not the model merely emitting a
    string containing a payload, and not inert reflected text. The LLM output is the vector, reproducibly.
    Benign payload; in scope.
-5. Write the `review{}` block (reviewer `llm-output-handling-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `llm-output-handling-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; execution at the sink is the proof; don't edit non-findings artifacts; stay in scope.

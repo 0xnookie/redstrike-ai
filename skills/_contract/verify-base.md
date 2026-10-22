@@ -21,11 +21,15 @@ its own blind spots — independence is the whole point). It consumes `findings.
 
 ## Verdict
 
-A review emits this object per finding (schema: `finding.schema.json` → `review{}`):
+A review emits a `review{}` object per finding, conforming to `finding.schema.json` → `review{}`.
+It is a **closed** object (`additionalProperties:false`): the ONLY allowed keys are `verdict`,
+`reviewer`, `reviewed_at`, `rubric`, `false_positive_checks`, `rejection_class`, `scope_ok`, `notes`.
+`rubric` values are exactly `pass | fail | n/a`. The engagement gate (`verify_completion.py
+--engagement`) HARD-fails any other key or value — so copy this shape exactly, and write the SAME
+object to both the `reviews/<id>.verdict.json` file (below) and the inline `review{}` block.
 
 ```json
 {
-  "id": "RS-YYYY-NNN",
   "verdict": "accepted | rejected | needs-evidence | blocked",
   "reviewer": "<skill>-verify",
   "reviewed_at": "<ISO-8601>",
@@ -33,10 +37,21 @@ A review emits this object per finding (schema: `finding.schema.json` → `revie
               "cvss": "pass", "coverage": "pass", "scope": "pass" },
   "false_positive_checks": ["<what you ruled out>"],
   "scope_ok": true,
-  "severity_opinion": "<your recomputed rating>",
-  "notes": "<terse>"
+  "notes": "<terse — include your recomputed severity rating + its rationale here>"
 }
 ```
+
+When `verdict` is `rejected`, add `"rejection_class"` (`false-positive | out-of-scope | duplicate |
+open-proof-gap` — see below). **Do not invent keys or values the schema forbids** — that is the single
+biggest cause of rejected review blocks. The recurring offenders and their schema-valid homes:
+- a recomputed severity rating has **no key of its own** → put it in `notes`, or (preferred, per
+  `severity-calibration.md`) correct the finding's `severity` / `cvss_vector` / `potential_severity`
+  and re-derive. There is **no `severity_opinion`** key.
+- a half-met check is `fail` (name the weakness in `false_positive_checks` / `notes`), never
+  `rubric: "weak"` / `"partial"`.
+- "reachability confirmed, impact inferred" is the finding's `confidence: "probable"`, never `"firm"`.
+- the finding id lives in the file name `reviews/<id>.verdict.json` and on the finding itself —
+  **not inside `review{}`** (no `id` key).
 
 - `accepted` → finding `status: verified`.
 - `rejected` → finding `status: rejected`; **set `rejection_class`** and state why. A `rejected` means *not a
