@@ -92,9 +92,20 @@ function toEngagement(entry: any): Engagement {
   const sc = entry.scope || {};
   const win = sc.window && (sc.window.start || sc.window.end) ? sc.window : { start: "", end: "" };
   const ended = win.end && !isNaN(+new Date(win.end)) && +new Date(win.end) < Date.now();
-  const status: EngagementStatus = (entry.summary?.findings ?? 0) === 0 && !entry.has?.["findings_consolidated.json"]
-    ? "scoping"
-    : ended ? "completed" : "running";
+  const hasConsolidated = !!entry.has?.["findings_consolidated.json"];
+  const hasFindings = (entry.summary?.findings ?? 0) > 0;
+  // Derive status from the DATA, not the clock. An explicit scope `status:` wins; otherwise:
+  // nothing produced yet => scoping; the terminal report exists (reporting ran) or the window has
+  // lapsed => completed; findings but no report yet => running. (Previously this keyed only off the
+  // window end date, and the lazy-load path below hard-coded "running", so a finished engagement
+  // showed "Running" until its scheduled window elapsed.)
+  const EXPLICIT = new Set(["running", "paused", "completed", "scoping"]);
+  const explicit = typeof sc.status === "string" && EXPLICIT.has(sc.status) ? (sc.status as EngagementStatus) : null;
+  const status: EngagementStatus = explicit
+    ? explicit
+    : (!hasFindings && !hasConsolidated) ? "scoping"
+    : (hasConsolidated || ended) ? "completed"
+    : "running";
   return {
     id: entry.id,
     name: sc.engagement || entry.id,
@@ -197,7 +208,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         patchEngagement({
           name: (o.engagement as string) || activeEngagement.name,
           target: (o.target as string) || activeEngagement.target,
-          status: "running",
+          // Do NOT force status here: loading a findings file is not evidence the engagement is
+          // actively running. Keep the data-derived status computed in toEngagement().
         });
         return "findings";
       }
