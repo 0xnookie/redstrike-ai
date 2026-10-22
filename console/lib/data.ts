@@ -114,6 +114,7 @@ export const emptyData: ConsoleData = {
   services: [],
   tests: [],
   cveFeed: undefined,
+  coverage: undefined,
 };
 
 /* ------------------------------------------------------------------ *
@@ -264,10 +265,23 @@ export function deriveAgentStats(roster: Agent[], findings: Finding[]): Agent[] 
     stats.set(slug, rec);
   }
   if (!stats.size) return roster;
-  return roster.map((a) => {
+  const overlaid = roster.map((a) => {
     const r = stats.get(a.slug);
     return r ? { ...a, ...r, status: "done" as const } : a;
   });
+  // Any reviewer that produced a finding but isn't in the static catalog gets a derived row,
+  // so the Agents page never silently drops a real finding (e.g. privesc, graphql, cloud).
+  const known = new Set(roster.map((a) => a.slug));
+  const extra: Agent[] = [];
+  for (const [slug, r] of stats) {
+    if (known.has(slug)) continue;
+    extra.push({
+      slug, name: slug, family: "Web", tier: "Tier-2",
+      summary: "Derived from this engagement's findings (not in the static catalog).",
+      reviewer: `${slug}-verify`, status: "done", approvalGated: false, ...r,
+    });
+  }
+  return extra.length ? [...overlaid, ...extra] : overlaid;
 }
 
 /** An execution timeline synthesized from each finding's review record. */
