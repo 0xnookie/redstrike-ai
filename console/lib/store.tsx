@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, EngagementStatus } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
   deriveAgentStats, deriveActivity, hostRoot,
@@ -12,7 +12,7 @@ import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 type Mode = "empty" | "live";
 
 // Each engagement's own findings/chains/services/assets, loaded on demand.
-interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; coverage?: CoverageLedger; }
+interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; coverage?: CoverageLedger; cveIntel?: CveIntel; }
 const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [] };
 
 const ACTIVE_KEY = "redstrike.activeEngagement";
@@ -31,6 +31,7 @@ interface ConsoleCtx {
   services: ConsoleData["services"];
   tests: TestRun[];
   coverage: CoverageLedger | undefined;
+  cveIntel: CveIntel | undefined;
   cveFeed: CveFeed | undefined;
   cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
@@ -63,7 +64,7 @@ const safeLocalSet = (k: string, v: string) => {
 };
 
 /** Assemble a dataset from an engagement's parsed canonical files. */
-function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any): Dataset {
+function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any): Dataset {
   let findings: Finding[] = [];
   let chains: AttackChain[] = [];
   if (Array.isArray(cons)) {
@@ -80,6 +81,7 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any): D
   else if (cons && Array.isArray(cons.attack_chains) && cons.attack_chains[0]?.steps) chains = cons.attack_chains as AttackChain[];
 
   const coverage = cover && Array.isArray(cover.categories) ? (cover as CoverageLedger) : undefined;
+  const cveIntel = intel && (Array.isArray(intel.cves) || Array.isArray(intel.entries)) ? (intel as CveIntel) : undefined;
 
   let services: Service[] = [];
   let assets: Asset[] = [];
@@ -87,7 +89,7 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any): D
     services = buildServices(host);
     assets = buildAssets(host, hostRoot(services, (cons && cons.target) || ""));
   }
-  return { findings, chains, services, assets, coverage };
+  return { findings, chains, services, assets, coverage, cveIntel };
 }
 
 /** Build an Engagement header from a manifest entry (its parsed scope + summary). */
@@ -146,6 +148,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const chains = active.chains;
   const services = active.services;
   const coverage = active.coverage;
+  const cveIntel = active.cveIntel;
   const assets = useMemo(() => overlayAssetFindings(active.assets, active.findings), [active.assets, active.findings]);
   const agents = useMemo(() => deriveAgentStats(agentRoster, active.findings), [active.findings]);
   const activity = useMemo(() => deriveActivity(active.findings), [active.findings]);
@@ -156,17 +159,18 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     if (loadedRef.current.has(id)) return;
     loadedRef.current.add(id);
     const base = `/e/${id}`;
-    const [cons, host, chainsFile, cover] = await Promise.all([
+    const [cons, host, chainsFile, cover, intel] = await Promise.all([
       fetchJson(`${base}/findings_consolidated.json`),
       fetchJson(`${base}/host_discovery.json`),
       fetchJson(`${base}/attack_chains.json`),
       fetchJson(`${base}/coverage_ledger.json`),
+      fetchJson(`${base}/cve_intel.json`),
     ]);
-    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined) {
+    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined && intel === undefined) {
       loadedRef.current.delete(id); // nothing served (e.g. scaffold-only) — allow a retry later
       return;
     }
-    const ds = datasetFromFiles(cons, host, chainsFile, cover);
+    const ds = datasetFromFiles(cons, host, chainsFile, cover, intel);
     setDatasets((d) => ({ ...d, [id]: ds }));
   }, []);
 
@@ -198,6 +202,10 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       if (Array.isArray(o.categories) && (o.map_version != null || o.active_phases != null || (o.categories[0] as any)?.phase != null)) {
         patchActive({ coverage: o as unknown as CoverageLedger });
         return "coverage";
+      }
+      if ((Array.isArray(o.cves) || Array.isArray(o.entries)) && (o.target != null || o.generated_at != null)) {
+        patchActive({ cveIntel: o as unknown as CveIntel });
+        return "cve_intel";
       }
       if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
         const services = buildServices(o);
@@ -288,7 +296,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
 
   const value: ConsoleCtx = {
     mode, engagements, activeEngagement, activeId, setActiveId,
-    findings, chains, agents, activity, assets, services, tests, coverage,
+    findings, chains, agents, activity, assets, services, tests, coverage, cveIntel,
     cveFeed, cveLive, loadFiles, clearData,
     selectedFinding, openFinding, closeFinding, findingsQuery, setFindingsQuery,
   };
