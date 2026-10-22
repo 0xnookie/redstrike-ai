@@ -96,8 +96,11 @@ redstrike init "Acme Corp" --authorized-by "sec@acme / auth-ref" --domain '*.acm
 redstrike run acme-corp-<date>        # launch Claude Code, scoped + gated (interactive)
 ```
 
-- Requires the **`claude`** CLI (Claude Code) on `PATH` and **Python 3.10+**. Stdlib-only (PyYAML
-  used if present).
+- Requires the **`claude`** CLI (Claude Code) on `PATH` and **Python 3.10+**. Stdlib-only: the
+  completion gate ships a built-in schema validator, so no Python packages are required. For
+  authoritative full-spec validation and exact `scope.yaml` parsing, install the extras with
+  `pip install 'redstrike-cli[validate]'` (jsonschema + PyYAML); `scripts/doctor.sh --env` reports
+  whether they're present.
 - Installed out-of-tree, point it at this repo with `--repo <path>` or `export REDSTRIKE_REPO=<path>`
   (running it from inside the repo also works).
 - **Auth:** `claude login` (subscription) or `CLAUDE_CODE_OAUTH_TOKEN` for unattended use.

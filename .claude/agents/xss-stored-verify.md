@@ -14,7 +14,7 @@ You are the **independent semantic reviewer** for the Redstrike `xss-stored` ski
 2. Load your rubric: `skills/_contract/verify-base.md` + `skills/xss-stored/verify.md` (the stored-XSS gauntlet) + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: BOTH ends evidenced (store + render) and **cross-user execution** (fired for a different user/session), and the payload **survived OUTPUT sanitization**. Same-session-only ⇒ reclassify/reject. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
-5. Write the `review{}` block into each finding (reviewer `xss-stored-verify`) and set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `xss-stored-verify`) and set `status`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only; be adversarial; verify the stored payload is recorded in `cleanup.md`; do not edit the executor's non-findings artifacts; stay within scope.

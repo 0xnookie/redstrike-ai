@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `cache-poisoning
 2. Load `skills/_contract/verify-base.md` + `skills/cache-poisoning/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `poison_tests.jsonl`, `cleanup.md` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: a cross-user cache HIT (a clean request, no attacker input, served the poisoned response: `X-Cache: hit`/`Age`>0) from a genuinely UNKEYED input, with real payload impact. Per-request reflection without a hit ⇒ reject. Verify benign + buster-scoped + approval for shared caches + cleanup.
-5. Write the `review{}` block (reviewer `cache-poisoning-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `cache-poisoning-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; safety/cleanup is part of the verdict; don't edit non-findings artifacts; stay in scope.

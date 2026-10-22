@@ -16,6 +16,23 @@ def _verify_script(repo_root: Path) -> Path:
     return repo_root / "skills" / "_contract" / "verify_completion.py"
 
 
+def _coverage_script(repo_root: Path) -> Path:
+    return repo_root / "scripts" / "coverage.py"
+
+
+def coverage_validate(repo_root: Path, eng_dir: Path, *, as_json: bool = False) -> int:
+    """Validate the coverage ledger — every routing-map category accounted for, nothing left
+    `pending`, every skip reasoned. Returns 0 when coverage.py is absent (nothing to enforce).
+    In --json mode the output is suppressed so the completion-gate JSON stays the single
+    document on stdout; only the exit code reflects the coverage verdict."""
+    script = _coverage_script(repo_root)
+    if not script.is_file():
+        return 0
+    cmd = [sys.executable, str(script), "--validate", "--engagement", str(eng_dir)]
+    kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if as_json else {}
+    return subprocess.run(cmd, cwd=str(repo_root), check=False, **kw).returncode
+
+
 def verify(repo_root: Path, eng_dir: Path, *, skill: str | None = None, as_json: bool = False) -> int:
     script = _verify_script(repo_root)
     if not script.is_file():
@@ -23,11 +40,19 @@ def verify(repo_root: Path, eng_dir: Path, *, skill: str | None = None, as_json:
         return 2
     if skill:
         cmd = [sys.executable, str(script), "--skill", f"skills/{skill}", "--out", str(eng_dir / skill)]
-    else:
-        cmd = [sys.executable, str(script), "--engagement", str(eng_dir)]
+        if as_json:
+            cmd.append("--json")
+        return subprocess.run(cmd, cwd=str(repo_root), check=False).returncode
+
+    # Engagement mode: the completion gate AND the coverage-ledger gate must both pass. The
+    # coverage check (categories attempted vs skipped-with-reason) previously ran only if the
+    # orchestrator model remembered to; here it's mechanical.
+    cmd = [sys.executable, str(script), "--engagement", str(eng_dir)]
     if as_json:
         cmd.append("--json")
-    return subprocess.run(cmd, cwd=str(repo_root), check=False).returncode
+    rc_complete = subprocess.run(cmd, cwd=str(repo_root), check=False).returncode
+    rc_coverage = coverage_validate(repo_root, eng_dir, as_json=as_json)
+    return rc_complete or rc_coverage
 
 
 _SEV_ORDER = ["critical", "high", "medium", "low", "info", "informational"]

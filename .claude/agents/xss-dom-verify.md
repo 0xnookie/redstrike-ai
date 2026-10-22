@@ -14,7 +14,7 @@ You are the **independent semantic reviewer** for the Redstrike `xss-dom` skill 
 2. Load your rubric: `skills/_contract/verify-base.md` + `skills/xss-dom/verify.md` (the DOM-XSS gauntlet) + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` and every evidence/poc/taint file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: a real **source→sink taint path** (devtools/breakpoint trace), the source is **attacker-controllable** (and a postMessage handler lacks origin validation), it **executes CLIENT-SIDE ONLY** (if the value is server-sourced ⇒ reclassify to reflected/stored), and the sink truly executes. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
-5. Write the `review{}` block into each finding (reviewer `xss-dom-verify`) and set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `xss-dom-verify`) and set `status`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only; be adversarial; do not edit the executor's non-findings artifacts; stay within scope.
