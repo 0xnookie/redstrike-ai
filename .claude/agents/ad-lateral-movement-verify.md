@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `ad-lateral-move
 2. Load `skills/_contract/verify-base.md` + `skills/ad-lateral-movement/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `cleanup.md` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: authentication to a DIFFERENT in-scope host with the recovered hash/ticket/cred AND a benign command's output (`whoami`/`hostname`) — not just that the cred exists; the cred came from a confirmed finding or the authorized foothold; only benign commands ran (no destruction/persistence); exec artifacts reverted per cleanup.md. In scope; approved.
-5. Write the `review{}` block (reviewer `ad-lateral-movement-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ad-lateral-movement-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; reject destructive actions / out-of-scope hosts / un-reverted artifacts; don't edit non-findings artifacts; stay in scope.

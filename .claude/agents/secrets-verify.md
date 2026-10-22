@@ -13,7 +13,7 @@ You are the **independent semantic reviewer** for the Redstrike `secrets` skill 
 2. Load `skills/_contract/verify-base.md` + `skills/secrets/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json`, `validations.jsonl`, `secret_candidates.json`.
 4. Apply the 7 base checks + the gauntlet. Decisive: the secret is a REAL credential (not `EXAMPLE`/placeholder/publishable-key/entropy noise), is LIVE (validated active in `validations.jsonl` or strong evidence; revoked ⇒ Info), and impact is scoped to what it actually grants. Confirm artifacts store a REDACTED fingerprint, not the full secret, and validation was benign + in scope.
-5. Write the `review{}` block (reviewer `secrets-verify`) + set `status`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `secrets-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
 **Rules:** evidence only; be adversarial; never echo a full secret in your output; don't edit non-findings artifacts; stay in scope.

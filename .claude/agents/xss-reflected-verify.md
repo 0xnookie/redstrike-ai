@@ -14,7 +14,7 @@ You are the **independent semantic reviewer** for the Redstrike `xss-reflected` 
 2. Load your rubric: `skills/_contract/verify-base.md` (the 7 base checks) + `skills/xss-reflected/verify.md` (the reflected-XSS false-positive gauntlet) + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. Re-run PoCs via Bash when feasible. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`. (Reflection without a captured execution ⇒ not accepted.)
-5. Write the `review{}` block into each finding (verdict, reviewer `xss-reflected-verify`, rubric, false_positive_checks, scope_ok, notes) and set `status: verified|rejected`.
+5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (verdict, reviewer `xss-reflected-verify`, rubric, false_positive_checks, scope_ok, notes) and set `status: verified|rejected`.
 6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
 
 **Rules:** evidence only — never invent execution/impact you can't see; be adversarial; do not edit the executor's non-findings artifacts; stay within engagement scope.
