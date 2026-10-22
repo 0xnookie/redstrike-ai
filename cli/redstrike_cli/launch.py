@@ -45,6 +45,29 @@ def hook_script() -> Path:
     return Path(scope_gate.__file__).resolve()
 
 
+def _seed_coverage_ledger(engagement_dir: Path, repo_root: Path, python_exe: str) -> None:
+    """Create a baseline coverage_ledger.json if absent (best-effort, never fatal).
+
+    `coverage.py --plan` with no recon signals attempts every in-scope category (the
+    recall-safe default), so "which vuln categories were attempted vs skipped" is tracked
+    from the start instead of depending on the orchestrator to remember to create a ledger.
+    The orchestrator re-plans it with recon signals + the real phases and marks entries as it
+    runs; `redstrike verify` validates it at close. Skipped when the ledger already exists
+    (don't clobber a refined one) or coverage.py isn't present."""
+    ledger = engagement_dir / "coverage_ledger.json"
+    script = repo_root / "scripts" / "coverage.py"
+    if ledger.is_file() or not script.is_file():
+        return
+    try:
+        subprocess.run(
+            [python_exe, str(script), "--plan", "--engagement", str(engagement_dir)],
+            cwd=str(repo_root), check=False,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+        )
+    except Exception:
+        pass
+
+
 def prepare_runtime(
     engagement_dir: Path,
     repo_root: Path,
@@ -62,6 +85,9 @@ def prepare_runtime(
     runtime.mkdir(parents=True, exist_ok=True)
     scope_json = runtime / "scope.json"
     proj = scopemod.derive_scope_json(scope_yaml, scope_json)  # re-derive from canonical YAML
+
+    # Track category coverage from the start (deterministic routing, not model discretion).
+    _seed_coverage_ledger(engagement_dir, repo_root, python_exe)
 
     gate_policy = runtime / "gate-policy.json"
     approvals_path = runtime / "approvals.json"
