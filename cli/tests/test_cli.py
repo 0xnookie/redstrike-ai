@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # cli/
 
-from redstrike_cli import engagement, launch  # noqa: E402
+from redstrike_cli import engagement, gate, launch  # noqa: E402
 from redstrike_cli.__main__ import main  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -130,6 +130,35 @@ class TestConsole(unittest.TestCase):
             out = buf.getvalue()
             self.assertEqual(rc, 0, out)
             self.assertNotIn("bringing up the web console", out)
+
+
+class TestCoverageWiring(unittest.TestCase):
+    """E1: the CLI seeds + enforces the coverage ledger instead of leaving it to the model."""
+
+    def test_coverage_validate_skips_when_script_absent(self):
+        # no scripts/coverage.py in the repo -> nothing to enforce, must not break the gate
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = repo / "eng"
+            eng.mkdir()
+            self.assertEqual(gate.coverage_validate(repo, eng), 0)
+
+    def test_seed_creates_ledger_and_gate_flags_an_unrun_one(self):
+        if not (REPO / "scripts" / "coverage.py").is_file():
+            self.skipTest("real coverage.py not present")
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d) / "acme-eng"
+            launch._seed_coverage_ledger(eng, REPO, sys.executable)
+            led = eng / "coverage_ledger.json"
+            self.assertTrue(led.is_file(), "seed must create the ledger")
+            data = json.loads(led.read_text(encoding="utf-8"))
+            self.assertTrue(any(c["status"] == "pending" for c in data["categories"]))
+            # an all-pending (never-run) ledger is an incomplete-coverage gap -> gate fails
+            self.assertNotEqual(gate.coverage_validate(REPO, eng), 0)
+            # re-seeding must not clobber an existing ledger
+            mtime = led.stat().st_mtime_ns
+            launch._seed_coverage_ledger(eng, REPO, sys.executable)
+            self.assertEqual(led.stat().st_mtime_ns, mtime)
 
 
 if __name__ == "__main__":
