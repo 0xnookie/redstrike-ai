@@ -188,6 +188,28 @@ export interface CveFeed {
   items: CveItem[];        // newest detections, most-recent first
 }
 
+// Category coverage ledger (coverage_ledger.json from scripts/coverage.py): which vuln
+// categories were attempted vs skipped-with-reason vs out-of-phase. Makes "not attempted" a
+// first-class, visible state instead of indistinguishable from "ran and found nothing".
+export type CoverageStatus = "pending" | "attempted" | "blocked" | "skipped" | "n/a" | "pipeline";
+export interface CoverageCategory {
+  id: string;
+  name?: string;
+  phase: string;
+  status: CoverageStatus;
+  reason?: string;
+  findings_count?: number;
+  skills?: string[];
+  triggers_matched?: string[];
+}
+export interface CoverageLedger {
+  engagement?: string;
+  generated_at?: string;
+  map_version?: number;
+  active_phases?: string[];
+  categories: CoverageCategory[];
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -199,4 +221,5 @@ export interface ConsoleData {
   services: Service[];
   tests: TestRun[];
   cveFeed?: CveFeed;
+  coverage?: CoverageLedger;
 }

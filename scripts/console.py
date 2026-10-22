@@ -43,6 +43,7 @@ WANTED = {
     "findings_consolidated.json": ["findings_consolidated.json"],
     "host_discovery.json": ["host_discovery.json"],
     "attack_chains.json": ["attack_chains.json", "chains.json"],
+    "coverage_ledger.json": ["coverage_ledger.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -136,10 +137,41 @@ def _reportable(f: dict) -> bool:
     return (not composite) and _verdict(f) in ("accepted", "blocked")
 
 
-def summarize(files: dict) -> dict:
+def _findings_list(path):
+    d = _read_json(path)
+    if isinstance(d, list):
+        return d
+    if isinstance(d, dict):
+        return list(d.get("findings") or [])
+    return None
+
+
+def engagement_findings(eng: Path, files: dict):
+    """The engagement's findings as a list, across the layouts the pipeline produces (mirrors
+    verify_completion's discovery): the consolidated report if present, else a root findings.json,
+    else the UNION of per-skill <eng>/<skill>/findings.json — so the console shows live findings
+    before `reporting` has consolidated them. Returns (findings, consolidated?)."""
+    cons = files.get("findings_consolidated.json")
+    if cons:
+        lst = _findings_list(cons)
+        if lst is not None:
+            return lst, True
+    root = eng / "findings.json"
+    if root.is_file():
+        lst = _findings_list(root)
+        if lst is not None:
+            return lst, False
+    union = []
+    for p in sorted(eng.glob("*/findings.json")):
+        part = _findings_list(p)
+        if part:
+            union.extend(part)
+    return union, False
+
+
+def summarize(eng: Path, files: dict) -> dict:
     """Reportable-severity counts + chain count, computed server-side for the list."""
-    cons = _read_json(files.get("findings_consolidated.json"))
-    findings = cons if isinstance(cons, list) else (cons.get("findings") if isinstance(cons, dict) else None) or []
+    findings, _ = engagement_findings(eng, files)
     counts = {k: 0 for k in ("critical", "high", "medium", "low", "info")}
     total = 0
     for f in findings:
@@ -150,6 +182,7 @@ def summarize(files: dict) -> dict:
                 counts[sev] += 1
     chains = 0
     cj = _read_json(files.get("attack_chains.json"))
+    cons = _read_json(files.get("findings_consolidated.json"))
     if isinstance(cj, dict) and isinstance(cj.get("chains"), list):
         chains = len(cj["chains"])
     elif isinstance(cons, dict) and isinstance(cons.get("attack_chains"), list):
@@ -244,7 +277,7 @@ def manifest_entries(target: Path) -> list:
         entries.append({
             "id": eng.name,
             "scope": scope,
-            "summary": summarize(files),
+            "summary": summarize(eng, files),
             "generated": (cons.get("generated") if isinstance(cons, dict) else None),
             "has": has,
         })
@@ -268,6 +301,15 @@ def make_handler(target: Path):
             if name == "scope.json":
                 scope = scope_for(eng)
                 return ("json", json.dumps(scope, default=str).encode("utf-8")) if scope else None
+            if name == "findings_consolidated.json":
+                files = files_for(eng)
+                findings, is_cons = engagement_findings(eng, files)
+                if is_cons:
+                    src = files.get(name)
+                    return ("file", src) if src else None
+                if findings:  # live per-skill union — show findings before `reporting` runs
+                    return ("json", json.dumps({"findings": findings}, default=str).encode("utf-8"))
+                return None
             src = files_for(eng).get(name)
             return ("file", src) if src else None
         return None

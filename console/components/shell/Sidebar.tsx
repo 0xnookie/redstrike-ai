@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Target, Bug, Workflow, Network, Activity,
-  Bot, FileText, Settings2, type LucideIcon,
+  Bot, FileText, Settings2, ListChecks, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { useConsole } from "@/lib/store";
@@ -27,6 +27,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Framework",
     items: [
+      { href: "/coverage", label: "Coverage", icon: ListChecks },
       { href: "/agents", label: "Agents", icon: Bot },
       { href: "/report", label: "Report", icon: FileText },
       { href: "/settings", label: "Settings", icon: Settings2 },
