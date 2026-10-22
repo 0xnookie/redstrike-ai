@@ -418,6 +418,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     if not scope_text:
         top_warnings.append("scope.yaml absent — scope compliance cannot be auto-checked (flagged, not failed)")
     top_warnings.extend(_coverage_warnings(eng))
+    if not any(eng.rglob("host_discovery.json")):
+        top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
+                            "the console's Ports view will be empty (Assets falls back to scope+findings). "
+                            "Run host-discovery / emit <eng>/host-discovery/host_discovery.json.")
 
     findings, source = _discover_engagement_findings(eng)
     if findings is None:
