@@ -222,6 +222,23 @@ def maybe_launch_console(args, repo: Path) -> None:
         print("  tip: view results in the web console — `redstrike console`")
 
 
+def _post_run_gate(repo: Path, eng_dir: Path, rc: int) -> int:
+    """Run the mechanical completion + coverage gate after an engine run. The engine itself
+    can't self-gate between phases, so this is where the gates become mechanical rather than
+    model-discretion. If the engine exited clean (rc 0) but the gate flags gaps (malformed
+    findings, missing evidence, a category left `pending`), surface it in the exit code so an
+    unattended caller sees the failure; a non-zero engine rc is left as-is."""
+    print()
+    print(ui.rule("post-run gate"))
+    grc = gate.verify(repo, eng_dir)
+    if grc == 0:
+        print(ui.ok("gate clear — findings well-formed, category coverage accounted for"))
+    elif rc == 0:
+        print(ui.warn("engine exited clean, but the completion/coverage gate flagged gaps (above) — not report-ready"))
+        return grc
+    return rc
+
+
 def cmd_console(args, repo: Path) -> int:
     target = repo / "engagements"
     if args.engagement:
@@ -297,6 +314,7 @@ def cmd_run(args, repo: Path) -> int:
     print(ui.ok("scope gate armed · launching Claude Code engine (interactive, gated)…"))
     print()
     rc = launch.exec_claude(argv, cwd=eng_dir)
+    rc = _post_run_gate(repo, eng_dir, rc)
     maybe_launch_console(args, repo)
     return rc
 
@@ -362,6 +380,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
     print()
     audit = eng_dir / "runtime" / "autorun.jsonl"
     rc, _summary = autorun.run_autonomous(claude_bin, argv, eng_dir, audit, pending_path=prep.pending_path)
+    rc = _post_run_gate(repo, eng_dir, rc)
     maybe_launch_console(args, repo)
     return rc
 
