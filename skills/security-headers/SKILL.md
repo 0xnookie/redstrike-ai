@@ -2,8 +2,10 @@
 
 > ATOMIC single agent (no feeder) — assess missing/weak security headers and report with ACCURATE,
 > de-inflated severity. Most header gaps are Info/Low unless they enable a concrete attack in context.
-> Read-only. findings-producing → carries `review.md` + `verify.md` (the verify guards against the
-> #1 failure mode here: severity inflation / best-practice noise).
+> Read-only (non-destructive) but ACTIVE over the network — httpx/curl header fetches + `nuclei` — so it
+> honors `_contract/roe-gate.md`: scope + rate-limit on every fetch, and run `nuclei` DETECTION-ONLY
+> (`-etags rce,intrusive,dos,oast`; never `-tags <product>`). findings-producing → carries `review.md` +
+> `verify.md` (the verify guards against the #1 failure mode here: severity inflation / best-practice noise).
 
 ## Interview
 - **STEPS:** collect response headers across key pages → evaluate against a matrix → assess real exploitability in context → rate honestly → emit → review → verify.

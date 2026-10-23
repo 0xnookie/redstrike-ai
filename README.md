@@ -173,6 +173,17 @@ Validate the whole framework (what CI runs):
 python scripts/validate.py
 ```
 
+Measure **recall** — *what did we miss?* Precision is verified per finding; recall is the other axis. The
+benchmark scores a run against a labelled target (OWASP Juice Shop's 116 challenges, or any app via an
+expected-vuln manifest). CI guards the harness; you measure recall after an engagement:
+
+```bash
+python scripts/benchmark.py --selftest                                               # CI runs this
+python scripts/benchmark.py --score --target generic-web --engagement engagements/<client>-<date>
+```
+
+See [`benchmark/README.md`](benchmark/README.md) for the Juice Shop (live) + findings-match workflows.
+
 ---
 
 ## 🖥️ The `redstrike` CLI

@@ -220,7 +220,14 @@ def evaluate(
         return _pass()
 
     if tool_name == "WebFetch":
-        host = _host_of_url(str(tool_input.get("url", "")))
+        raw = str(tool_input.get("url", ""))
+        host = _host_of_url(raw)
+        if not host:
+            # Schemeless / opaque URL (e.g. "evil.com/x"): urlsplit finds no netloc, so a bare
+            # hostname would otherwise fail OPEN past the gate. Recover the authority host from the
+            # raw string (first host/IP wins — that's the fetch target) before deciding.
+            recovered = extract_targets(raw)
+            host = recovered[0] if recovered else ""
         if not host:
             return _pass()
         k = classify(host, scope)
