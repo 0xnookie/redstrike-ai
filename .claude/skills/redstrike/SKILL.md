@@ -62,6 +62,7 @@ with a recorded reason. The formerly un-triggered classes are now wired in: `nos
 **b. Run every `pending` category.** For each, run its `<class>-context` feeder (families) then its
 variant/category agents, and flip its ledger entry to `attempted` (set `findings_count`) or `blocked`.
 Human-readable mirror of the map:
+- **white-box (ONLY if `scope.yaml` grants authorized source access):** run `redstrike-source-audit` once in recon → `source-audit/source_context.json`, a routed `file:line → vuln class → executor` candidate map. Its per-class dangerous-sink candidates feed the matching `<class>-context` feeder below as higher-confidence leads (a grep hit is a LEAD the executor must still PROVE at runtime); secret candidates → `redstrike-secrets`, dependency candidates → `redstrike-cve-intelligence`. No source access ⇒ skip it (pure black-box run).
 - reflected/stored/dom input + sinks → `redstrike-xss-context` → `xss-*`
 - injectable params → `redstrike-sqli-context` → `sqli-*` **and** `redstrike-nosql-injection` ; interpreter sinks → `redstrike-injection-context` → `ssti`/`command-injection`/`deserialization`
 - URL-fetching params → `redstrike-ssrf-context` → `ssrf-*` ; `redstrike-open-redirect`

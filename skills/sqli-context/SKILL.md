@@ -9,7 +9,7 @@
 - **TOOLS:** `jq` over `js-analysis`, interceptor, `sqlmap --fingerprint` (detection only), differential probes (`'`, `"`, `)`, `--`, arithmetic); `refs/sqli_payloads.md`.
 - **GOAL:** Map injectable points, their query context (string/numeric/identifier/order-by/LIKE), backend DBMS, and error visibility into `sqli_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `candidates.json`, `probes.jsonl`, `sqli_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,endpoints,apis}.jsonl`, `scope.yaml`. `refs/` = `sqli_payloads.md`. Chains FROM `js-analysis`; chains TO `sqli-inband|blind`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,endpoints,apis}.jsonl`, `scope.yaml`. `refs/` = `sqli_payloads.md`. Also ingests optional `source-audit/source_context.json` (white-box SQL-sink candidates, if source was audited — merge as higher-confidence leads the executor still PROVES). Chains FROM `js-analysis` (+ `source-audit` when source is in scope); chains TO `sqli-inband|blind`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
