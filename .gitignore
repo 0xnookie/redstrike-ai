@@ -51,6 +51,9 @@ env/
 .pytest_cache/
 .mypy_cache/
 
+# ---- Recall benchmark ----
+benchmark/results/          # scored run outputs (scratch); commit a baseline deliberately, not every score
+
 # ---- Misc ----
 tmp/
 temp/
