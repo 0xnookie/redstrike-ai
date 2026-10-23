@@ -23,7 +23,7 @@
   "artifacts": [
     { "id": "A.1", "path": "fetch_sinks.json", "type": "json", "allow_empty_array": true },
     { "id": "B.1", "path": "behavior_probes.jsonl", "type": "jsonl", "min_items": 1 },
-    { "id": "C.1", "path": "ssrf_context.json", "type": "json" },
+    { "id": "C.1", "path": "ssrf_context.json", "type": "json", "schema": "skills/_contract/ssrf_context.schema.json" },
     { "id": "D.1", "path": "summary.md", "type": "text" },
     { "id": "E.1", "path": "logs", "type": "dir" }
   ]

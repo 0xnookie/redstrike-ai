@@ -22,7 +22,7 @@
   "artifacts": [
     { "id": "A.1", "path": "domain.json", "type": "json" },
     { "id": "B.1", "path": "bloodhound", "type": "dir", "min_children": 1 },
-    { "id": "C.1", "path": "ad_context.json", "type": "json" },
+    { "id": "C.1", "path": "ad_context.json", "type": "json", "schema": "skills/_contract/ad_context.schema.json" },
     { "id": "D.1", "path": "summary.md", "type": "text" },
     { "id": "E.1", "path": "logs", "type": "dir" }
   ]

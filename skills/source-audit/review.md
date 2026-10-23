@@ -19,7 +19,7 @@
   "skill": "source-audit",
   "artifacts": [
     { "id": "A.1", "path": "source_findings.jsonl", "type": "jsonl", "allow_empty": true },
-    { "id": "B.1", "path": "source_context.json", "type": "json" },
+    { "id": "B.1", "path": "source_context.json", "type": "json", "schema": "skills/_contract/source_context.schema.json" },
     { "id": "C.1", "path": "summary.md", "type": "text" },
     { "id": "D.1", "path": "logs", "type": "dir" }
   ]

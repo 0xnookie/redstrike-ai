@@ -506,8 +506,47 @@ class TestManifestSchemaRefs(unittest.TestCase):
                         isinstance(ref, str) and ref.startswith("skills/_contract/")
                         and ref.endswith(".schema.json"), f"{rv}: odd schema ref {ref!r}")
                     self.assertTrue((REPO / ref).is_file(), f"{rv}: dangling schema ref {ref}")
-        # 79 findings.json + cve_intel.json + the pre-existing attack_chain ref
-        self.assertGreaterEqual(refs, 80, "expected the finding/cve_intel schema wiring to be present")
+        # 79 findings.json + 14 *_context.json + cve_intel.json + pre-existing attack_chain
+        self.assertGreaterEqual(refs, 94, "expected the finding/context/cve_intel schema wiring to be present")
+
+
+class TestContextSchemas(unittest.TestCase):
+    """E4 context wiring: the *_context schemas are the canonical output contract
+    (each producer's SKILL.md says its output 'validates against the schema'), so a
+    conformant instance passes and the shapes real runs drifted to are rejected —
+    which is why wiring the schema into the manifest is the fix, not a schema change."""
+    B = {"target": "https://app.acme.com", "generated_at": "2026-01-01T00:00:00Z"}
+
+    def ok(self, doc, schema):
+        return vc._validate_against_schema(doc, f"skills/_contract/{schema}")[0]
+
+    def test_injection_and_sqli_style_conformant_passes(self):
+        self.assertTrue(self.ok(
+            {**self.B, "injection_points": [{"id": "inj-001", "endpoint": "/q", "param": "q"}]},
+            "injection_context.schema.json"))
+        self.assertTrue(self.ok(
+            {**self.B, "injection_points": [{"id": "sq-001", "endpoint": "/q", "param": "q"}]},
+            "sqli_context.schema.json"))
+
+    def test_authz_conformant_passes_drifted_fails(self):
+        self.assertTrue(self.ok(
+            {**self.B, "identities": [{"label": "low", "role": "user"}]},
+            "authz_context.schema.json"))
+        # the real drift: identities[].id/.auth instead of .label/.role
+        self.assertFalse(self.ok(
+            {**self.B, "identities": [{"id": "u1", "auth": "cookie"}]},
+            "authz_context.schema.json"))
+
+    def test_xss_conformant_passes_drifted_fails(self):
+        conformant = {**self.B, "csp": {"present": False}, "dom": {},
+                      "injection_points": [{"id": "ip-001", "endpoint": "/s", "method": "GET",
+                                            "source": "query", "reflects": True}]}
+        self.assertTrue(self.ok(conformant, "xss_context.schema.json"))
+        # the real drift: id 'xc-001' (wrong prefix) + 'type', missing source/reflects
+        drifted = {**self.B, "csp": {"present": False}, "dom": {},
+                   "injection_points": [{"id": "xc-001", "type": "reflected",
+                                         "endpoint": "/s", "method": "GET"}]}
+        self.assertFalse(self.ok(drifted, "xss_context.schema.json"))
 
 
 if __name__ == "__main__":
