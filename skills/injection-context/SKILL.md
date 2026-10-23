@@ -9,7 +9,7 @@
 - **TOOLS:** `jq` over `js-analysis/out/<site>/findings/`, interceptor, `refs/injection_payloads.md`; `js-analysis/out/<site>/analysis/site-summary.md` (stack).
 - **GOAL:** Map injection points that reach an interpreter (template / OS command / deserializer), fingerprint the engine, and route to a variant, into `injection_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `candidates.json`, `probes.jsonl`, `injection_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,apis}.jsonl` + `js-analysis/out/<site>/analysis/site-summary.md` (stack) + `scope.yaml` (`oob.collaborator`). `refs/` = `injection_payloads.md`. Chains FROM `js-analysis`; chains TO `ssti`, `command-injection`, `deserialization`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,apis}.jsonl` + `js-analysis/out/<site>/analysis/site-summary.md` (stack) + `scope.yaml` (`oob.collaborator`). `refs/` = `injection_payloads.md`. Also ingests optional `source-audit/source_context.json` (white-box interpreter-sink candidates for this family, if source was audited — merge as higher-confidence leads the executor still PROVES). Chains FROM `js-analysis` (+ `source-audit` when source is in scope); chains TO `ssti`, `command-injection`, `deserialization`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal

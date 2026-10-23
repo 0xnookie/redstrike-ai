@@ -10,7 +10,7 @@
 - **TOOLS:** `jq` (ingest `js-analysis/out/<site>/findings/secrets.jsonl`), provider-specific benign validation calls (read-only, minimal), `trufflehog --only-verified` (where applicable); entropy/classifier.
 - **GOAL:** Produce a validated secret inventory — each reported secret confirmed real + live (or strong evidence) + scoped for impact — with false positives filtered. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `secret_candidates.json`, `validations.jsonl`, `findings.json`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/secrets.jsonl` (+ other sources), `js-analysis/refs/secret_regexes.yaml`, `scope.yaml`. Chains FROM `js-analysis`; chains TO `reporting` + (CVE/exploit tier-3).
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/secrets.jsonl` (+ other sources), `js-analysis/refs/secret_regexes.yaml`, optional `source-audit/source_context.json` `secret_candidates` (white-box, redacted — live-validate each), `scope.yaml`. Chains FROM `js-analysis` (+ `source-audit` when source is in scope); chains TO `reporting` + (CVE/exploit tier-3).
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
