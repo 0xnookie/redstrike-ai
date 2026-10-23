@@ -1,7 +1,7 @@
 # Security Headers — completion ledger
 # `- [ ]` = NOT done, MUST be re-run · `- [x]` = done.
 
-## Collect
+## Collect (scope-gated, rate-limited)
 - [ ] Headers collected across key pages (authed + unauthed)
 - [ ] Cookie flags collected (Secure / HttpOnly / SameSite)
 
