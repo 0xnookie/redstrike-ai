@@ -9,7 +9,7 @@
 - **TOOLS:** `jq` over `js-analysis`, interceptor, `refs/file_payloads.md`.
 - **GOAL:** Map file-read/include params and upload endpoints + their handling into `file_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `file_sinks.json`, `probes.jsonl`, `file_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,endpoints}.jsonl` (path-ish params from `param_wordlist` file/path group; upload features) + `scope.yaml`. `refs/` = `file_payloads.md`. Chains FROM `js-analysis`; chains TO `path-traversal-lfi`, `upload-rce`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,endpoints}.jsonl` (path-ish params from `param_wordlist` file/path group; upload features) + `scope.yaml`. `refs/` = `file_payloads.md`. Also ingests optional `source-audit/source_context.json` (white-box file/path-sink candidates, if source was audited — merge as higher-confidence leads the executor still PROVES). Chains FROM `js-analysis` (+ `source-audit` when source is in scope); chains TO `path-traversal-lfi`, `upload-rce`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
