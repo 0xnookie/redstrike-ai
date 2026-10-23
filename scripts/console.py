@@ -126,6 +126,11 @@ def _read_json(path):
 
 
 def _verdict(f: dict) -> str:
+    """The reviewer's decision. `review.verdict` is the AUTHORITATIVE axis; the finding's
+    `status` is derived from it (verify-base.md: accepted/blocked->verified, rejected->rejected,
+    needs-evidence->open). When the inline review block is absent we fall back to deriving the
+    verdict from status — lossy (a `blocked` finding reads back as `accepted`), but `_reportable`
+    treats both the same, so the count is unaffected."""
     r = f.get("review") or {}
     if r.get("verdict"):
         return r["verdict"]
