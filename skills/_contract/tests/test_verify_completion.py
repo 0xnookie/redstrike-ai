@@ -434,5 +434,81 @@ class TestValidateEngagementE2E(unittest.TestCase):
             self.assertEqual(bad.returncode, 2, bad.stdout + bad.stderr)
 
 
+# --------------------------------------------------------------------------- #
+# E4: cve_intel schema reconciliation (cves|entries drift) + manifest wiring
+# --------------------------------------------------------------------------- #
+class TestCveIntelSchema(unittest.TestCase):
+    """The reconciled cve_intel.schema.json accepts BOTH the canonical `cves` key
+    and the `entries` alias (the console reads either), enforces the per-CVE item
+    shape, and rejects the old per-component shape the real run had drifted to."""
+    SCHEMA = "skills/_contract/cve_intel.schema.json"
+
+    def ok(self, doc):
+        return vc._validate_against_schema(doc, self.SCHEMA)[0]
+
+    def _base(self, **extra):
+        d = {"target": "https://app.acme.com", "generated_at": "2026-01-01T00:00:00Z"}
+        d.update(extra)
+        return d
+
+    def test_accepts_cves_and_entries_keys(self):
+        row = {"component": "jquery", "version": "3.4.1", "cve": "CVE-2020-11022"}
+        self.assertTrue(self.ok(self._base(cves=[row])))
+        self.assertTrue(self.ok(self._base(entries=[row])))
+
+    def test_empty_result_is_valid(self):
+        # cve-intelligence finding nothing is a PASS — neither key required
+        self.assertTrue(self.ok(self._base()))
+
+    def test_rich_per_cve_row_passes(self):
+        row = {"component": "nginx", "cve": "CVE-2021-23017", "cvss": "7.7",
+               "reachable": "yes", "confidence": "probable", "kev": True,
+               "epss": 0.42, "priority_rank": 1, "source": ["nvd", "osv"]}
+        self.assertTrue(self.ok(self._base(cves=[row])))
+
+    def test_item_missing_required_cve_fails(self):
+        self.assertFalse(self.ok(self._base(cves=[{"component": "jquery"}])))
+
+    def test_old_per_component_shape_fails(self):
+        # {component, cves:[...], applies, exploited} — the drifted shape
+        bad = {"component": "jquery", "cves": ["CVE-2020-11022"], "applies": "yes", "exploited": False}
+        self.assertFalse(self.ok(self._base(entries=[bad])))
+
+    def test_unknown_top_level_key_fails(self):
+        self.assertFalse(self.ok(self._base(cves=[], bogus=1)))
+
+    def test_bad_cve_pattern_fails(self):
+        self.assertFalse(self.ok(self._base(cves=[{"component": "x", "cve": "not-a-cve"}])))
+
+
+class TestManifestSchemaRefs(unittest.TestCase):
+    """E4 wiring guard (mirrors validate.py as a fast unit test in the same CI step):
+    every `schema` a manifest declares must resolve to a real _contract schema, else
+    check_artifact silently skips validation. Also pins that the wiring is present."""
+    def test_every_wired_schema_ref_resolves(self):
+        import glob
+        refs = 0
+        for rv in sorted(glob.glob(str(REPO / "skills" / "*" / "review.md"))):
+            text = pathlib.Path(rv).read_text(encoding="utf-8")
+            for m in vc.FENCE_RE.finditer(text):
+                try:
+                    obj = json.loads(m.group(1))
+                except json.JSONDecodeError:
+                    continue
+                if not (isinstance(obj, dict) and "artifacts" in obj):
+                    continue
+                for a in obj["artifacts"]:
+                    ref = a.get("schema")
+                    if not ref:
+                        continue
+                    refs += 1
+                    self.assertTrue(
+                        isinstance(ref, str) and ref.startswith("skills/_contract/")
+                        and ref.endswith(".schema.json"), f"{rv}: odd schema ref {ref!r}")
+                    self.assertTrue((REPO / ref).is_file(), f"{rv}: dangling schema ref {ref}")
+        # 79 findings.json + cve_intel.json + the pre-existing attack_chain ref
+        self.assertGreaterEqual(refs, 80, "expected the finding/cve_intel schema wiring to be present")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,7 @@
     { "id": "B.1", "path": "gadgets.md", "type": "text" },
     { "id": "C.1", "path": "taint_flows.json", "type": "json", "allow_empty_array": true },
     { "id": "D.1", "path": "payloads_tried.jsonl", "type": "jsonl", "min_items": 1 },
-    { "id": "E.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "E.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "F.1", "path": "poc", "type": "dir", "required": false },
     { "id": "F.2", "path": "poc_urls.txt", "type": "text", "required": false },
     { "id": "G.1", "path": "report.md", "type": "text" },

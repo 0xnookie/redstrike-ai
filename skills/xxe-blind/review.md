@@ -27,7 +27,7 @@
     { "id": "A.1", "path": "oob_config.json", "type": "json" },
     { "id": "B.1", "path": "xxe_tests.jsonl", "type": "jsonl", "min_items": 1 },
     { "id": "C.1", "path": "callbacks.jsonl", "type": "jsonl", "allow_empty": true },
-    { "id": "D.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "D.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "E.1", "path": "poc", "type": "dir", "required": false },
     { "id": "F.1", "path": "report.md", "type": "text" },
     { "id": "F.2", "path": "curl_commands.sh", "type": "text", "must_contain": "curl" },

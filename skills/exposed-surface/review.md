@@ -36,7 +36,7 @@
     { "id": "D.1", "path": "nuclei.jsonl", "type": "jsonl", "allow_empty": true },
     { "id": "E.1", "path": "params_found.txt", "type": "text", "required": false },
     { "id": "F.1", "path": "confirmed.jsonl", "type": "jsonl", "allow_empty": true },
-    { "id": "G.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "G.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "H.1", "path": "evidence", "type": "dir", "required": false },
     { "id": "I.1", "path": "report.md", "type": "text" },
     { "id": "J.1", "path": "logs", "type": "dir" }

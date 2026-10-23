@@ -27,7 +27,7 @@
     { "id": "A.1", "path": "workflow_model.md", "type": "text" },
     { "id": "B.1", "path": "invariants.json", "type": "json" },
     { "id": "C.1", "path": "abuse_tests.jsonl", "type": "jsonl", "min_items": 1 },
-    { "id": "D.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "D.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "E.1", "path": "poc", "type": "dir", "required": false },
     { "id": "F.1", "path": "report.md", "type": "text" },
     { "id": "G.1", "path": "logs", "type": "dir" }
