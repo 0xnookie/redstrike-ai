@@ -259,6 +259,12 @@ def _minimal_scope_read(path: Path) -> dict:
             if val in ("", ">", "|"):
                 list_key = key
                 section.setdefault(key, [])
+            elif val == "[]":
+                list_key = None
+                section[key] = []          # inline empty list (e.g. `cidrs: []`)
+            elif val == "{}":
+                list_key = None
+                section[key] = {}          # inline empty map
             else:
                 list_key = None
                 section[key] = val
