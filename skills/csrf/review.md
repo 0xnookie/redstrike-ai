@@ -24,7 +24,7 @@
   "artifacts": [
     { "id": "A.1", "path": "state_changing_requests.json", "type": "json", "allow_empty_array": true },
     { "id": "B.1", "path": "defense_matrix.json", "type": "json", "allow_empty_array": true },
-    { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "D.1", "path": "poc", "type": "dir", "required": false },
     { "id": "E.1", "path": "report.md", "type": "text" },
     { "id": "F.1", "path": "logs", "type": "dir" }

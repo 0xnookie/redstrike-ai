@@ -75,9 +75,25 @@ for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_c
         obj, problem = load_manifest(review)
         if problem:
             err(f"{sk.name}/review.md: {problem}")
-        elif any(a.get("path") == "findings.json" for a in obj.get("artifacts", [])):
-            if not (sk / "verify.md").is_file():
-                err(f"{sk.name}: manifest declares findings.json but has no verify.md")
+        else:
+            arts = obj.get("artifacts", [])
+            if any(a.get("path") == "findings.json" for a in arts):
+                if not (sk / "verify.md").is_file():
+                    err(f"{sk.name}: manifest declares findings.json but has no verify.md")
+            # a `schema` ref must resolve to a real _contract schema, else the runtime
+            # gate (verify_completion.check_artifact) SILENTLY skips validation for it.
+            for a in arts:
+                ref = a.get("schema")
+                if not ref:
+                    continue
+                checked["schema_refs"] = checked.get("schema_refs", 0) + 1
+                aid = a.get("id", a.get("path", "?"))
+                if not (isinstance(ref, str) and ref.startswith("skills/_contract/")
+                        and ref.endswith(".schema.json")):
+                    err(f"{sk.name}/review.md: artifact '{aid}' schema ref '{ref}' "
+                        f"is not a skills/_contract/*.schema.json path")
+                elif not (ROOT / ref).is_file():
+                    err(f"{sk.name}/review.md: artifact '{aid}' references missing schema '{ref}'")
 
 # 4 — schemas
 for schema in sorted((skills_dir / "_contract").glob("*.schema.json")):

@@ -28,7 +28,7 @@
     { "id": "A.1", "path": "enum.json", "type": "json" },
     { "id": "A.2", "path": "enum.txt", "type": "text" },
     { "id": "B.1", "path": "privesc_tests.jsonl", "type": "jsonl", "min_items": 1 },
-    { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "D.1", "path": "poc", "type": "dir", "required": false },
     { "id": "E.1", "path": "cleanup.md", "type": "text" },
     { "id": "F.1", "path": "report.md", "type": "text" },

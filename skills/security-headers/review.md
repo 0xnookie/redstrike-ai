@@ -22,7 +22,7 @@
   "artifacts": [
     { "id": "A.1", "path": "headers.json", "type": "json" },
     { "id": "B.1", "path": "assessment.json", "type": "json" },
-    { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "C.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "D.1", "path": "report.md", "type": "text" },
     { "id": "E.1", "path": "logs", "type": "dir" }
   ]
