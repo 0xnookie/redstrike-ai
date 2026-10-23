@@ -434,5 +434,120 @@ class TestValidateEngagementE2E(unittest.TestCase):
             self.assertEqual(bad.returncode, 2, bad.stdout + bad.stderr)
 
 
+# --------------------------------------------------------------------------- #
+# E4: cve_intel schema reconciliation (cves|entries drift) + manifest wiring
+# --------------------------------------------------------------------------- #
+class TestCveIntelSchema(unittest.TestCase):
+    """The reconciled cve_intel.schema.json accepts BOTH the canonical `cves` key
+    and the `entries` alias (the console reads either), enforces the per-CVE item
+    shape, and rejects the old per-component shape the real run had drifted to."""
+    SCHEMA = "skills/_contract/cve_intel.schema.json"
+
+    def ok(self, doc):
+        return vc._validate_against_schema(doc, self.SCHEMA)[0]
+
+    def _base(self, **extra):
+        d = {"target": "https://app.acme.com", "generated_at": "2026-01-01T00:00:00Z"}
+        d.update(extra)
+        return d
+
+    def test_accepts_cves_and_entries_keys(self):
+        row = {"component": "jquery", "version": "3.4.1", "cve": "CVE-2020-11022"}
+        self.assertTrue(self.ok(self._base(cves=[row])))
+        self.assertTrue(self.ok(self._base(entries=[row])))
+
+    def test_empty_result_is_valid(self):
+        # cve-intelligence finding nothing is a PASS — neither key required
+        self.assertTrue(self.ok(self._base()))
+
+    def test_rich_per_cve_row_passes(self):
+        row = {"component": "nginx", "cve": "CVE-2021-23017", "cvss": "7.7",
+               "reachable": "yes", "confidence": "probable", "kev": True,
+               "epss": 0.42, "priority_rank": 1, "source": ["nvd", "osv"]}
+        self.assertTrue(self.ok(self._base(cves=[row])))
+
+    def test_item_missing_required_cve_fails(self):
+        self.assertFalse(self.ok(self._base(cves=[{"component": "jquery"}])))
+
+    def test_old_per_component_shape_fails(self):
+        # {component, cves:[...], applies, exploited} — the drifted shape
+        bad = {"component": "jquery", "cves": ["CVE-2020-11022"], "applies": "yes", "exploited": False}
+        self.assertFalse(self.ok(self._base(entries=[bad])))
+
+    def test_unknown_top_level_key_fails(self):
+        self.assertFalse(self.ok(self._base(cves=[], bogus=1)))
+
+    def test_bad_cve_pattern_fails(self):
+        self.assertFalse(self.ok(self._base(cves=[{"component": "x", "cve": "not-a-cve"}])))
+
+
+class TestManifestSchemaRefs(unittest.TestCase):
+    """E4 wiring guard (mirrors validate.py as a fast unit test in the same CI step):
+    every `schema` a manifest declares must resolve to a real _contract schema, else
+    check_artifact silently skips validation. Also pins that the wiring is present."""
+    def test_every_wired_schema_ref_resolves(self):
+        import glob
+        refs = 0
+        for rv in sorted(glob.glob(str(REPO / "skills" / "*" / "review.md"))):
+            text = pathlib.Path(rv).read_text(encoding="utf-8")
+            for m in vc.FENCE_RE.finditer(text):
+                try:
+                    obj = json.loads(m.group(1))
+                except json.JSONDecodeError:
+                    continue
+                if not (isinstance(obj, dict) and "artifacts" in obj):
+                    continue
+                for a in obj["artifacts"]:
+                    ref = a.get("schema")
+                    if not ref:
+                        continue
+                    refs += 1
+                    self.assertTrue(
+                        isinstance(ref, str) and ref.startswith("skills/_contract/")
+                        and ref.endswith(".schema.json"), f"{rv}: odd schema ref {ref!r}")
+                    self.assertTrue((REPO / ref).is_file(), f"{rv}: dangling schema ref {ref}")
+        # 79 findings.json + 14 *_context.json + cve_intel.json + pre-existing attack_chain
+        self.assertGreaterEqual(refs, 94, "expected the finding/context/cve_intel schema wiring to be present")
+
+
+class TestContextSchemas(unittest.TestCase):
+    """E4 context wiring: the *_context schemas are the canonical output contract
+    (each producer's SKILL.md says its output 'validates against the schema'), so a
+    conformant instance passes and the shapes real runs drifted to are rejected —
+    which is why wiring the schema into the manifest is the fix, not a schema change."""
+    B = {"target": "https://app.acme.com", "generated_at": "2026-01-01T00:00:00Z"}
+
+    def ok(self, doc, schema):
+        return vc._validate_against_schema(doc, f"skills/_contract/{schema}")[0]
+
+    def test_injection_and_sqli_style_conformant_passes(self):
+        self.assertTrue(self.ok(
+            {**self.B, "injection_points": [{"id": "inj-001", "endpoint": "/q", "param": "q"}]},
+            "injection_context.schema.json"))
+        self.assertTrue(self.ok(
+            {**self.B, "injection_points": [{"id": "sq-001", "endpoint": "/q", "param": "q"}]},
+            "sqli_context.schema.json"))
+
+    def test_authz_conformant_passes_drifted_fails(self):
+        self.assertTrue(self.ok(
+            {**self.B, "identities": [{"label": "low", "role": "user"}]},
+            "authz_context.schema.json"))
+        # the real drift: identities[].id/.auth instead of .label/.role
+        self.assertFalse(self.ok(
+            {**self.B, "identities": [{"id": "u1", "auth": "cookie"}]},
+            "authz_context.schema.json"))
+
+    def test_xss_conformant_passes_drifted_fails(self):
+        conformant = {**self.B, "csp": {"present": False}, "dom": {},
+                      "injection_points": [{"id": "ip-001", "endpoint": "/s", "method": "GET",
+                                            "source": "query", "reflects": True}]}
+        self.assertTrue(self.ok(conformant, "xss_context.schema.json"))
+        # the real drift: id 'xc-001' (wrong prefix) + 'type', missing source/reflects
+        drifted = {**self.B, "csp": {"present": False}, "dom": {},
+                   "injection_points": [{"id": "xc-001", "type": "reflected",
+                                         "endpoint": "/s", "method": "GET"}]}
+        self.assertFalse(self.ok(drifted, "xss_context.schema.json"))
+
+
 if __name__ == "__main__":
     unittest.main()

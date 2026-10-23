@@ -29,7 +29,7 @@
     { "id": "B.1", "path": "reflections.jsonl", "type": "jsonl", "min_items": 1 },
     { "id": "C.1", "path": "csp.json", "type": "json" },
     { "id": "D.1", "path": "dom_flows.json", "type": "json" },
-    { "id": "E.1", "path": "xss_context.json", "type": "json" },
+    { "id": "E.1", "path": "xss_context.json", "type": "json", "schema": "skills/_contract/xss_context.schema.json" },
     { "id": "F.1", "path": "summary.md", "type": "text" },
     { "id": "G.1", "path": "logs", "type": "dir" }
   ]

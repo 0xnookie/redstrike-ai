@@ -22,7 +22,7 @@
   "artifacts": [
     { "id": "A.1", "path": "discovery.json", "type": "json" },
     { "id": "B.1", "path": "enumeration.jsonl", "type": "jsonl", "allow_empty": true },
-    { "id": "C.1", "path": "agent_context.json", "type": "json" },
+    { "id": "C.1", "path": "agent_context.json", "type": "json", "schema": "skills/_contract/agent_context.schema.json" },
     { "id": "D.1", "path": "summary.md", "type": "text" },
     { "id": "E.1", "path": "logs", "type": "dir" }
   ]

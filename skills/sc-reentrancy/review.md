@@ -21,7 +21,7 @@
   "skill": "sc-reentrancy",
   "artifacts": [
     { "id": "A.1", "path": "checks.jsonl", "type": "jsonl", "min_items": 1 },
-    { "id": "B.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "B.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "C.1", "path": "poc", "type": "dir", "required": false },
     { "id": "D.1", "path": "report.md", "type": "text" },
     { "id": "D.2", "path": "repro.sh", "type": "text" },
