@@ -35,6 +35,23 @@ class TestWebFetch(unittest.TestCase):
     def test_localhost_ignorable(self):
         self.assertEqual(dec("WebFetch", {"url": "http://localhost:8080/"}), "pass")
 
+    # schemeless / bare-hostname URLs must not fail OPEN past the gate
+    def test_schemeless_out_of_scope(self):
+        self.assertEqual(dec("WebFetch", {"url": "admin.acme.com/panel"}), "deny")
+
+    def test_schemeless_unknown_host(self):
+        self.assertEqual(dec("WebFetch", {"url": "evil.example-attacker.com/x"}), "deny")
+        self.assertEqual(dec("WebFetch", {"url": "evil.example-attacker.com"}), "deny")
+
+    def test_schemeless_in_scope_passes(self):
+        self.assertEqual(dec("WebFetch", {"url": "app.acme.com/x"}), "pass")
+
+    def test_schemeless_localhost_ignorable(self):
+        self.assertEqual(dec("WebFetch", {"url": "localhost:8080/x"}), "pass")
+
+    def test_path_only_no_host_passes(self):
+        self.assertEqual(dec("WebFetch", {"url": "/local/only/path"}), "pass")
+
 
 class TestBash(unittest.TestCase):
     def test_in_scope_host(self):
