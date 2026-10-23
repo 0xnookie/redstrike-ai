@@ -25,7 +25,7 @@
     { "id": "A.1", "path": "framework.json", "type": "json" },
     { "id": "B.1", "path": "surface.json", "type": "json" },
     { "id": "C.1", "path": "cve_map.json", "type": "json", "allow_empty_array": true },
-    { "id": "D.1", "path": "findings.json", "type": "json", "allow_empty_array": true },
+    { "id": "D.1", "path": "findings.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/finding.schema.json" },
     { "id": "E.1", "path": "report.md", "type": "text" },
     { "id": "F.1", "path": "logs", "type": "dir" }
   ]
