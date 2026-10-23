@@ -21,7 +21,7 @@
   "skill": "web3-context",
   "artifacts": [
     { "id": "A.1", "path": "contracts.jsonl", "type": "jsonl", "min_items": 1 },
-    { "id": "B.1", "path": "web3_context.json", "type": "json" },
+    { "id": "B.1", "path": "web3_context.json", "type": "json", "schema": "skills/_contract/web3_context.schema.json" },
     { "id": "C.1", "path": "summary.md", "type": "text" },
     { "id": "D.1", "path": "contracts", "type": "dir", "required": false },
     { "id": "E.1", "path": "logs", "type": "dir" }

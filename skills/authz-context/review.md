@@ -25,7 +25,7 @@
     { "id": "A.1", "path": "objects.json", "type": "json", "allow_empty_array": true },
     { "id": "B.1", "path": "role_matrix.json", "type": "json" },
     { "id": "C.1", "path": "mass_assign.json", "type": "json", "allow_empty_array": true },
-    { "id": "D.1", "path": "authz_context.json", "type": "json" },
+    { "id": "D.1", "path": "authz_context.json", "type": "json", "schema": "skills/_contract/authz_context.schema.json" },
     { "id": "E.1", "path": "summary.md", "type": "text" },
     { "id": "F.1", "path": "logs", "type": "dir" }
   ]
