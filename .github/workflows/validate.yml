@@ -18,6 +18,11 @@ jobs:
         run: |
           mkdir -p /tmp/empty
           python skills/_contract/verify_completion.py --skill skills/xss-reflected --out /tmp/empty || test $? -eq 2
+      - name: Framework script unit tests (verify_completion + console; stdlib)
+        run: |
+          for t in skills/_contract/tests/test_*.py scripts/tests/test_*.py; do
+            echo "· $t"; python "$t" || exit 1
+          done
 
   cli:
     runs-on: ubuntu-latest
