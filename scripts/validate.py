@@ -198,6 +198,24 @@ if cvep.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"cve_prioritize.py selftest failed: {e}")
 
+# 10 — recall-benchmark self-test (target specs valid + each category_map in sync with the routing map).
+# This is the benchmark's CI footprint: the recall RUN is an operator workflow (needs a live target), but
+# the harness + specs + mappings are guarded here. See benchmark/README.md.
+bench_py = ROOT / "scripts" / "benchmark.py"
+if bench_py.is_file():
+    try:
+        import importlib.util
+        _bspec = importlib.util.spec_from_file_location("rs_benchmark_lint", bench_py)
+        _bench = importlib.util.module_from_spec(_bspec)
+        _bspec.loader.exec_module(_bench)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _bench.selftest()
+        checked["benchmark"] = 1
+    except BaseException as e:  # noqa: BLE001 — selftest asserts / may sys.exit on a bad spec
+        err(f"benchmark.py selftest failed: {e}")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
