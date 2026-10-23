@@ -33,7 +33,7 @@
         "composite": { "type": "boolean", "description": "True for a composite/kill-chain finding (from attack-chain-discovery) that re-states already-counted component findings. Reporting lists it under Attack Chains and EXCLUDES it from the severity counts (non-additive)." },
         "cvss_vector": { "type": "string", "description": "CVSS 3.1 base vector. Compute it with scripts/cvss.py (do not hand-assert the score); the reviewer recomputes and flags drift. v4.0 vectors are not yet scored by the tool." },
         "confidence": { "enum": ["confirmed", "probable", "tentative"] },
-        "status": { "enum": ["open", "verified", "rejected", "duplicate", "remediated"], "description": "Lifecycle. verify.md sets 'verified' or 'rejected'." },
+        "status": { "enum": ["open", "verified", "rejected", "duplicate", "remediated"], "description": "Lifecycle state. DERIVED from the reviewer's authoritative `review.verdict`: accepted/blocked -> verified, rejected -> rejected, needs-evidence -> open (the two axes and their mapping are in verify-base.md). `duplicate` and `remediated` are post-report lifecycle states with no verdict equivalent. On any status/verdict discrepancy, `review.verdict` (the `reviews/<id>.verdict.json` file) wins." },
         "evidence": {
           "type": "array",
           "minItems": 1,
@@ -58,7 +58,7 @@
           "required": ["verdict", "reviewer"],
           "additionalProperties": false,
           "properties": {
-            "verdict": { "enum": ["accepted", "rejected", "needs-evidence", "blocked"], "description": "accepted=confirmed; rejected=not real/out-of-scope; needs-evidence=real but a missing artifact the executor can still produce (bounce back); blocked=confirmed real but full demonstration is prevented by target/environment state the executor cannot change (e.g. unseeded DB) — report WITH a caveat, do not bounce." },
+            "verdict": { "enum": ["accepted", "rejected", "needs-evidence", "blocked"], "description": "The AUTHORITATIVE reviewer decision (`reviews/<id>.verdict.json` is canonical; the finding's `status` is DERIVED from this). accepted=confirmed (-> status verified); rejected=not real/out-of-scope (-> status rejected; set rejection_class); needs-evidence=real but a missing artifact the executor can still produce (bounce back; status stays open); blocked=confirmed real but full demonstration is prevented by target/environment state the executor cannot change (e.g. unseeded DB) -> status verified, report WITH a caveat, do not bounce. Only accepted + blocked reach reporting." },
             "reviewer": { "type": "string" },
             "reviewed_at": { "type": "string", "format": "date-time" },
             "rubric": {

@@ -117,6 +117,9 @@ def check_artifact(a: dict, out: Path):
 _RS_ID_RE = re.compile(r"^RS-[0-9]{4}-[0-9]{3,}$")
 _REQUIRED_FINDING_FIELDS = ("id", "title", "asset", "category", "severity",
                             "confidence", "status", "evidence", "reproduction")
+# statuses that imply review already happened (the lifecycle axis) — used ONLY to flag a finding that
+# claims a reviewed status but carries no review.verdict record. `review.verdict` is the authoritative
+# axis; `status` is derived from it (see verify-base.md "Two axes").
 _REVIEWED_STATUSES = {"verified", "rejected", "remediated"}
 
 
