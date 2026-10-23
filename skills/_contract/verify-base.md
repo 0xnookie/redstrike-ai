@@ -53,6 +53,23 @@ biggest cause of rejected review blocks. The recurring offenders and their schem
 - the finding id lives in the file name `reviews/<id>.verdict.json` and on the finding itself —
   **not inside `review{}`** (no `id` key).
 
+### Two axes: `review.verdict` (the decision) vs finding `status` (the lifecycle)
+
+These are **not** two names for the same thing — they are different axes, and conflating them is a recurring
+confusion. `review.verdict` is the reviewer's **authoritative** decision (the `reviews/<id>.verdict.json`
+file is the canonical record and the tiebreaker on any discrepancy). The finding's `status` is **derived**
+from the verdict — do not set it independently. `duplicate`/`remediated` are lifecycle-only states (no
+verdict equivalent), set downstream of review (de-dupe / retest).
+
+| `review.verdict` | → finding `status` | reaches reporting? | meaning |
+|------------------|--------------------|--------------------|---------|
+| `accepted`       | `verified`         | yes                | confirmed |
+| `blocked`        | `verified`         | yes, WITH a caveat | real, but full demonstration is prevented by env/target state |
+| `rejected`       | `rejected`         | no                 | not real / out-of-scope / duplicate — set `rejection_class` |
+| `needs-evidence` | `open`             | no — bounced back  | a missing artifact the executor can still produce |
+
+The per-verdict rules below elaborate each row.
+
 - `accepted` → finding `status: verified`.
 - `rejected` → finding `status: rejected`; **set `rejection_class`** and state why. A `rejected` means *not a
   real vuln here*: `false-positive` (disproved WITH evidence), `out-of-scope`, or `duplicate` — a clean drop.

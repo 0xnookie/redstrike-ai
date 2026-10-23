@@ -133,6 +133,10 @@ def _discover_findings(eng: Path):
 
 
 def _verdict(f: dict) -> str:
+    # `review.verdict` is the AUTHORITATIVE axis; `status` is derived from it (verify-base.md:
+    # accepted/blocked->verified, rejected->rejected, needs-evidence->open). Falling back to status
+    # when the inline review block is absent is lossy (blocked reads back as accepted) but
+    # _reportable treats both the same. Mirrors scripts/console.py._verdict.
     r = f.get("review") or {}
     if r.get("verdict"):
         return r["verdict"]
