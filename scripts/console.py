@@ -196,6 +196,17 @@ def summarize(eng: Path, files: dict) -> dict:
     return {"findings": total, **counts, "chains": chains}
 
 
+def _iso_z(v):
+    """Normalize a window timestamp to the scope.yaml ISO-8601 'Z' form. PyYAML parses
+    an ISO timestamp into a (tz-aware) datetime/date whose str() is '2026-01-01 00:00:00+00:00';
+    the dependency-free reader keeps the raw 'YYYY-MM-DDTHH:MM:SSZ' string. Coerce both to the
+    same ISO-8601 'Z' representation so the two code paths agree."""
+    import datetime as _dt
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.isoformat().replace("+00:00", "Z")
+    return str(v or "")
+
+
 def scope_yaml_to_json(path: Path):
     """Read a scope.yaml into the console's scope.json shape. PyYAML if present."""
     try:
@@ -222,7 +233,7 @@ def scope_yaml_to_json(path: Path):
         "engagement": doc.get("engagement", ""),
         "target": target,
         "authorized_by": doc.get("authorized_by", ""),
-        "window": {"start": str(win.get("start", "")), "end": str(win.get("end", ""))},
+        "window": {"start": _iso_z(win.get("start", "")), "end": _iso_z(win.get("end", ""))},
         "in_scope": block("in_scope"),
         "out_of_scope": block("out_of_scope"),
         "rules": doc.get("rules") or {},
