@@ -57,7 +57,14 @@ def load_map(path: Path = MAP_PATH) -> dict:
 
 
 def _load_signals(ref: str) -> set:
-    """Signals come as a JSON list of strings, or an object {signal: truthy}. '-' = stdin."""
+    """Load the recon signal set. Accepts three shapes ('-' = stdin):
+      1. a bare JSON list of signal strings:       ["tech:wordpress", "param:injectable"]
+      2. a flat object mapping signal -> truthy:    {"tech:wordpress": true, "x": false}
+      3. the signals feeder's nested document:      {"signals": [...], "signal_evidence": {...}, ...}
+    Shape 3 is what the Redstrike signals feeder emits; without this branch its top-level
+    KEYS ("signals", "signal_evidence", ...) were taken as the signal set, silently
+    collapsing routing to baseline-only with no error.
+    """
     if ref is None:
         return None
     raw = sys.stdin.read() if ref == "-" else Path(ref).read_text(encoding="utf-8")
@@ -65,10 +72,19 @@ def _load_signals(ref: str) -> set:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         sys.exit(f"[!] signals not valid JSON: {e}")
-    if isinstance(data, dict):
-        return {k for k, v in data.items() if v}
     if isinstance(data, list):
         return {str(x) for x in data}
+    if isinstance(data, dict):
+        # Nested feeder document: a "signals" list wins over the top-level keys.
+        inner = data.get("signals")
+        if isinstance(inner, list):
+            return {str(x) for x in inner}
+        if isinstance(inner, dict):
+            return {str(k) for k, v in inner.items() if v}
+        # Flat object: {signal: truthy}. Drop known non-signal metadata keys so a
+        # mistakenly-flat feeder doc can't smuggle "signal_evidence" etc. in as signals.
+        _META = {"_comment", "signal_evidence", "surfaces_ruled_out", "phases"}
+        return {k for k, v in data.items() if v and k not in _META}
     sys.exit("[!] signals must be a JSON list or object")
 
 
