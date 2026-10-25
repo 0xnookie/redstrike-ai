@@ -23,7 +23,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · findings accepted.
 ## What do we want
 - The exact **core** version + every **plugin/theme** slug+version (from independent signals, not one banner)
 - Per component: version-MATCHED CVEs (exact range), CVSS, title, exploit availability — plugins/themes first
-- WP-specific surface: `xmlrpc.php` (pingback SSRF / multicall amplification — FEASIBILITY only), user enumeration (REST / `?author=` / login oracle), REST exposure, config/backup/debug exposure, directory listing
+- WP-specific surface: `xmlrpc.php` (pingback SSRF / multicall amplification — FEASIBILITY only), user enumeration (REST / `?author=` / login oracle), REST exposure, config/backup/debug exposure, directory listing, file-modification / admin→RCE primitive (`DISALLOW_FILE_EDIT`/`DISALLOW_FILE_MODS` unset + theme/plugin editor + plugin/theme upload → the standard admin→RCE escalation)
 
 ## Steps  (action · tool · output)
 1. Fingerprint WP + pin version from ≥2 independent signals (`meta generator`, `/readme.html`, core asset `?ver=` e.g. `wp-emoji-release.min.js?ver=`, `/wp-json/` REST, `/feed/`, `/wp-login.php`) · `whatweb`/`wpscan`/`curl` + js-analysis/host-discovery inputs · `framework.json`
