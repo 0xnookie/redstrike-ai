@@ -13,6 +13,7 @@
 - [ ] xmlrpc.php posture (enabled? pingback? system.multicall?) — FEASIBILITY only, no DoS/brute
 - [ ] REST + config/backup/`debug.log` exposure checked (de-duped vs exposed-surface/secrets)
 - [ ] Directory listing checked
+- [ ] File-modification / admin→RCE primitive checked (`DISALLOW_FILE_EDIT`/`DISALLOW_FILE_MODS`; theme/plugin file editor + plugin/theme upload reachable as admin; wp-content PHP-executed + web-user-writable) — the standard admin→RCE path, handed to `attack-chain-discovery`
 - [ ] surface.json written
 
 ## Map

@@ -27,6 +27,17 @@ Record identity + version + the signals that agree into `framework.json`; disagr
 **REST exposure.** Enumerate `/wp-json/` routes for sensitive data (users, settings, drafts, plugin routes). `?rest_route=/wp/v2/users` is the pretty-permalink-independent form.
 **Config / backup / debug exposure (de-dupe → `exposed-surface`/`secrets`).** `/wp-config.php~`, `.bak`, `.save`, `.orig`, `/wp-config.php.txt`; `/wp-content/debug.log`; `/.git/`; `/wp-content/uploads/` directory listing; `/wp-content/backup*`. If found, it's an `exposed-surface`/`secrets` finding — reference, don't re-own.
 **Directory listing.** `/wp-content/uploads/`, `/wp-content/plugins/` with autoindex on.
+**File-modification / admin→RCE primitive (WP misconfig).** Default WordPress lets any administrator write
+executable PHP from the dashboard — **Appearance→Theme File Editor**, **Plugins→Plugin File Editor**, and the
+plugin/theme **installer/uploader** — so *admin is one capability away from RCE*. Check whether this is
+hardened: is `DISALLOW_FILE_EDIT` set (disables the code editors) and `DISALLOW_FILE_MODS` set (also blocks
+install/update)? (white-box: `grep DISALLOW_FILE_ wp-config.php`; black-box: `/wp-admin/theme-editor.php` /
+`plugin-editor.php` reachable as admin, and `/wp-admin/plugin-install.php` upload present). Unset = **the
+standard WP admin→RCE path is open** — pair it with any admin-takeover (weak/rotated-default admin password,
+DB-write to `wp_users`, auth-bypass CVE) to complete unauth/low-priv → **RCE**. Confirm the write lands in a
+web-reachable, PHP-executed, web-user-writable path (`wp-content/**` owned by the PHP user + the server runs
+`.php` there). Benign/feasibility only — **never plant a webshell** (that's `exploit-generator`/`persistence`,
+approval-gated); record it as a WP misconfig and hand the chain to `attack-chain-discovery`.
 
 Record components (slug·version·active?·evidence) + surface posture into `surface.json`.
 
@@ -51,6 +62,10 @@ close each candidate `confirmed / ruled-out / open-proof-gap`.
   findings are rarer than plugin/theme ones — weight the enumeration toward plugins/themes.
 - **xmlrpc.php** — `pingback.ping` SSRF; `system.multicall` auth-amplification (feasibility only).
 - **User enumeration** — REST `/wp/v2/users` + `?author=` leak logins (fuels later, approval-gated, cred work).
+- **Admin→RCE (default-config, not a CVE)** — with administrator, the built-in Theme/Plugin File Editor and
+  plugin/theme uploader write executable PHP unless `DISALLOW_FILE_EDIT`/`DISALLOW_FILE_MODS` are set. Treat
+  this as the standard escalation that turns *any* admin-takeover into code execution; report the hardening
+  gap and hand the chain to `attack-chain-discovery`.
 
 ## Safety
 Benign, read-only, scope-gated, rate-limited. No exploitation, no plugin/theme install, no DoS
