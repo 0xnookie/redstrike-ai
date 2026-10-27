@@ -180,7 +180,15 @@ export function buildServices(o: Record<string, any>): Service[] {
 export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
   const assets: Asset[] = [];
   const seen = new Set<string>();
-  const addHost = (host: string, tech?: string[]) => {
+  // tech is a string in the current live_hosts shape ("tech") and an array in the older
+  // one ("stack"); normalize either to a string[] for the Asset.
+  const techOf = (h: any): string[] | undefined => {
+    if (Array.isArray(h?.stack) && h.stack.length) return h.stack;
+    if (Array.isArray(h?.tech) && h.tech.length) return h.tech;
+    if (typeof h?.tech === "string" && h.tech.trim()) return [h.tech.trim()];
+    return undefined;
+  };
+  const addHost = (host: string, meta?: any) => {
     if (!host || seen.has(host)) return;
     seen.add(host);
     assets.push({
@@ -193,15 +201,20 @@ export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
       // where there's real evidence (a finding, or an analysed/flagged service).
       coverage: "untested",
       findings: 0,
-      tech,
+      tech: techOf(meta),
       parent: orgName && host !== orgName ? orgName : undefined,
+      status: typeof meta?.status === "number" ? meta.status : undefined,
+      server: typeof meta?.server === "string" ? meta.server : undefined,
+      title: typeof meta?.title === "string" ? meta.title : undefined,
+      tier: typeof meta?.tier === "number" ? meta.tier : undefined,
+      note: typeof meta?.note === "string" ? meta.note : undefined,
     });
   };
 
   if (Array.isArray(o.live_hosts)) {
-    o.live_hosts.forEach((h: any) => addHost(hostFromUrl(h?.url) || h?.ip, Array.isArray(h?.stack) ? h.stack : undefined));
+    o.live_hosts.forEach((h: any) => addHost(hostFromUrl(h?.url) || h?.ip, h));
   } else if (Array.isArray(o.hosts)) {
-    o.hosts.forEach((h: any) => addHost(h?.host ?? h?.hostname ?? String(h?.ip ?? ""), undefined));
+    o.hosts.forEach((h: any) => addHost(h?.host ?? h?.hostname ?? String(h?.ip ?? ""), h));
   }
 
   const primaryHost = assets[0]?.value;
