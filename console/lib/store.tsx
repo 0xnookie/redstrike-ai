@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus, ApiEndpoint, JsFile } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
   deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
@@ -12,8 +12,8 @@ import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 type Mode = "empty" | "live";
 
 // Each engagement's own findings/chains/services/assets, loaded on demand.
-interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; coverage?: CoverageLedger; cveIntel?: CveIntel; }
-const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [] };
+interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; coverage?: CoverageLedger; cveIntel?: CveIntel; }
+const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [], apiEndpoints: [], jsFiles: [] };
 
 const ACTIVE_KEY = "redstrike.activeEngagement";
 
@@ -29,6 +29,8 @@ interface ConsoleCtx {
   activity: ConsoleData["activity"];
   assets: ConsoleData["assets"];
   services: ConsoleData["services"];
+  apiEndpoints: ApiEndpoint[];
+  jsFiles: JsFile[];
   tests: TestRun[];
   coverage: CoverageLedger | undefined;
   cveIntel: CveIntel | undefined;
@@ -39,6 +41,9 @@ interface ConsoleCtx {
   selectedFinding: Finding | null;
   openFinding: (f: Finding) => void;
   closeFinding: () => void;
+  selectedHost: string | null;
+  openHost: (host: string) => void;
+  closeHost: () => void;
   findingsQuery: string;
   setFindingsQuery: (q: string) => void;
 }
@@ -63,8 +68,16 @@ const safeLocalSet = (k: string, v: string) => {
   try { localStorage.setItem(k, v); } catch { /* private mode / blocked */ }
 };
 
+/** Parse host_discovery's `api_endpoints` into a typed list (both shapes are tolerant). */
+function apiEndpointsOf(host: any): ApiEndpoint[] {
+  const raw = host && Array.isArray(host.api_endpoints) ? host.api_endpoints : [];
+  return raw
+    .map((e: any) => ({ host: e?.host ?? "", url: e?.url, method: e?.method, evidence: e?.evidence }))
+    .filter((e: ApiEndpoint) => e.host || e.url);
+}
+
 /** Assemble a dataset from an engagement's parsed canonical files. */
-function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any): Dataset {
+function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any): Dataset {
   let findings: Finding[] = [];
   let chains: AttackChain[] = [];
   if (Array.isArray(cons)) {
@@ -89,7 +102,9 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, in
     services = buildServices(host);
     assets = buildAssets(host, hostRoot(services, (cons && cons.target) || ""));
   }
-  return { findings, chains, services, assets, coverage, cveIntel };
+  const apiEndpoints = apiEndpointsOf(host);
+  const jsFiles: JsFile[] = js && Array.isArray(js.files) ? (js.files as JsFile[]) : [];
+  return { findings, chains, services, assets, apiEndpoints, jsFiles, coverage, cveIntel };
 }
 
 /** Build an Engagement header from a manifest entry (its parsed scope + summary). */
@@ -132,8 +147,11 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [activeId, setActiveIdState] = useState<string>(emptyData.activeEngagementId);
   const [mode, setMode] = useState<Mode>("empty");
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
-  const openFinding = useCallback((f: Finding) => setSelectedFinding(f), []);
+  const openFinding = useCallback((f: Finding) => { setSelectedHost(null); setSelectedFinding(f); }, []);
   const closeFinding = useCallback(() => setSelectedFinding(null), []);
+  const [selectedHost, setSelectedHost] = useState<string | null>(null);
+  const openHost = useCallback((host: string) => { setSelectedFinding(null); setSelectedHost(host); }, []);
+  const closeHost = useCallback(() => setSelectedHost(null), []);
   const [findingsQuery, setFindingsQuery] = useState("");
   const [cveFeed, setCveFeed] = useState<CveFeed | undefined>(undefined);
   const [cveLive, setCveLive] = useState(false);
@@ -149,6 +167,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const services = active.services;
   const coverage = active.coverage;
   const cveIntel = active.cveIntel;
+  const apiEndpoints = active.apiEndpoints;
+  const jsFiles = active.jsFiles;
   const assets = useMemo(() => {
     // Prefer real host-discovery assets; otherwise derive from scope + findings so the
     // Assets views aren't empty when recon didn't emit host_discovery.json.
@@ -164,18 +184,19 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     if (loadedRef.current.has(id)) return;
     loadedRef.current.add(id);
     const base = `/e/${id}`;
-    const [cons, host, chainsFile, cover, intel] = await Promise.all([
+    const [cons, host, chainsFile, cover, intel, js] = await Promise.all([
       fetchJson(`${base}/findings_consolidated.json`),
       fetchJson(`${base}/host_discovery.json`),
       fetchJson(`${base}/attack_chains.json`),
       fetchJson(`${base}/coverage_ledger.json`),
       fetchJson(`${base}/cve_intel.json`),
+      fetchJson(`${base}/js_analysis.json`),
     ]);
-    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined && intel === undefined) {
+    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined && intel === undefined && js === undefined) {
       loadedRef.current.delete(id); // nothing served (e.g. scaffold-only) — allow a retry later
       return;
     }
-    const ds = datasetFromFiles(cons, host, chainsFile, cover, intel);
+    const ds = datasetFromFiles(cons, host, chainsFile, cover, intel, js);
     setDatasets((d) => ({ ...d, [id]: ds }));
   }, []);
 
@@ -212,9 +233,14 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         patchActive({ cveIntel: o as unknown as CveIntel });
         return "cve_intel";
       }
+      if (Array.isArray(o.files) && o.files.length > 0 &&
+          (o.files as any[]).every((f) => f && typeof f === "object" && "rel" in f && "name" in f)) {
+        patchActive({ jsFiles: o.files as JsFile[] });
+        return "js_analysis";
+      }
       if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
         const services = buildServices(o);
-        patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)) });
+        patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)), apiEndpoints: apiEndpointsOf(o) });
         return "host_discovery";
       }
       if (Array.isArray(o.chains)) { patchActive({ chains: o.chains as AttackChain[] }); return "chains"; }
@@ -301,9 +327,10 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
 
   const value: ConsoleCtx = {
     mode, engagements, activeEngagement, activeId, setActiveId,
-    findings, chains, agents, activity, assets, services, tests, coverage, cveIntel,
+    findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, tests, coverage, cveIntel,
     cveFeed, cveLive, loadFiles, clearData,
-    selectedFinding, openFinding, closeFinding, findingsQuery, setFindingsQuery,
+    selectedFinding, openFinding, closeFinding,
+    selectedHost, openHost, closeHost, findingsQuery, setFindingsQuery,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

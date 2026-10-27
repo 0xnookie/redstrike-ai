@@ -22,6 +22,12 @@ serves them under per-engagement routes the console fetches on open:
   chains.json                 (attack-chain-discovery)  -> /e/<id>/attack_chains.json
   scope.yaml / scope.json     (engagement root)         -> /e/<id>/scope.json
 
+plus a js-analysis manifest + the analyzed JS files themselves (so the console's
+asset detail can list and open what recon pulled per host):
+
+  js-analysis/**             (js-analysis)             -> /e/<id>/js_analysis.json  (computed listing)
+                                                       -> /e/<id>/js/<rel>          (raw file, correct Content-Type)
+
 plus a `/engagements.json` manifest (one entry per engagement, with parsed scope
 + a reportable-severity summary computed server-side). scope.yaml is converted to
 JSON on the fly (PyYAML if available, else a small built-in reader).
@@ -62,6 +68,53 @@ def ensure_build(force: bool) -> None:
 def _shallowest(root: Path, name: str):
     hits = sorted(root.rglob(name), key=lambda p: len(p.parts))
     return hits[0] if hits else None
+
+
+def _js_dir(engagement: Path):
+    """The engagement's js-analysis directory (shallowest match), if any."""
+    hits = sorted((p for p in engagement.rglob("js-analysis") if p.is_dir()), key=lambda p: len(p.parts))
+    return hits[0] if hits else None
+
+
+def js_analysis_manifest(engagement: Path) -> dict:
+    """List the JS files recon analyzed, grouped by their per-host subdir.
+
+    The js-analysis skill writes the scripts it pulled into <eng>/js-analysis/<host-ish>/.
+    We expose a flat listing (dir + name + rel + size) so the console's asset detail can
+    show "what was analyzed on this host" and link each file to its raw route below."""
+    base = _js_dir(engagement)
+    files = []
+    if base:
+        for p in sorted(base.rglob("*")):
+            if not p.is_file() or p.name.startswith("."):
+                continue
+            rel = p.relative_to(base)
+            parent = str(rel.parent)
+            try:
+                size = p.stat().st_size
+            except OSError:
+                size = None
+            files.append({
+                "dir": "" if parent == "." else parent,
+                "name": p.name,
+                "rel": str(rel),
+                "bytes": size,
+            })
+    return {"files": files}
+
+
+def _ctype_for(p: Path) -> str:
+    return {
+        ".js": "text/javascript; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
+        ".cjs": "text/javascript; charset=utf-8",
+        ".ts": "text/plain; charset=utf-8",
+        ".json": "application/json",
+        ".map": "application/json",
+        ".css": "text/css; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+    }.get(p.suffix.lower(), "text/plain; charset=utf-8")
 
 
 def looks_like_engagement(d: Path) -> bool:
@@ -324,6 +377,18 @@ def make_handler(target: Path):
             if name == "scope.json":
                 scope = scope_for(eng)
                 return ("json", json.dumps(scope, default=str).encode("utf-8")) if scope else None
+            if name == "js_analysis.json":
+                return ("json", json.dumps(js_analysis_manifest(eng), default=str).encode("utf-8"))
+            if name.startswith("js/"):
+                base = _js_dir(eng)
+                if not base:
+                    return None
+                base = base.resolve()
+                tgt = (base / name[len("js/"):]).resolve()
+                # strict: tgt must be a real file INSIDE the js-analysis dir (no traversal)
+                if tgt.is_file() and (tgt == base or base in tgt.parents):
+                    return ("file", tgt, _ctype_for(tgt))
+                return None
             if name == "findings_consolidated.json":
                 files = files_for(eng)
                 findings, is_cons = engagement_findings(eng, files)
@@ -345,14 +410,17 @@ def make_handler(target: Path):
             r = resolve(self.path.split("?")[0])
             if r is None:
                 return False
-            kind, payload = r
+            kind, payload = r[0], r[1]
+            # file routes may carry an explicit Content-Type (3rd element); JSON + legacy
+            # file routes default to application/json (every legacy file route serves JSON).
+            ctype = r[2] if len(r) > 2 else "application/json"
             try:
                 data = payload if kind == "json" else Path(payload).read_bytes()
             except OSError:
                 self.send_error(404)
                 return True
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             if not body_only:
