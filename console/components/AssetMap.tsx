@@ -1,35 +1,43 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Globe, Server, Network, Radio, Link2, Plus, Minus, Maximize2, type LucideIcon } from "lucide-react";
+import { Globe, Server, Network, Link2, Plus, Minus, Maximize2, Search, ShieldAlert, X } from "lucide-react";
 import type { Asset, AssetKind, Service, Finding } from "@/lib/types";
-import { COVERAGE, SEVERITY } from "@/lib/theme";
+import { COVERAGE, SEVERITY, ink } from "@/lib/theme";
 import { cx, hostOf } from "@/lib/format";
 
-type NodeKind = AssetKind | "org";
-interface GNode {
-  id: string; label: string; kind: NodeKind; scope: "in" | "out";
-  coverage: Asset["coverage"]; findings: number; r: number; x: number; y: number;
+/* ───────────────────────────────────────────────────────────────────────────
+   Asset coverage map — a packed-bubble "constellation".
+
+   The old force-directed layout was O(N²)·iterations and collapsed into an
+   unreadable hairball past ~100 nodes (a real engagement has 700+ live hosts).
+   This lays every host out in O(N) with a deterministic phyllotaxis (sunflower)
+   packing, groups hosts under their scope apex, sorts the risky few to the core
+   so they read first, and labels only what matters — the rest stay as dots you
+   reveal on hover / search / zoom. Scales to thousands and stays legible.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+type RiskLevel = "high" | "elevated" | "none";
+interface PNode {
+  id: string; host: string; kind: AssetKind; scope: "in" | "out";
+  coverage: Asset["coverage"]; findings: number; ports: number; risk: RiskLevel;
+  r: number; x: number; y: number;
 }
-interface GEdge { a: string; b: string; }
+interface PGroup { key: string; label: string; cx: number; cy: number; r: number; count: number }
 
-const KIND_ICON: Record<NodeKind, LucideIcon> = {
-  org: Building2, domain: Globe, subdomain: Globe, ip: Server, cidr: Network, service: Radio, endpoint: Link2,
-};
-const KIND_LABEL: [NodeKind, string][] = [
-  ["org", "Org"], ["domain", "Domain"], ["subdomain", "Subdomain"], ["ip", "IP"], ["service", "Service"], ["endpoint", "Endpoint"],
-];
-
-const STAGE_W = 920, STAGE_H = 520;
+const STAGE_W = 1040, STAGE_H = 560, PAD = 54;
+const GOLDEN = Math.PI * (3 - Math.sqrt(5)); // 137.5° — even sunflower packing
+const SPACING = 13;                          // centre-to-centre pitch of the packing
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
-const baseR = (k: NodeKind) =>
-  k === "org" ? 28 : k === "domain" ? 23 : k === "subdomain" ? 20 : k === "ip" || k === "cidr" ? 18 : k === "service" ? 16 : 15;
+const IP_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+const HOST_KINDS = new Set<AssetKind>(["domain", "subdomain", "ip", "cidr"]);
+const RISK_RANK: Record<RiskLevel, number> = { high: 2, elevated: 1, none: 0 };
+const RISK_COLOR = { high: "#ef4444", elevated: "#f59e0b" } as const;
 
-export function AssetMap({ assets, orgName, services = [], findings = [], onSelectHost, selectedHost }: { assets: Asset[]; orgName: string; services?: Service[]; findings?: Finding[]; onSelectHost?: (host: string) => void; selectedHost?: string }) {
-  const { nodes, edges } = useMemo(() => buildGraph(assets, orgName), [assets, orgName]);
-  const positioned = useMemo(() => layout(nodes, edges), [nodes, edges]);
-
-  // per-host risk: worst finding severity on the host + service posture (exposed/outdated)
+export function AssetMap({
+  assets, orgName, services = [], findings = [], onSelectHost, selectedHost,
+}: { assets: Asset[]; orgName: string; services?: Service[]; findings?: Finding[]; onSelectHost?: (host: string) => void; selectedHost?: string }) {
+  // per-host risk posture: worst finding severity + service posture (exposed/outdated) + open ports
   const hostRisk = useMemo(() => {
     const agg = new Map<string, { open: number; exposed: boolean; outdated: boolean }>();
     for (const s of services) {
@@ -40,225 +48,368 @@ export function AssetMap({ assets, orgName, services = [], findings = [], onSele
       if (s.flagged === "outdated") a.outdated = true;
       agg.set(s.host, a);
     }
-    const sev = new Map<string, number>(); // max severity rank per host
+    const sev = new Map<string, number>();
     for (const f of findings) {
       if (f.composite) continue;
-      const host = hostOf(f.asset);
-      sev.set(host, Math.max(sev.get(host) ?? 0, SEVERITY[f.severity]?.rank ?? 0));
+      const h = hostOf(f.asset);
+      sev.set(h, Math.max(sev.get(h) ?? 0, SEVERITY[f.severity]?.rank ?? 0));
     }
-    const m = new Map<string, { level: "high" | "medium" | "low"; open: number }>();
-    new Set<string>([...agg.keys(), ...sev.keys()]).forEach((host) => {
-      const a = agg.get(host) ?? { open: 0, exposed: false, outdated: false };
-      const r = sev.get(host) ?? 0;
-      const level = a.exposed || r >= 4 ? "high" : a.outdated || r >= 1 ? "medium" : "low";
-      m.set(host, { level, open: a.open });
+    const m = new Map<string, { level: RiskLevel; open: number }>();
+    new Set<string>([...agg.keys(), ...sev.keys()]).forEach((h) => {
+      const a = agg.get(h) ?? { open: 0, exposed: false, outdated: false };
+      const r = sev.get(h) ?? 0;
+      const level: RiskLevel = a.exposed || r >= 4 ? "high" : a.outdated || r >= 1 ? "elevated" : "none";
+      m.set(h, { level, open: a.open });
     });
     return m;
   }, [services, findings]);
 
+  const { nodes, groups } = useMemo(
+    () => buildConstellation(assets, orgName, hostRisk),
+    [assets, orgName, hostRisk],
+  );
+
+  const totals = useMemo(() => {
+    const t = { hosts: nodes.length, tested: 0, untested: 0, inprog: 0, out: 0, high: 0, elevated: 0 };
+    for (const n of nodes) {
+      if (n.scope === "out") t.out++;
+      else if (n.coverage === "tested") t.tested++;
+      else if (n.coverage === "in-progress") t.inprog++;
+      else t.untested++;
+      if (n.risk === "high") t.high++;
+      else if (n.risk === "elevated") t.elevated++;
+    }
+    return t;
+  }, [nodes]);
+
   const [view, setView] = useState({ tx: 0, ty: 0, s: 1 });
-  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "risk" | "untested">("all");
+  const [hover, setHover] = useState<{ id: string; left: number; top: number } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; moved: boolean } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // wheel zoom (registered non-passive so we can preventDefault the page scroll)
+  const q = query.trim().toLowerCase();
+  const isActive = (n: PNode) => {
+    if (filter === "risk" && n.risk === "none") return false;
+    if (filter === "untested" && !(n.coverage === "untested" || n.scope === "out")) return false;
+    if (q && !n.host.toLowerCase().includes(q)) return false;
+    return true;
+  };
+
+  // wheel zoom (non-passive so we can preventDefault the page scroll)
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      setView((v) => ({ ...v, s: clamp(v.s * (e.deltaY < 0 ? 1.12 : 0.89), 0.45, 2.8) }));
+      setView((v) => ({ ...v, s: clamp(v.s * (e.deltaY < 0 ? 1.12 : 0.89), 0.5, 6) }));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const onDown = (e: React.MouseEvent) => { dragRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }; setDragging(true); };
+  const onDown = (e: React.MouseEvent) => { dragRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false }; setDragging(true); };
   const onMove = (e: React.MouseEvent) => {
     const d = dragRef.current; if (!d) return;
+    if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 3) d.moved = true;
     setView((v) => ({ ...v, tx: d.tx + (e.clientX - d.x), ty: d.ty + (e.clientY - d.y) }));
   };
   const onUp = () => { dragRef.current = null; setDragging(false); };
-  const zoom = (f: number) => setView((v) => ({ ...v, s: clamp(v.s * f, 0.45, 2.8) }));
+  const zoom = (f: number) => setView((v) => ({ ...v, s: clamp(v.s * f, 0.5, 6) }));
+  const reset = () => setView({ tx: 0, ty: 0, s: 1 });
+
+  const hostOfNode = (n: PNode) => n.host;
+  const enter = (e: React.MouseEvent, n: PNode) => {
+    const c = containerRef.current?.getBoundingClientRect();
+    const b = (e.currentTarget as SVGElement).getBoundingClientRect();
+    if (!c) return;
+    setHover({ id: n.id, left: b.left + b.width / 2 - c.left, top: b.top - c.top });
+  };
+  const hovered = hover ? nodes.find((n) => n.id === hover.id) : undefined;
+  const selectedNode = selectedHost ? nodes.find((n) => n.host === selectedHost) : undefined;
+
+  // static node layer — memoised so hover/tooltip never re-renders 700 circles
+  const nodeLayer = useMemo(() => (
+    <>
+      {nodes.map((n) => {
+        const act = isActive(n);
+        const v = nodeVisual(n);
+        const op = act ? 1 : 0.1;
+        const show = act && (n.risk !== "none" || n.findings > 0 || (!!q && n.host.toLowerCase().includes(q)));
+        return (
+          <g key={n.id} opacity={op} style={{ transition: "opacity .18s ease" }}
+             className={onSelectHost ? "cursor-pointer" : undefined}
+             onMouseDown={(e) => e.stopPropagation()}
+             onMouseEnter={(e) => enter(e, n)} onMouseLeave={() => setHover(null)}
+             onClick={onSelectHost && act ? () => onSelectHost(hostOfNode(n)) : undefined}>
+            {n.risk !== "none" && act && (
+              <circle cx={n.x} cy={n.y} r={n.r + 6} fill={RISK_COLOR[n.risk]} opacity={0.16} />
+            )}
+            <circle cx={n.x} cy={n.y} r={n.r} fill={v.fill} stroke={v.stroke} strokeWidth={v.strokeW} strokeDasharray={v.dash} />
+            {n.risk !== "none" && (
+              <circle cx={n.x} cy={n.y} r={n.r + 2.3} fill="none" stroke={RISK_COLOR[n.risk]} strokeWidth={2} />
+            )}
+            {show && (
+              <text x={n.x} y={n.y + n.r + 9.5} textAnchor="middle" fontSize={9.5}
+                    paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3} strokeLinejoin="round"
+                    fill={ink(0.82)} style={{ fontWeight: 500 }}>
+                {shortHost(n.host)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </>
+  ), [nodes, filter, q, onSelectHost]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
       ref={containerRef}
-      className="graph-grid relative h-[520px] select-none overflow-hidden rounded-xl border border-line bg-card2"
+      className="graph-grid relative h-[560px] select-none overflow-hidden rounded-xl border border-line bg-card2"
       style={{ cursor: dragging ? "grabbing" : "grab" }}
-      onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+      onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={() => { onUp(); setHover(null); }}
     >
-      <div
-        className="absolute left-1/2 top-1/2"
-        style={{ width: STAGE_W, height: STAGE_H, transform: `translate(-50%,-50%) translate(${view.tx}px,${view.ty}px) scale(${view.s})` }}
-      >
-        <svg width={STAGE_W} height={STAGE_H} className="absolute inset-0" style={{ pointerEvents: "none" }}>
-          {edges.map((e, i) => {
-            const a = positioned[e.a], b = positioned[e.b];
-            if (!a || !b) return null;
-            return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgb(var(--fg) / 0.14)" strokeWidth={1.2} />;
-          })}
-        </svg>
-        {Object.values(positioned).map((n) => {
-          const Icon = KIND_ICON[n.kind];
-          const st = nodeStyle(n);
-          const hk = n.kind === "subdomain" || n.kind === "ip" || n.kind === "domain" || n.kind === "service" ? n.label.split(":")[0] : undefined;
-          const risk = hk ? hostRisk.get(hk) : undefined;
-          const ringColor = risk && risk.level !== "low" ? (risk.level === "high" ? "#ef4444" : "#f59e0b") : undefined;
-          const showPorts = !!risk && risk.open > 0 && (n.kind === "subdomain" || n.kind === "ip" || n.kind === "domain");
-          const clickable = !!hk && !!onSelectHost;
-          const selected = !!hk && hk === selectedHost;
-          const ringParts: string[] = [];
-          if (ringColor) ringParts.push("0 0 0 2.5px rgb(var(--card2))", `0 0 0 5px ${ringColor}`);
-          if (selected) { const g = ringColor ? 7 : 2.5, o = ringColor ? 9.5 : 5; ringParts.push(`0 0 0 ${g}px rgb(var(--card2))`, `0 0 0 ${o}px rgb(var(--fg))`); }
-          return (
-            <div
-              key={n.id}
-              className={cx("group absolute flex flex-col items-center", clickable && "cursor-pointer")}
-              style={{ left: n.x, top: n.y, transform: "translate(-50%,-50%)" }}
-              onMouseDown={clickable ? (e) => e.stopPropagation() : undefined}
-              onClick={clickable ? () => onSelectHost!(hk!) : undefined}
-              title={hk}
-            >
-              <div
-                className={cx("relative grid place-items-center rounded-full transition-transform", clickable && "group-hover:scale-110", selected && "scale-110")}
-                style={{ width: n.r * 2, height: n.r * 2, background: st.bg, border: st.border, color: st.icon, boxShadow: ringParts.length ? ringParts.join(", ") : undefined }}
-              >
-                <Icon size={Math.round(n.r * 0.85)} strokeWidth={1.75} />
-                {showPorts && (
-                  <span className="absolute -right-1.5 -top-1.5 grid h-[17px] min-w-[17px] place-items-center rounded-full border border-line bg-card px-1 text-[9px] font-semibold text-fg">
-                    {risk!.open}
-                  </span>
-                )}
-              </div>
-              <div
-                className="mt-1 max-w-[130px] truncate text-center text-[11px] font-medium"
-                style={{ color: st.label, textDecoration: n.scope === "out" ? "line-through" : "none" }}
-              >
-                {n.label}
-              </div>
+      <svg width="100%" height="100%" viewBox={`0 0 ${STAGE_W} ${STAGE_H}`} preserveAspectRatio="xMidYMid meet" className="block">
+        <g transform={`translate(${STAGE_W / 2 + view.tx} ${STAGE_H / 2 + view.ty}) scale(${view.s})`}>
+          {/* group hulls */}
+          {groups.map((g) => (
+            <g key={g.key} opacity={0.9}>
+              <circle cx={g.cx} cy={g.cy} r={g.r} fill={ink(0.025)} stroke={ink(0.09)} strokeWidth={1} />
+              {groups.length > 1 && (
+                <text x={g.cx} y={g.cy - g.r - 7} textAnchor="middle" fontSize={11}
+                      paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3.5} strokeLinejoin="round"
+                      fill={ink(0.6)} style={{ fontWeight: 600 }}>
+                  {g.label} · {g.count}
+                </text>
+              )}
+            </g>
+          ))}
+
+          {nodeLayer}
+
+          {/* selected ring (overlay, not in memoised layer) */}
+          {selectedNode && (
+            <circle cx={selectedNode.x} cy={selectedNode.y} r={selectedNode.r + 4.5} fill="none"
+                    stroke={ink(0.9)} strokeWidth={2} />
+          )}
+          {/* hovered emphasis */}
+          {hovered && (
+            <g pointerEvents="none">
+              <circle cx={hovered.x} cy={hovered.y} r={hovered.r + 3.5} fill="none" stroke={ink(0.55)} strokeWidth={1.5} />
+              {!(hovered.risk !== "none" || hovered.findings > 0) && (
+                <text x={hovered.x} y={hovered.y + hovered.r + 9.5} textAnchor="middle" fontSize={9.5}
+                      paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3} strokeLinejoin="round"
+                      fill={ink(0.82)} style={{ fontWeight: 500 }}>
+                  {shortHost(hovered.host)}
+                </text>
+              )}
+            </g>
+          )}
+        </g>
+      </svg>
+
+      {/* tooltip */}
+      {hover && hovered && (
+        <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full"
+             style={{ left: clamp(hover.left, 90, (containerRef.current?.clientWidth ?? STAGE_W) - 90), top: hover.top - 8 }}>
+          <div className="rounded-lg border border-line bg-card/95 px-2.5 py-1.5 text-xs shadow-lg backdrop-blur">
+            <div className="flex items-center gap-1.5 font-semibold text-fg">
+              <KindIcon kind={hovered.kind} /><span className="max-w-[240px] truncate">{hovered.host}</span>
             </div>
-          );
-        })}
+            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-muted">
+              <span className="inline-flex items-center gap-1">
+                <i className="h-2 w-2 rounded-full" style={coverDot(hovered)} />
+                {hovered.scope === "out" ? "Out of scope" : COVERAGE[hovered.coverage].label}
+              </span>
+              {hovered.ports > 0 && <span>{hovered.ports} open port{hovered.ports === 1 ? "" : "s"}</span>}
+              {hovered.findings > 0 && <span className="text-fg">{hovered.findings} finding{hovered.findings === 1 ? "" : "s"}</span>}
+              {hovered.risk !== "none" && (
+                <span className="inline-flex items-center gap-1 font-medium" style={{ color: RISK_COLOR[hovered.risk] }}>
+                  <ShieldAlert size={11} />{hovered.risk === "high" ? "High risk" : "Elevated"}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* top bar — search + filters (left) · stats (right) */}
+      <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-3">
+        <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 rounded-lg border border-line bg-card/85 px-2 py-1 backdrop-blur">
+            <Search size={13} className="text-muted" />
+            <input
+              value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find host…"
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-32 bg-transparent text-xs text-fg placeholder:text-muted focus:outline-none"
+            />
+            {query && <button onMouseDown={(e) => e.stopPropagation()} onClick={() => setQuery("")} className="text-muted hover:text-fg"><X size={12} /></button>}
+          </div>
+          <div className="flex items-center overflow-hidden rounded-lg border border-line bg-card/85 backdrop-blur">
+            {([["all", `All ${totals.hosts}`], ["risk", `Risk ${totals.high + totals.elevated}`], ["untested", `Untested ${totals.untested + totals.out}`]] as const).map(([k, label], i) => (
+              <button key={k} onMouseDown={(e) => e.stopPropagation()} onClick={() => setFilter(k)}
+                className={cx("px-2.5 py-1 text-xs transition", i > 0 && "border-l border-line",
+                  filter === k ? "bg-fg/10 font-medium text-fg" : "text-muted hover:text-fg")}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="pointer-events-none flex items-center gap-1.5">
+          <Stat value={`${Math.round((totals.tested / Math.max(1, totals.hosts - totals.out)) * 100)}%`} label="tested" />
+          {totals.high + totals.elevated > 0 && (
+            <Stat value={String(totals.high + totals.elevated)} label="at risk" tone={totals.high ? "#ef4444" : "#f59e0b"} />
+          )}
+        </div>
       </div>
 
       {/* legend */}
-      <div className="absolute left-3 top-3 w-56 rounded-xl border border-line bg-card/85 p-3 text-xs backdrop-blur">
-        <div className="mb-2 font-semibold">Asset coverage map</div>
-        <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-muted">
-          {KIND_LABEL.map(([k, l]) => {
-            const I = KIND_ICON[k];
-            return <span key={k} className="flex items-center gap-1.5"><I size={12} />{l}</span>;
-          })}
-        </div>
-        <div className="space-y-1 border-t border-line pt-2 text-muted">
+      <div className="absolute bottom-3 left-14 w-auto rounded-xl border border-line bg-card/85 px-3 py-2 text-xs backdrop-blur">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted">
           <Swatch label="Tested" style={{ background: COVERAGE.tested.color }} />
           <Swatch label="In progress" style={{ background: COVERAGE["in-progress"].color }} />
           <Swatch label="Untested" style={{ background: "rgb(var(--card))", border: `1.5px solid ${COVERAGE.untested.color}` }} />
           <Swatch label="Out of scope" style={{ background: "transparent", border: "1.5px dashed rgb(var(--fg) / 0.3)" }} />
+          <span className="h-3 w-px bg-line" />
+          <Swatch label="High" style={{ background: "transparent", border: `2px solid ${RISK_COLOR.high}` }} />
+          <Swatch label="Elevated" style={{ background: "transparent", border: `2px solid ${RISK_COLOR.elevated}` }} />
         </div>
-        <div className="mt-2 space-y-1 border-t border-line pt-2 text-muted">
-          <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wide">Open-port risk</div>
-          <Swatch label="High — exposed / findings" style={{ background: "transparent", border: "2px solid #ef4444" }} />
-          <Swatch label="Elevated — outdated" style={{ background: "transparent", border: "2px solid #f59e0b" }} />
-          <div className="flex items-center gap-2"><span className="grid h-3.5 w-3.5 place-items-center rounded-full border border-line bg-card text-[7px] font-semibold text-fg">n</span>open ports</div>
-        </div>
-        <p className="mt-2 border-t border-line pt-2 text-[10px] text-muted">Force-directed · drag to pan, scroll to zoom · click a host to filter ports.</p>
       </div>
 
       {/* zoom controls */}
       <div className="absolute bottom-3 left-3 flex flex-col overflow-hidden rounded-lg border border-line bg-card">
-        <Ctl onClick={() => zoom(1.15)}><Plus size={14} /></Ctl>
-        <Ctl onClick={() => zoom(0.87)} border><Minus size={14} /></Ctl>
-        <Ctl onClick={() => setView({ tx: 0, ty: 0, s: 1 })} border><Maximize2 size={13} /></Ctl>
+        <Ctl onClick={() => zoom(1.2)}><Plus size={14} /></Ctl>
+        <Ctl onClick={() => zoom(0.83)} border><Minus size={14} /></Ctl>
+        <Ctl onClick={reset} border><Maximize2 size={13} /></Ctl>
       </div>
     </div>
   );
 }
 
+/* ── chrome ─────────────────────────────────────────────────────────────── */
 function Ctl({ onClick, border, children }: { onClick: () => void; border?: boolean; children: React.ReactNode }) {
   return (
-    <button
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={onClick}
-      className={`grid h-8 w-8 place-items-center text-muted transition hover:bg-card2 hover:text-fg ${border ? "border-t border-line" : ""}`}
-    >
+    <button onMouseDown={(e) => e.stopPropagation()} onClick={onClick}
+      className={`grid h-8 w-8 place-items-center text-muted transition hover:bg-card2 hover:text-fg ${border ? "border-t border-line" : ""}`}>
       {children}
     </button>
   );
 }
 function Swatch({ label, style }: { label: string; style: React.CSSProperties }) {
-  return <div className="flex items-center gap-2"><span className="h-3 w-3 shrink-0 rounded-full" style={style} />{label}</div>;
+  return <span className="flex items-center gap-1.5"><span className="h-3 w-3 shrink-0 rounded-full" style={style} />{label}</span>;
 }
-
-function nodeStyle(n: GNode): { bg: string; border: string; icon: string; label: string } {
-  if (n.kind === "org") return { bg: "transparent", border: "1.5px dashed rgb(var(--fg) / 0.32)", icon: "rgb(var(--fg) / 0.7)", label: "rgb(var(--fg))" };
-  if (n.scope === "out") return { bg: "transparent", border: "1.5px dashed rgb(var(--fg) / 0.22)", icon: "rgb(var(--fg) / 0.32)", label: "rgb(var(--fg) / 0.45)" };
-  const c = COVERAGE[n.coverage].color;
-  if (n.coverage === "untested") return { bg: "rgb(var(--card))", border: `1.5px solid ${c}`, icon: c, label: "rgb(var(--fg) / 0.72)" };
-  return { bg: c, border: "none", icon: "#ffffff", label: "rgb(var(--fg))" }; // tested / in-progress = filled
-}
-
-function buildGraph(assets: Asset[], orgName: string): { nodes: GNode[]; edges: GEdge[] } {
-  const nodes: GNode[] = [];
-  const edges: GEdge[] = [];
-  const ORG = "__org";
-  nodes.push({ id: ORG, label: orgName, kind: "org", scope: "in", coverage: "tested", findings: 0, r: baseR("org"), x: 0, y: 0 });
-  assets.forEach((a) =>
-    nodes.push({
-      id: a.id, label: a.value, kind: a.kind, scope: a.scope, coverage: a.coverage,
-      findings: a.findings, r: baseR(a.kind) + Math.min(a.findings, 6) * 1.4, x: 0, y: 0,
-    })
+function Stat({ value, label, tone }: { value: string; label: string; tone?: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-card/85 px-2.5 py-1 text-right backdrop-blur">
+      <div className="text-sm font-semibold leading-none" style={tone ? { color: tone } : undefined}>{value}</div>
+      <div className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">{label}</div>
+    </div>
   );
-  const idOfValue = (v: string) => assets.find((x) => x.value === v)?.id;
-  assets.forEach((a) => {
-    const pid = a.parent ? idOfValue(a.parent) : undefined;
-    edges.push({ a: pid ?? ORG, b: a.id });
-  });
-  return { nodes, edges };
+}
+function KindIcon({ kind }: { kind: AssetKind }) {
+  const I = kind === "ip" || kind === "cidr" ? Server : kind === "service" ? Network : kind === "endpoint" ? Link2 : Globe;
+  return <I size={12} className="shrink-0 text-muted" />;
 }
 
-/** Fruchterman–Reingold force layout (deterministic seed), normalized to the stage. */
-function layout(nodes: GNode[], edges: GEdge[]): Record<string, GNode> {
-  const N = nodes.length || 1;
-  const pos = nodes.map((n, i) => ({
-    ...n,
-    x: Math.cos((2 * Math.PI * i) / N) * 170 + (i % 2 ? 24 : -24),
-    y: Math.sin((2 * Math.PI * i) / N) * 130,
-  }));
-  const idx = new Map(pos.map((n, i) => [n.id, i]));
-  const k = Math.sqrt((STAGE_W * STAGE_H) / N) * 0.62;
-  const iters = 380;
-  for (let it = 0; it < iters; it++) {
-    const disp = pos.map(() => ({ x: 0, y: 0 }));
-    for (let i = 0; i < pos.length; i++)
-      for (let j = i + 1; j < pos.length; j++) {
-        let dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y;
-        const d = Math.hypot(dx, dy) || 0.01;
-        const f = (k * k) / d; dx /= d; dy /= d;
-        disp[i].x += dx * f; disp[i].y += dy * f; disp[j].x -= dx * f; disp[j].y -= dy * f;
-      }
-    for (const e of edges) {
-      const i = idx.get(e.a), j = idx.get(e.b);
-      if (i === undefined || j === undefined) continue;
-      let dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y;
-      const d = Math.hypot(dx, dy) || 0.01;
-      const f = (d * d) / k; dx /= d; dy /= d;
-      disp[i].x -= dx * f; disp[i].y -= dy * f; disp[j].x += dx * f; disp[j].y += dy * f;
+/* ── visuals ────────────────────────────────────────────────────────────── */
+function nodeVisual(n: PNode): { fill: string; stroke: string; strokeW: number; dash?: string } {
+  if (n.scope === "out") return { fill: "transparent", stroke: ink(0.24), strokeW: 1, dash: "3 3" };
+  const c = COVERAGE[n.coverage].color;
+  if (n.coverage === "untested") return { fill: "rgb(var(--card))", stroke: c, strokeW: 1.5 };
+  return { fill: c, stroke: "rgb(var(--card2))", strokeW: 1 }; // filled + surface ring to separate overlapping marks
+}
+function coverDot(n: PNode): React.CSSProperties {
+  if (n.scope === "out") return { background: "transparent", border: "1.5px dashed rgb(var(--fg) / 0.3)" };
+  if (n.coverage === "untested") return { background: "rgb(var(--card))", border: `1.5px solid ${COVERAGE.untested.color}` };
+  return { background: COVERAGE[n.coverage].color };
+}
+function shortHost(h: string): string {
+  const base = h.split(":")[0];
+  return base.length > 22 ? base.slice(0, 21) + "…" : base;
+}
+
+/* ── layout: group by scope apex, pack each group with phyllotaxis (O(N)) ─── */
+function buildConstellation(
+  assets: Asset[], orgName: string, risk: Map<string, { level: RiskLevel; open: number }>,
+): { nodes: PNode[]; groups: PGroup[] } {
+  const base = (orgName || "").replace(/^\*\./, "").toLowerCase();
+  const groupKey = (host: string): string => {
+    const h = host.split(":")[0].toLowerCase();
+    if (IP_RE.test(h)) return "ip";
+    if (base && (h === base || h.endsWith("." + base))) return base;
+    const p = h.split(".");
+    return p.length <= 2 ? h : p.slice(-2).join(".");
+  };
+  const groupLabel = (key: string) => (key === "ip" ? "IP space" : key);
+
+  // collect host-like assets, attach risk + sizing
+  const items = assets
+    .filter((a) => HOST_KINDS.has(a.kind))
+    .map((a) => {
+      const r = risk.get(a.value) ?? { level: "none" as RiskLevel, open: 0 };
+      const boost = Math.min(a.findings, 5) * 0.9 + (r.level === "high" ? 2.4 : r.level === "elevated" ? 1.2 : 0);
+      return {
+        id: a.id, host: a.value, kind: a.kind, scope: a.scope, coverage: a.coverage,
+        findings: a.findings, ports: r.open, risk: r.level, r: 4.6 + boost, _g: groupKey(a.value),
+      };
+    });
+
+  // bucket into groups
+  const buckets = new Map<string, typeof items>();
+  for (const it of items) (buckets.get(it._g) ?? buckets.set(it._g, []).get(it._g)!).push(it);
+
+  // pack each group locally (centre = 0,0); risky/notable sorted to the core so they read first
+  const localGroups = [...buckets.entries()].map(([key, arr]) => {
+    arr.sort((a, b) =>
+      RISK_RANK[b.risk] - RISK_RANK[a.risk] || b.findings - a.findings ||
+      (b.scope === "in" ? 0 : 1) - (a.scope === "in" ? 0 : 1) || a.host.localeCompare(b.host));
+    let rad = 0;
+    const packed = arr.map((it, i) => {
+      // +1.4 opens a small clearing at the core so the ringed risk/finding hosts
+      // (sorted to the centre) and their labels don't collide.
+      const d = SPACING * Math.sqrt(i + 1.4);
+      const ang = i * GOLDEN;
+      const x = Math.cos(ang) * d, y = Math.sin(ang) * d;
+      rad = Math.max(rad, d + it.r);
+      return { ...it, x, y };
+    });
+    return { key, label: groupLabel(key), r: rad + 14, count: arr.length, packed };
+  });
+
+  // place groups: largest first at centre, others spiralled out with collision avoidance
+  localGroups.sort((a, b) => b.r - a.r);
+  const placed: PGroup[] = [];
+  const maxR = localGroups[0]?.r ?? 1;
+  for (const g of localGroups) {
+    let cx = 0, cy = 0;
+    for (let k = 0; k < 4000; k++) {
+      const d = maxR * 0.9 * Math.sqrt(k);
+      const ang = k * GOLDEN;
+      cx = Math.cos(ang) * d; cy = Math.sin(ang) * d;
+      if (placed.every((p) => Math.hypot(p.cx - cx, p.cy - cy) >= p.r + g.r + 26)) break;
     }
-    for (let i = 0; i < pos.length; i++) { disp[i].x += -pos[i].x * 0.015; disp[i].y += -pos[i].y * 0.015; }
-    const t = Math.max(2, 42 * (1 - it / iters));
-    for (let i = 0; i < pos.length; i++) {
-      const dl = Math.hypot(disp[i].x, disp[i].y) || 0.01;
-      pos[i].x += (disp[i].x / dl) * Math.min(dl, t);
-      pos[i].y += (disp[i].y / dl) * Math.min(dl, t);
+    placed.push({ key: g.key, label: g.label, cx, cy, r: g.r, count: g.count });
+  }
+  const byKey = new Map(placed.map((p) => [p.key, p]));
+
+  // emit world-space nodes, then fit the whole cloud to the stage (centred at 0,0)
+  const nodes: PNode[] = [];
+  for (const g of localGroups) {
+    const p = byKey.get(g.key)!;
+    for (const it of g.packed) {
+      const { _g, ...rest } = it;
+      nodes.push({ ...rest, x: p.cx + it.x, y: p.cy + it.y });
     }
   }
-  const xs = pos.map((p) => p.x), ys = pos.map((p) => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const pad = 72, w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
-  const s = Math.min((STAGE_W - pad * 2) / w, (STAGE_H - pad * 2) / h);
-  const out: Record<string, GNode> = {};
-  pos.forEach((p) => { out[p.id] = { ...p, x: pad + (p.x - minX) * s, y: pad + (p.y - minY) * s }; });
-  return out;
+  if (!nodes.length) return { nodes, groups: [] };
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of placed) { minX = Math.min(minX, p.cx - p.r); maxX = Math.max(maxX, p.cx + p.r); minY = Math.min(minY, p.cy - p.r); maxY = Math.max(maxY, p.cy + p.r); }
+  const cx0 = (minX + maxX) / 2, cy0 = (minY + maxY) / 2;
+  const fit = Math.min((STAGE_W - PAD * 2) / Math.max(1, maxX - minX), (STAGE_H - PAD * 2) / Math.max(1, maxY - minY), 1.5);
+  for (const n of nodes) { n.x = (n.x - cx0) * fit; n.y = (n.y - cy0) * fit; n.r *= fit; }
+  const groups = placed.map((p) => ({ ...p, cx: (p.cx - cx0) * fit, cy: (p.cy - cy0) * fit, r: p.r * fit }));
+  return { nodes, groups };
 }
