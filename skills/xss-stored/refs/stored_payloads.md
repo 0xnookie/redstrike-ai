@@ -33,6 +33,16 @@ Also test: sanitizer version (retire.js/libraries.jsonl), `svg`/`mathml` namespa
 - length caps / truncation may cut the payload — use short vectors.
 - the store may HTML-encode but the render may decode (double-decoding) — test the round trip.
 - different render surfaces of the SAME stored value may have different contexts — test each.
+- **a bundled sanitizer ≠ a sanitized sink.** A bundle can ship DOMPurify yet wire it to only ONE
+  path (e.g. the markdown/rich-text renderer) and leave your sink raw — sanitization is frequently
+  inconsistent across render paths in one app. Grep for the actual `.sanitize(` / purify call sites
+  and confirm YOUR sink's value flows through one; don't assume it's safe because the lib is present.
+- **innerHTML sinks + a handler-blocking WAF ⇒ mitigated, not exploitable.** An
+  `innerHTML`/`insertAdjacentHTML` sink cannot execute a top-level `<script>`; it needs an event
+  handler (`onerror`/`onload`/`ontoggle`) or an auto-exec foreign/allowed-tag vector. A WAF that
+  signatures event-handler attributes therefore mitigates the sink even though inert tags (`<b>`,
+  `<img src=x>` with no handler) pass with 200. Passing a tag through the WAF is NOT execution —
+  rate exploitability on a handler/vector that actually survives both the WAF and the output filter.
 
 Pick the lowest-complexity payload that survives the specific output filter; don't escalate to
 mXSS until a simple vector is proven filtered. Confirm EXECUTION cross-session (verify.md).
