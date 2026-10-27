@@ -46,6 +46,21 @@ export function hostOf(asset: string): string {
   }
 }
 
+/**
+ * Every host named in a finding's `asset`. Findings often list several hosts in
+ * one field ("a.example.com, b.example.com") — splitting lets per-host views
+ * (coverage, risk) attribute the finding to each real host instead of to the
+ * whole comma-joined string.
+ */
+export function assetHosts(asset: string): string[] {
+  return (asset || "")
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(hostOf)
+    .filter((h) => h && h !== "—");
+}
+
 export function verdictOf(f: Finding): Verdict | "" {
   if (f.review?.verdict) return f.review.verdict;
   if (f.status === "rejected") return "rejected";
