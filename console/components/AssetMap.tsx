@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Globe, Server, Network, Link2, Plus, Minus, Maximize2, Search, ShieldAlert, X } from "lucide-react";
 import type { Asset, AssetKind, Service, Finding } from "@/lib/types";
 import { COVERAGE, SEVERITY, ink } from "@/lib/theme";
-import { cx, hostOf } from "@/lib/format";
+import { cx, assetHosts } from "@/lib/format";
 
 /* ───────────────────────────────────────────────────────────────────────────
    Asset coverage map — a packed-bubble "constellation".
@@ -51,8 +51,8 @@ export function AssetMap({
     const sev = new Map<string, number>();
     for (const f of findings) {
       if (f.composite) continue;
-      const h = hostOf(f.asset);
-      sev.set(h, Math.max(sev.get(h) ?? 0, SEVERITY[f.severity]?.rank ?? 0));
+      const rank = SEVERITY[f.severity]?.rank ?? 0;
+      for (const h of assetHosts(f.asset)) sev.set(h, Math.max(sev.get(h) ?? 0, rank));
     }
     const m = new Map<string, { level: RiskLevel; open: number }>();
     new Set<string>([...agg.keys(), ...sev.keys()]).forEach((h) => {
@@ -137,7 +137,9 @@ export function AssetMap({
         const act = isActive(n);
         const v = nodeVisual(n);
         const op = act ? 1 : 0.1;
-        const show = act && (n.risk !== "none" || n.findings > 0 || (!!q && n.host.toLowerCase().includes(q)));
+        // label only the standouts by default (reportable finding or high risk) so a dense
+        // risk core stays legible; every other node reveals its label on hover / search.
+        const show = act && (n.risk === "high" || n.findings > 0 || (!!q && n.host.toLowerCase().includes(q)));
         return (
           <g key={n.id} opacity={op} style={{ transition: "opacity .18s ease" }}
              className={onSelectHost ? "cursor-pointer" : undefined}
@@ -198,7 +200,7 @@ export function AssetMap({
           {hovered && (
             <g pointerEvents="none">
               <circle cx={hovered.x} cy={hovered.y} r={hovered.r + 3.5} fill="none" stroke={ink(0.55)} strokeWidth={1.5} />
-              {!(hovered.risk !== "none" || hovered.findings > 0) && (
+              {!(hovered.risk === "high" || hovered.findings > 0) && (
                 <text x={hovered.x} y={hovered.y + hovered.r + 9.5} textAnchor="middle" fontSize={9.5}
                       paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3} strokeLinejoin="round"
                       fill={ink(0.82)} style={{ fontWeight: 500 }}>
