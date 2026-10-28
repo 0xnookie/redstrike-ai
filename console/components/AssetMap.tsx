@@ -23,6 +23,7 @@ interface PNode {
   id: string; host: string; kind: AssetKind; scope: "in" | "out";
   coverage: Asset["coverage"]; findings: number; ports: number; risk: RiskLevel;
   r: number; x: number; y: number;
+  lead?: boolean; // the one most-severe node in its group — labelled by default
 }
 interface PGroup { key: string; label: string; cx: number; cy: number; r: number; count: number }
 
@@ -138,9 +139,9 @@ export function AssetMap({
         const act = isActive(n);
         const v = nodeVisual(n);
         const op = act ? 1 : 0.1;
-        // label only the standouts by default (reportable finding or high risk) so a dense
+        // label only the group's lead (single most-severe host) by default so the dense
         // risk core stays legible; every other node reveals its label on hover / search.
-        const show = act && (n.risk === "high" || n.findings > 0 || (!!q && n.host.toLowerCase().includes(q)));
+        const show = act && (n.lead || (!!q && n.host.toLowerCase().includes(q)));
         return (
           <g key={n.id} opacity={op} style={{ transition: "opacity .18s ease" }}
              className={onSelectHost ? "cursor-pointer" : undefined}
@@ -154,13 +155,7 @@ export function AssetMap({
             {n.risk !== "none" && (
               <circle cx={n.x} cy={n.y} r={n.r + 2.3} fill="none" stroke={RISK_COLOR[n.risk]} strokeWidth={2} />
             )}
-            {show && (
-              <text x={n.x} y={n.y + n.r + 9.5} textAnchor="middle" fontSize={9.5}
-                    paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3} strokeLinejoin="round"
-                    fill={ink(0.82)} style={{ fontWeight: 500 }}>
-                {shortHost(n.host)}
-              </text>
-            )}
+            {show && <NodeLabel n={n} />}
           </g>
         );
       })}
@@ -192,22 +187,19 @@ export function AssetMap({
 
           {nodeLayer}
 
-          {/* selected ring (overlay, not in memoised layer) */}
+          {/* selected ring + label (overlay, not in memoised layer) */}
           {selectedNode && (
-            <circle cx={selectedNode.x} cy={selectedNode.y} r={selectedNode.r + 4.5} fill="none"
-                    stroke={ink(0.9)} strokeWidth={2} />
+            <g pointerEvents="none">
+              <circle cx={selectedNode.x} cy={selectedNode.y} r={selectedNode.r + 4.5} fill="none"
+                      stroke={ink(0.9)} strokeWidth={2} />
+              {!selectedNode.lead && <NodeLabel n={selectedNode} />}
+            </g>
           )}
-          {/* hovered emphasis */}
+          {/* hovered emphasis — reveal the label for any non-lead node */}
           {hovered && (
             <g pointerEvents="none">
               <circle cx={hovered.x} cy={hovered.y} r={hovered.r + 3.5} fill="none" stroke={ink(0.55)} strokeWidth={1.5} />
-              {!(hovered.risk === "high" || hovered.findings > 0) && (
-                <text x={hovered.x} y={hovered.y + hovered.r + 9.5} textAnchor="middle" fontSize={9.5}
-                      paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3} strokeLinejoin="round"
-                      fill={ink(0.82)} style={{ fontWeight: 500 }}>
-                  {shortHost(hovered.host)}
-                </text>
-              )}
+              {!hovered.lead && <NodeLabel n={hovered} />}
             </g>
           )}
         </g>
@@ -332,6 +324,15 @@ function shortHost(h: string): string {
   const base = h.split(":")[0];
   return base.length > 22 ? base.slice(0, 21) + "…" : base;
 }
+function NodeLabel({ n }: { n: PNode }) {
+  return (
+    <text x={n.x} y={n.y + n.r + 9.5} textAnchor="middle" fontSize={9.5}
+          paintOrder="stroke" stroke="rgb(var(--card2))" strokeWidth={3} strokeLinejoin="round"
+          fill={ink(0.82)} style={{ fontWeight: 500 }}>
+      {shortHost(n.host)}
+    </text>
+  );
+}
 
 /* ── layout: group by scope apex, pack each group with phyllotaxis (O(N)) ─── */
 function buildConstellation(
@@ -407,9 +408,12 @@ function buildConstellation(
   const nodes: PNode[] = [];
   for (const g of localGroups) {
     const p = byKey.get(g.key)!;
+    // packed is sorted risk-first, so the first notable host is the group's lead —
+    // the only one labelled by default; the rest reveal their label on hover/selection.
+    const leadId = g.packed.find((it) => it.risk !== "none" || it.findings > 0)?.id;
     for (const it of g.packed) {
       const { _g, ...rest } = it;
-      nodes.push({ ...rest, x: p.cx + it.x, y: p.cy + it.y });
+      nodes.push({ ...rest, x: p.cx + it.x, y: p.cy + it.y, lead: it.id === leadId });
     }
   }
   if (!nodes.length) return { nodes, groups: [] };
