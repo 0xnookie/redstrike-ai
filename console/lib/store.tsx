@@ -44,6 +44,9 @@ interface ConsoleCtx {
   selectedHost: string | null;
   openHost: (host: string) => void;
   closeHost: () => void;
+  selectedEndpoint: string | null;
+  openEndpoint: (path: string) => void;
+  closeEndpoint: () => void;
   findingsQuery: string;
   setFindingsQuery: (q: string) => void;
 }
@@ -146,12 +149,17 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [datasets, setDatasets] = useState<Record<string, Dataset>>({});
   const [activeId, setActiveIdState] = useState<string>(emptyData.activeEngagementId);
   const [mode, setMode] = useState<Mode>("empty");
+  // three mutually-exclusive right-side drawers (finding / host / endpoint): opening
+  // any one closes the others so only a single detail panel is ever up.
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
-  const openFinding = useCallback((f: Finding) => { setSelectedHost(null); setSelectedFinding(f); }, []);
+  const openFinding = useCallback((f: Finding) => { setSelectedHost(null); setSelectedEndpoint(null); setSelectedFinding(f); }, []);
   const closeFinding = useCallback(() => setSelectedFinding(null), []);
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
-  const openHost = useCallback((host: string) => { setSelectedFinding(null); setSelectedHost(host); }, []);
+  const openHost = useCallback((host: string) => { setSelectedFinding(null); setSelectedEndpoint(null); setSelectedHost(host); }, []);
   const closeHost = useCallback(() => setSelectedHost(null), []);
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
+  const openEndpoint = useCallback((path: string) => { setSelectedFinding(null); setSelectedHost(null); setSelectedEndpoint(path); }, []);
+  const closeEndpoint = useCallback(() => setSelectedEndpoint(null), []);
   const [findingsQuery, setFindingsQuery] = useState("");
   const [cveFeed, setCveFeed] = useState<CveFeed | undefined>(undefined);
   const [cveLive, setCveLive] = useState(false);
@@ -330,7 +338,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, tests, coverage, cveIntel,
     cveFeed, cveLive, loadFiles, clearData,
     selectedFinding, openFinding, closeFinding,
-    selectedHost, openHost, closeHost, findingsQuery, setFindingsQuery,
+    selectedHost, openHost, closeHost,
+    selectedEndpoint, openEndpoint, closeEndpoint,
+    findingsQuery, setFindingsQuery,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
