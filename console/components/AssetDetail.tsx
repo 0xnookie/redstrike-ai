@@ -35,6 +35,24 @@ function kb(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/* The port a finding's asset targets on a given host — so a finding can be attributed
+   to a specific service (host:port), not just the host. Reads the explicit port, else
+   the scheme default (https→443, http→80). null when the asset names no URL for this
+   host (a bare-host asset can't be pinned to one port). */
+function portForHost(asset: string, host: string): number | null {
+  for (const tok of (asset || "").split(/[,\s]+/)) {
+    const t = tok.trim();
+    if (!t) continue;
+    try {
+      const u = new URL(t);
+      if (u.host.split(":")[0] !== host) continue;
+      if (u.port) return Number(u.port);
+      return u.protocol === "https:" ? 443 : u.protocol === "http:" ? 80 : null;
+    } catch { /* bare host / non-URL token — can't resolve a port */ }
+  }
+  return null;
+}
+
 export function AssetDetail({ host, onClose }: { host: string | null; onClose: () => void }) {
   const { assets, services, findings, apiEndpoints, jsFiles, cveIntel, activeId, openFinding, setFindingsQuery } = useConsole();
   const router = useRouter();
@@ -63,11 +81,20 @@ export function AssetDetail({ host, onClose }: { host: string | null; onClose: (
       const c = (e.component ?? "").toLowerCase().trim();
       return c && hay.includes(c);
     });
-    return { asset, svcs, finds, apis, js, cves };
+    // attribute each host finding to the specific service (port) it targets, so a
+    // service row can link to the findings on that port (finds is already severity-sorted)
+    const findsByPort = new Map<number, Finding[]>();
+    for (const f of finds) {
+      const p = portForHost(f.asset, host);
+      if (p == null) continue;
+      const list = findsByPort.get(p);
+      if (list) list.push(f); else findsByPort.set(p, [f]);
+    }
+    return { asset, svcs, finds, apis, js, cves, findsByPort };
   }, [host, assets, services, findings, apiEndpoints, jsFiles, cveIntel]);
 
   if (!host || !data) return null;
-  const { asset, svcs, finds, apis, js, cves } = data;
+  const { asset, svcs, finds, apis, js, cves, findsByPort } = data;
   const cov = asset ? COVERAGE[asset.coverage] : null;
   const repCount = finds.filter(isReportable).length;
   const sensitive = asset?.note && /sensitive|health|no scan|liveness/i.test(asset.note);
@@ -176,16 +203,31 @@ export function AssetDetail({ host, onClose }: { host: string | null; onClose: (
         {svcs.length > 0 && (
           <Section icon={<Radio size={13} />} title="Ports & services" count={svcs.length}>
             <ul className="space-y-1.5">
-              {svcs.map((s) => (
-                <li key={s.id} className="flex items-center gap-2 rounded-lg border border-line bg-card2 px-2.5 py-1.5 text-sm">
-                  <code className="font-mono text-xs">{s.port}<span className="text-muted">/{s.proto ?? "tcp"}</span></code>
-                  <span className="rounded bg-card px-1.5 py-0.5 text-[11px] font-medium">{s.service}</span>
-                  {(s.product || s.version) && <span className="truncate text-xs text-muted">{s.product}{s.version ? ` ${s.version}` : ""}</span>}
-                  {s.tls && <Pill label={s.tls} color="#38bdf8" />}
-                  {s.flagged && <Pill label={s.flagged} color={s.flagged === "exposed" ? "#ef4444" : s.flagged === "outdated" ? "#f59e0b" : "#64748b"} dot />}
-                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted"><Dot color={s.state === "open" ? "#22c55e" : "#9ca3af"} />{s.state}</span>
-                </li>
-              ))}
+              {svcs.map((s) => {
+                const sf = findsByPort.get(s.port) ?? [];
+                return (
+                  <li key={s.id} className="flex items-center gap-2 rounded-lg border border-line bg-card2 px-2.5 py-1.5 text-sm">
+                    <code className="font-mono text-xs">{s.port}<span className="text-muted">/{s.proto ?? "tcp"}</span></code>
+                    <span className="rounded bg-card px-1.5 py-0.5 text-[11px] font-medium">{s.service}</span>
+                    {(s.product || s.version) && <span className="truncate text-xs text-muted">{s.product}{s.version ? ` ${s.version}` : ""}</span>}
+                    {s.tls && <Pill label={s.tls} color="#38bdf8" />}
+                    {s.flagged && <Pill label={s.flagged} color={s.flagged === "exposed" ? "#ef4444" : s.flagged === "outdated" ? "#f59e0b" : "#64748b"} dot />}
+                    <span className="ml-auto inline-flex items-center gap-2">
+                      {sf.length > 0 && (
+                        <button
+                          onClick={() => openOne(sf[0])}
+                          title={`${sf.length} finding${sf.length === 1 ? "" : "s"} on port ${s.port}${sf.length > 1 ? " — opens the most severe" : ""}`}
+                          className="inline-flex items-center gap-1 rounded-full border border-line px-1.5 py-0.5 text-[11px] font-medium transition hover:border-brand/40"
+                          style={{ color: sevMeta(sf[0].severity).color }}
+                        >
+                          <Bug size={11} />{sf.length}
+                        </button>
+                      )}
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted"><Dot color={s.state === "open" ? "#22c55e" : "#9ca3af"} />{s.state}</span>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </Section>
         )}
