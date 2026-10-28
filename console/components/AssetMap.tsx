@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Globe, Network, Plus, Minus, Maximize2, Search, ShieldAlert, X, Folder, Shrink, Expand,
 } from "lucide-react";
@@ -66,8 +66,13 @@ export function AssetMap({
     walkTree(tree, (n) => { if (n !== tree && n.children.length > 0) s.add(n.id); });
     return s;
   }, [tree]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(defaultCollapsed);
-  useEffect(() => { setCollapsed(new Set(defaultCollapsed)); }, [defaultCollapsed]);
+  // Bind the collapsed set to the tree it belongs to. When the tree changes (e.g. the
+  // 712-host data finishes loading), `collapsed` falls back to defaultCollapsed for THIS
+  // render instead of lagging a render behind — so the map never flashes fully-expanded.
+  const [cbox, setCbox] = useState<{ tree: TreeNode; set: Set<string> }>(() => ({ tree, set: defaultCollapsed }));
+  const collapsed = cbox.tree === tree ? cbox.set : defaultCollapsed;
+  useEffect(() => { if (cbox.tree !== tree) setCbox({ tree, set: defaultCollapsed }); }, [tree, defaultCollapsed, cbox.tree]);
+  const updateCollapsed = (fn: (s: Set<string>) => Set<string>) => setCbox((b) => ({ tree, set: fn(b.tree === tree ? b.set : defaultCollapsed) }));
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "risk" | "untested">("all");
@@ -108,23 +113,14 @@ export function AssetMap({
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggle = (id: string) => updateCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allExpanded = collapsed.size === 0;
-  const expandAll = () => setCollapsed(new Set());
-  const collapseAll = () => setCollapsed(new Set(defaultCollapsed));
+  const expandAll = () => setCbox({ tree, set: new Set() });
+  const collapseAll = () => setCbox({ tree, set: new Set(defaultCollapsed) });
 
   const onNodeClick = (n: TreeNode) => {
     if (n.children.length > 0) toggle(n.id);
     else if (n.kind === "host") onSelectHost?.(n.full);
-  };
-
-  // anchor the tooltip to the hovered element's real screen rect (the SVG scales via
-  // viewBox, so node stage-coords don't map 1:1 to container pixels)
-  const enter = (e: React.MouseEvent, n: TreeNode) => {
-    const c = containerRef.current?.getBoundingClientRect();
-    const b = (e.currentTarget as SVGGElement).getBoundingClientRect();
-    if (!c) return;
-    setHover({ id: n.id, left: b.left + b.width / 2 - c.left, top: b.top - c.top });
   };
 
   // wheel zoom (non-passive so we can preventDefault the page scroll)
@@ -158,43 +154,56 @@ export function AssetMap({
     return 1;
   };
 
-  // static tree layer — memoised so hover/pan never re-renders the whole tree
+  // lookup + combined geometry for event delegation and cheap rendering: at full
+  // expand (712 nodes) we render ONE links path and emit nodes as flat fragments with
+  // a data-id, instead of 711 path elements + 712 handler-bearing groups.
+  const nodeById = useMemo(() => { const m = new Map<string, TreeNode>(); for (const n of layout.nodes) m.set(n.id, n); return m; }, [layout]);
+  const linksD = useMemo(() => layout.links.map(([s, t]) => linkPath(s, t)).join(" "), [layout]);
+
+  const idFromEvent = (e: React.MouseEvent): string | null => {
+    const t = e.target as Element | null;
+    return t && typeof t.getAttribute === "function" ? t.getAttribute("data-id") : null;
+  };
+  const onLayerDown = (e: React.MouseEvent) => { if (idFromEvent(e)) e.stopPropagation(); };
+  const onLayerClick = (e: React.MouseEvent) => {
+    const id = idFromEvent(e); if (!id) return;
+    e.stopPropagation(); const n = nodeById.get(id); if (n) onNodeClick(n);
+  };
+  const onLayerOver = (e: React.MouseEvent) => {
+    const id = idFromEvent(e);
+    if (!id) { setHover((h) => (h ? null : h)); return; }
+    const c = containerRef.current?.getBoundingClientRect();
+    const b = (e.target as Element).getBoundingClientRect();
+    if (!c) return;
+    setHover({ id, left: b.left + b.width / 2 - c.left, top: b.top - c.top });
+  };
+
+  // static tree layer — memoised so hover/pan never re-renders the whole tree, and kept
+  // flat (no per-node groups/handlers) so 700+ nodes stay cheap when fully expanded
   const treeLayer = useMemo(() => (
-    <g>
-      {/* links first (under the nodes) */}
-      {layout.links.map(([s, t], i) => (
-        <path key={`l${i}`} d={linkPath(s, t)} fill="none" stroke={ink(0.16)} strokeWidth={Math.max(0.6, 1.1 * layout.fit)}
-              opacity={q && !hasMatch.has(t.id) ? 0.15 : 0.85} />
-      ))}
-      {/* nodes */}
+    <>
+      <path d={linksD} fill="none" stroke={ink(0.16)} strokeWidth={Math.max(0.6, 1.1 * layout.fit)} opacity={q ? 0.22 : 0.8} />
       {layout.nodes.map((n) => {
         const vis = nodeFill(n);
         const op = nodeOpacity(n);
         const expandable = n.children.length > 0;
-        const showLabel = labelByDefault(n);
+        const hit = expandable || n.kind === "host";
+        const riskColor = n.risk !== "none" ? RISK_COLOR[n.risk] : null;
         return (
-          <g key={n.id} opacity={op} style={{ transition: "opacity .18s ease" }}
-             className={expandable || n.kind === "host" ? "cursor-pointer" : undefined}
-             onMouseDown={(e) => e.stopPropagation()}
-             onMouseEnter={(e) => enter(e, n)} onMouseLeave={() => setHover(null)}
-             onClick={(e) => { e.stopPropagation(); onNodeClick(n); }}>
-            {n.risk !== "none" && (
-              <circle cx={n.x} cy={n.y} r={n.r! + 3} fill={RISK_COLOR[n.risk]} opacity={0.14} />
-            )}
-            <circle cx={n.x} cy={n.y} r={n.r} fill={vis.fill} stroke={vis.stroke} strokeWidth={vis.sw} strokeDasharray={vis.dash} />
-            {n.risk !== "none" && (
-              <circle cx={n.x} cy={n.y} r={n.r! + 1.8} fill="none" stroke={RISK_COLOR[n.risk]} strokeWidth={1.6} />
-            )}
-            {/* a dashed outer ring marks a collapsed, expandable branch */}
+          <Fragment key={n.id}>
+            {riskColor && <circle cx={n.x} cy={n.y} r={n.r! + 3} fill={riskColor} opacity={0.14 * op} pointerEvents="none" />}
+            <circle data-id={n.id} cx={n.x} cy={n.y} r={n.r} fill={vis.fill} stroke={vis.stroke} strokeWidth={vis.sw}
+                    strokeDasharray={vis.dash} opacity={op} style={hit ? { cursor: "pointer" } : undefined} />
+            {riskColor && <circle cx={n.x} cy={n.y} r={n.r! + 1.8} fill="none" stroke={riskColor} strokeWidth={1.6} opacity={op} pointerEvents="none" />}
             {expandable && collapsed.has(n.id) && n.kind !== "root" && (
-              <circle cx={n.x} cy={n.y} r={n.r! + 3.4} fill="none" stroke={ink(0.4)} strokeWidth={1} strokeDasharray="1.5 2.5" />
+              <circle cx={n.x} cy={n.y} r={n.r! + 3.4} fill="none" stroke={ink(0.4)} strokeWidth={1} strokeDasharray="1.5 2.5" opacity={op} pointerEvents="none" />
             )}
-            {showLabel && <NodeLabel n={n} />}
-          </g>
+            {labelByDefault(n) && <g opacity={op} pointerEvents="none"><NodeLabel n={n} /></g>}
+          </Fragment>
         );
       })}
-    </g>
-  ), [layout, q, filter, collapsed, hasMatch]); // eslint-disable-line react-hooks/exhaustive-deps
+    </>
+  ), [layout, q, filter, collapsed, linksD]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hovered = hover ? layout.nodes.find((n) => n.id === hover.id) : undefined;
   const selectedNode = selectedHost ? layout.nodes.find((n) => n.kind === "host" && n.full === selectedHost) : undefined;
@@ -208,7 +217,10 @@ export function AssetMap({
     >
       <svg width="100%" height="100%" viewBox={`0 0 ${STAGE_W} ${STAGE_H}`} preserveAspectRatio="xMidYMid meet" className="block">
         <g transform={`translate(${STAGE_W / 2 + view.tx} ${STAGE_H / 2 + view.ty}) scale(${view.s})`}>
-          {treeLayer}
+          {/* one delegated handler set for every node (data-id drives hit-testing) */}
+          <g onMouseDown={onLayerDown} onClick={onLayerClick} onMouseOver={onLayerOver}>
+            {treeLayer}
+          </g>
 
           {/* hovered emphasis + always-on label */}
           {hovered && (
