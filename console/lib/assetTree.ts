@@ -81,7 +81,9 @@ export function buildAssetTree(
       id: nid(),
       label: isRoot ? (cur.full || orgName || "scope") : cur.label,
       full: cur.full,
-      kind: cur.asset ? "host" : isRoot ? "root" : "domain",
+      // isRoot wins: the apex can itself be a live host (e.g. wien.gv.at), but it must
+      // still render + behave as the tree root, not a leaf.
+      kind: isRoot ? "root" : cur.asset ? "host" : "domain",
       asset: cur.asset,
       scope: cur.asset?.scope ?? "in",
       coverage: cur.asset?.coverage,
@@ -119,9 +121,12 @@ export function buildAssetTree(
   // 4 — fold the long tail of plain untested hosts into letter buckets (depth-first)
   const bucketize = (n: TreeNode) => {
     n.children.forEach(bucketize);
+    // "plain" = a clean entry (no risk and no findings anywhere in its subtree) — safe to
+    // tuck into a letter bucket. A host that merely has sub-hosts still buckets (its subtree
+    // rides along inside the bucket); only risky / has-findings entries stay out as spokes.
     const plain: TreeNode[] = [], keep: TreeNode[] = [];
     for (const c of n.children) {
-      (c.kind === "host" && c.children.length === 0 && c.risk === "none" && c.findings === 0 ? plain : keep).push(c);
+      ((c.kind === "host" || c.kind === "domain") && c.risk === "none" && c.findings === 0 ? plain : keep).push(c);
     }
     if (plain.length > BUCKET_THRESHOLD) {
       const groups = new Map<string, TreeNode[]>();

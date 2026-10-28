@@ -59,14 +59,15 @@ export function AssetMap({
 
   const tree = useMemo(() => buildAssetTree(assets, orgName, hostRisk), [assets, orgName, hostRisk]);
 
-  // buckets collapse by default so the first view shows structure, not 700 dots
-  const bucketIds = useMemo(() => {
+  // every branch below the root collapses by default, so the first view is one clean
+  // ring of top-level branches (domains + letter buckets + risky host spokes) to drill into
+  const defaultCollapsed = useMemo(() => {
     const s = new Set<string>();
-    walkTree(tree, (n) => { if (n.kind === "bucket") s.add(n.id); });
+    walkTree(tree, (n) => { if (n !== tree && n.children.length > 0) s.add(n.id); });
     return s;
   }, [tree]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(bucketIds);
-  useEffect(() => { setCollapsed(new Set(bucketIds)); }, [bucketIds]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(defaultCollapsed);
+  useEffect(() => { setCollapsed(new Set(defaultCollapsed)); }, [defaultCollapsed]);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "risk" | "untested">("all");
@@ -110,7 +111,7 @@ export function AssetMap({
   const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allExpanded = collapsed.size === 0;
   const expandAll = () => setCollapsed(new Set());
-  const collapseToBuckets = () => setCollapsed(new Set(bucketIds));
+  const collapseAll = () => setCollapsed(new Set(defaultCollapsed));
 
   const onNodeClick = (n: TreeNode) => {
     if (n.children.length > 0) toggle(n.id);
@@ -145,7 +146,7 @@ export function AssetMap({
   };
   const onUp = () => { dragRef.current = null; setDragging(false); };
   const zoom = (f: number) => setView((v) => ({ ...v, s: clamp(v.s * f, 0.4, 8) }));
-  const reset = () => { setView({ tx: 0, ty: 0, s: 1 }); collapseToBuckets(); };
+  const reset = () => { setView({ tx: 0, ty: 0, s: 1 }); collapseAll(); };
 
   const nodeOpacity = (n: TreeNode): number => {
     if (q) return hasMatch.has(n.id) ? 1 : 0.12;
@@ -253,7 +254,7 @@ export function AssetMap({
               </button>
             ))}
           </div>
-          <button onMouseDown={(e) => e.stopPropagation()} onClick={allExpanded ? collapseToBuckets : expandAll}
+          <button onMouseDown={(e) => e.stopPropagation()} onClick={allExpanded ? collapseAll : expandAll}
             className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card/85 px-2.5 py-1 text-xs text-muted backdrop-blur transition hover:text-fg">
             {allExpanded ? <Shrink size={13} /> : <Expand size={13} />}
             {allExpanded ? "Collapse" : "Expand all"}
