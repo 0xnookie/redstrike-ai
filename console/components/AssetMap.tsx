@@ -5,6 +5,7 @@ import { Globe, Server, Network, Link2, Plus, Minus, Maximize2, Search, ShieldAl
 import type { Asset, AssetKind, Service, Finding } from "@/lib/types";
 import { COVERAGE, SEVERITY, ink } from "@/lib/theme";
 import { cx, assetHosts } from "@/lib/format";
+import { packSiblings } from "@/lib/pack";
 
 /* ───────────────────────────────────────────────────────────────────────────
    Asset coverage map — a packed-bubble "constellation".
@@ -26,8 +27,8 @@ interface PNode {
 interface PGroup { key: string; label: string; cx: number; cy: number; r: number; count: number }
 
 const STAGE_W = 1040, STAGE_H = 560, PAD = 54;
-const GOLDEN = Math.PI * (3 - Math.sqrt(5)); // 137.5° — even sunflower packing
-const SPACING = 13;                          // centre-to-centre pitch of the packing
+const GOLDEN = Math.PI * (3 - Math.sqrt(5)); // 137.5° — spiral for placing GROUP hulls
+const NODE_GAP = 4;                          // padding added to each node radius when packing
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const IP_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 const HOST_KINDS = new Set<AssetKind>(["domain", "subdomain", "ip", "cidr"]);
@@ -362,19 +363,25 @@ function buildConstellation(
   const buckets = new Map<string, typeof items>();
   for (const it of items) (buckets.get(it._g) ?? buckets.set(it._g, []).get(it._g)!).push(it);
 
-  // pack each group locally (centre = 0,0); risky/notable sorted to the core so they read first
+  // pack each group with real circle packing (no overlaps, whatever the size spread);
+  // risky/notable sorted first so they land at the core and read first. We pad each
+  // radius by NODE_GAP before packing so the risk ring/glow and a little breathing room
+  // clear too, then recentre on the cluster's bounding box.
   const localGroups = [...buckets.entries()].map(([key, arr]) => {
     arr.sort((a, b) =>
       RISK_RANK[b.risk] - RISK_RANK[a.risk] || b.findings - a.findings ||
       (b.scope === "in" ? 0 : 1) - (a.scope === "in" ? 0 : 1) || a.host.localeCompare(b.host));
+    const pos = packSiblings(arr.map((it) => it.r + NODE_GAP));
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    arr.forEach((it, i) => {
+      minX = Math.min(minX, pos[i].x - it.r); maxX = Math.max(maxX, pos[i].x + it.r);
+      minY = Math.min(minY, pos[i].y - it.r); maxY = Math.max(maxY, pos[i].y + it.r);
+    });
+    const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
     let rad = 0;
     const packed = arr.map((it, i) => {
-      // +1.4 opens a small clearing at the core so the ringed risk/finding hosts
-      // (sorted to the centre) and their labels don't collide.
-      const d = SPACING * Math.sqrt(i + 1.4);
-      const ang = i * GOLDEN;
-      const x = Math.cos(ang) * d, y = Math.sin(ang) * d;
-      rad = Math.max(rad, d + it.r);
+      const x = pos[i].x - mx, y = pos[i].y - my;
+      rad = Math.max(rad, Math.hypot(x, y) + it.r);
       return { ...it, x, y };
     });
     return { key, label: groupLabel(key), r: rad + 14, count: arr.length, packed };
