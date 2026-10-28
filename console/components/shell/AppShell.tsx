@@ -7,11 +7,11 @@ import { Topbar } from "./Topbar";
 import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "./CommandPalette";
 import { FindingDrawer } from "@/components/findings/FindingDrawer";
-import { AssetDetail } from "@/components/AssetDetail";
+import { AssetDetail, EndpointDetail } from "@/components/AssetDetail";
 import { useConsole } from "@/lib/store";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { loadFiles, selectedFinding, closeFinding, selectedHost, closeHost } = useConsole();
+  const { loadFiles, selectedFinding, closeFinding, selectedHost, closeHost, selectedEndpoint, closeEndpoint } = useConsole();
   const [desktopOpen, setDesktopOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -76,6 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <FindingDrawer finding={selectedFinding} onClose={closeFinding} />
       <AssetDetail host={selectedHost} onClose={closeHost} />
+      <EndpointDetail path={selectedEndpoint} onClose={closeEndpoint} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );

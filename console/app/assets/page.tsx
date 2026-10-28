@@ -16,9 +16,11 @@ const KIND_LABEL: Record<AssetKind, string> = {
 };
 
 export default function AssetsPage() {
-  const { activeEngagement: eng, assets, services, findings, setFindingsQuery, openHost } = useConsole();
+  const { activeEngagement: eng, assets, services, findings, setFindingsQuery, openHost, openEndpoint } = useConsole();
   const router = useRouter();
   const openHostFindings = (host: string) => { setFindingsQuery(host); router.push("/findings"); };
+  // endpoint rows open the endpoint drawer; everything else opens the host drawer
+  const openAsset = (a: Asset) => (a.kind === "endpoint" ? openEndpoint(a.value) : openHost(a.value));
   const [kind, setKind] = useState<AssetKind | "all">("all");
   const [svcQuery, setSvcQuery] = useState("");
   const [proto, setProto] = useState<"all" | "tcp" | "udp">("all");
@@ -187,7 +189,7 @@ export default function AssetsPage() {
             </thead>
             <tbody>
               {shown.map((a) => (
-                <AssetRow key={a.id} asset={a} onOpen={openHost} />
+                <AssetRow key={a.id} asset={a} onOpen={openAsset} />
               ))}
             </tbody>
           </table>
@@ -197,9 +199,9 @@ export default function AssetsPage() {
   );
 }
 
-function AssetRow({ asset: a, onOpen }: { asset: Asset; onOpen?: (host: string) => void }) {
+function AssetRow({ asset: a, onOpen }: { asset: Asset; onOpen?: (asset: Asset) => void }) {
   const c = COVERAGE[a.coverage];
-  const clickable = a.kind !== "endpoint" && !!onOpen;
+  const clickable = !!onOpen;
   const kindIcon =
     a.kind === "domain" || a.kind === "subdomain" ? <Globe size={14} /> :
     a.kind === "ip" || a.kind === "cidr" ? <Server size={14} /> :
@@ -207,7 +209,7 @@ function AssetRow({ asset: a, onOpen }: { asset: Asset; onOpen?: (host: string) 
   return (
     <tr
       className={cx("border-t border-line", a.scope === "out" && "opacity-55", clickable && "cursor-pointer transition hover:bg-card2")}
-      onClick={clickable ? () => onOpen!(a.value) : undefined}
+      onClick={clickable ? () => onOpen!(a) : undefined}
       title={clickable ? `Inspect ${a.value}` : undefined}
     >
       <td className="px-4 py-3">
