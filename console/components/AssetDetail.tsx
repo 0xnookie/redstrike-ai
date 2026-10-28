@@ -35,6 +35,17 @@ function kb(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/* Does a CVE component name appear as a whole token in the host's tech/server string?
+   A plain substring over-matches ("go" in "google", "vue" in "revue", "php" in a longer
+   word); bound the match by non-alphanumeric transitions so only a standalone component
+   counts, and ignore 1-char names (unmatchable noise). `hay` is already lower-cased. */
+function componentMatches(hay: string, component: string): boolean {
+  const c = (component ?? "").toLowerCase().trim();
+  if (c.length < 2) return false;
+  const esc = c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`).test(hay);
+}
+
 /* The port a finding's asset targets on a given host — so a finding can be attributed
    to a specific service (host:port), not just the host. Reads the explicit port, else
    the scheme default (https→443, http→80). null when the asset names no URL for this
@@ -77,10 +88,7 @@ export function AssetDetail({ host, onClose }: { host: string | null; onClose: (
     // match target-wide CVE intel to THIS host by its detected tech/server string
     const entries = cveIntel?.cves ?? cveIntel?.entries ?? [];
     const hay = `${(asset?.tech ?? []).join(" ")} ${asset?.server ?? ""} ${asset?.title ?? ""}`.toLowerCase();
-    const cves = entries.filter((e) => {
-      const c = (e.component ?? "").toLowerCase().trim();
-      return c && hay.includes(c);
-    });
+    const cves = entries.filter((e) => componentMatches(hay, e.component ?? ""));
     // attribute each host finding to the specific service (port) it targets, so a
     // service row can link to the findings on that port (finds is already severity-sorted)
     const findsByPort = new Map<number, Finding[]>();
