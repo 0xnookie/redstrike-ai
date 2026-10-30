@@ -16,20 +16,18 @@ const KIND_LABEL: Record<AssetKind, string> = {
 };
 
 export default function AssetsPage() {
-  const { activeEngagement: eng, assets, services, findings, setFindingsQuery } = useConsole();
+  const { activeEngagement: eng, assets, services, findings, setFindingsQuery, openHost, openEndpoint } = useConsole();
   const router = useRouter();
   const openHostFindings = (host: string) => { setFindingsQuery(host); router.push("/findings"); };
+  // endpoint rows open the endpoint drawer; everything else opens the host drawer
+  const openAsset = (a: Asset) => (a.kind === "endpoint" ? openEndpoint(a.value) : openHost(a.value));
   const [kind, setKind] = useState<AssetKind | "all">("all");
   const [svcQuery, setSvcQuery] = useState("");
   const [proto, setProto] = useState<"all" | "tcp" | "udp">("all");
   const [hostFilter, setHostFilter] = useState<string | null>(null);
   const portsRef = useRef<HTMLDivElement>(null);
-  const selectHost = (host: string) =>
-    setHostFilter((prev) => {
-      const next = prev === host ? null : host;
-      if (next) setTimeout(() => portsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-      return next;
-    });
+  // selecting a host both opens its detail drawer and scopes the ports table to it
+  const selectHost = (host: string) => { setHostFilter(host); openHost(host); };
 
   const kinds = useMemo(() => Array.from(new Set(assets.map((a) => a.kind))), [assets]);
   const shown = assets.filter((a) => kind === "all" || a.kind === kind);
@@ -191,7 +189,7 @@ export default function AssetsPage() {
             </thead>
             <tbody>
               {shown.map((a) => (
-                <AssetRow key={a.id} asset={a} />
+                <AssetRow key={a.id} asset={a} onOpen={openAsset} />
               ))}
             </tbody>
           </table>
@@ -201,14 +199,19 @@ export default function AssetsPage() {
   );
 }
 
-function AssetRow({ asset: a }: { asset: Asset }) {
+function AssetRow({ asset: a, onOpen }: { asset: Asset; onOpen?: (asset: Asset) => void }) {
   const c = COVERAGE[a.coverage];
+  const clickable = !!onOpen;
   const kindIcon =
     a.kind === "domain" || a.kind === "subdomain" ? <Globe size={14} /> :
     a.kind === "ip" || a.kind === "cidr" ? <Server size={14} /> :
     a.kind === "endpoint" ? <Link2 size={14} /> : <Boxes size={14} />;
   return (
-    <tr className={cx("border-t border-line", a.scope === "out" && "opacity-55")}>
+    <tr
+      className={cx("border-t border-line", a.scope === "out" && "opacity-55", clickable && "cursor-pointer transition hover:bg-card2")}
+      onClick={clickable ? () => onOpen!(a) : undefined}
+      title={clickable ? `Inspect ${a.value}` : undefined}
+    >
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-muted">{kindIcon}</span>

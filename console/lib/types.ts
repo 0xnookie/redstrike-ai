@@ -136,6 +136,12 @@ export interface Asset {
   findings: number;
   tech?: string[];
   parent?: string;
+  // recon detail carried from host_discovery's live_hosts entry (shown in the asset drawer)
+  status?: number;      // HTTP status observed
+  server?: string;      // Server header / gateway banner
+  title?: string;       // page / portal title
+  tier?: number;        // recon priority tier (1 = highest-value)
+  note?: string;        // recon note, e.g. "health-sensitive: liveness-only, no scan"
 }
 
 // Open port + service, built from host-discovery's host_discovery.json
@@ -156,6 +162,24 @@ export interface Service {
   title?: string;         // HTTP title / banner
   findings?: number;      // findings attributed to this service
   flagged?: string;       // short note when notable: outdated · exposed · edge · out-of-scope
+}
+
+// API endpoint surfaced by host-discovery (host_discovery.json `api_endpoints`).
+export interface ApiEndpoint {
+  host: string;
+  url?: string;
+  method?: string;
+  evidence?: string;      // why it's interesting (e.g. "Service API (401 auth-protected)")
+}
+
+// One JS file recon pulled + analyzed, from the console launcher's js_analysis.json
+// listing (scripts/console.py scans <eng>/js-analysis/**). `dir` is the per-host subdir
+// (a subdomain label), `rel` the path under js-analysis/ used to fetch the raw file.
+export interface JsFile {
+  dir: string;
+  name: string;
+  rel: string;
+  bytes?: number | null;
 }
 
 // A discrete pentest run — feeds the Testing Activity heatmap + the Recent Tests list.
