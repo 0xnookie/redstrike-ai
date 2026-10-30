@@ -153,8 +153,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     // Prefer real host-discovery assets; otherwise derive from scope + findings so the
     // Assets views aren't empty when recon didn't emit host_discovery.json.
     const base = active.assets.length ? active.assets : deriveAssetsFromScope(activeEngagement, active.findings);
-    return overlayAssetFindings(base, active.findings);
-  }, [active.assets, active.findings, activeEngagement]);
+    return overlayAssetFindings(base, active.findings, active.services);
+  }, [active.assets, active.findings, active.services, activeEngagement]);
   const agents = useMemo(() => deriveAgentStats(agentRoster, active.findings), [active.findings]);
   const activity = useMemo(() => deriveActivity(active.findings), [active.findings]);
   const tests: TestRun[] = []; // no per-run source yet; the activity timeline drives the heatmap
