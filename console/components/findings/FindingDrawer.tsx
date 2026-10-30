@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Copy, Check } from "lucide-react";
+import { X, Copy, Check, Globe } from "lucide-react";
 import type { Finding } from "@/lib/types";
 import { cvssScore } from "@/lib/cvss";
 import { sevMeta, VERDICT } from "@/lib/theme";
-import { fmtDate, verdictOf } from "@/lib/format";
+import { fmtDate, verdictOf, assetHosts } from "@/lib/format";
+import { useConsole } from "@/lib/store";
 import { Pill, SeverityBadge, ConfidenceBadge } from "@/components/ui/primitives";
 import { RichText } from "@/components/ui/RichText";
 
@@ -34,6 +35,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 }
 
 export function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose: () => void }) {
+  const { openHost } = useConsole();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
@@ -42,6 +44,9 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
 
   if (!finding) return null;
   const f = finding;
+  // first real host named in the asset — opens that host's detail drawer (openHost
+  // closes this finding drawer and opens the host one, so the two stay in sync)
+  const host = assetHosts(f.asset)[0];
   const score = cvssScore(f.cvss_vector);
   const v = verdictOf(f);
   const cat = f.category || {};
@@ -86,7 +91,20 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
             <span className="ml-2 inline-block align-middle"><CopyButton text={f.cvss_vector} label="vector" /></span>
           </Field>
         )}
-        <Field label="Affected asset"><code className="break-all rounded bg-card2 px-1.5 py-0.5 text-xs">{f.asset}</code></Field>
+        <Field label="Affected asset">
+          <code className="break-all rounded bg-card2 px-1.5 py-0.5 text-xs">{f.asset}</code>
+          {host && (
+            <div className="mt-1.5">
+              <button
+                onClick={() => openHost(host)}
+                className="inline-flex items-center gap-1 text-xs text-sky-400 hover:underline"
+                title={`Inspect ${host} in the asset map`}
+              >
+                <Globe size={12} /> Inspect {host}
+              </button>
+            </div>
+          )}
+        </Field>
         {maps.length > 0 && <Field label="Mappings"><div className="flex flex-wrap gap-1.5">{maps}</div></Field>}
         {f.impact && <Field label="Impact"><RichText text={f.impact} /></Field>}
         {f.reproduction?.length > 0 && (
