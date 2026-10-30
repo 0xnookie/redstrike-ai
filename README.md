@@ -244,7 +244,7 @@ cd console && npm install && npm run dev                 # or: dev server for UI
     <td width="50%"><img src="assets/console/attack-chains.png" alt="Attack chains" width="100%" /><br/><sub><b>Attack chains</b> — kill-chain graph composed from accepted findings</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — force-directed coverage map (tested / in-progress / out-of-scope)</sub></td>
+    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — radial domain mindmap of the coverage map (tested / in-progress / out-of-scope)</sub></td>
     <td width="50%"><img src="assets/console/agents.png" alt="Agent fleet" width="100%" /><br/><sub><b>Agents</b> — the executor + independent-reviewer fleet, by family &amp; tier</sub></td>
   </tr>
 </table>
