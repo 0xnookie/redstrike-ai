@@ -17,7 +17,7 @@
 import type {
   ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service,
 } from "./types";
-import { hostOf, isReportable, verdictOf } from "./format";
+import { assetHosts, isReportable, verdictOf } from "./format";
 
 /* ------------------------------------------------------------------ *
  * Static framework catalog — the executor + independent-reviewer fleet.
@@ -188,7 +188,10 @@ export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
       value: host,
       kind: isIpLike(host) ? "ip" : "subdomain",
       scope: "in",
-      coverage: "tested",
+      // Discovery only tells us the host is LIVE, not that it was security-tested.
+      // Default to "untested"; overlayAssetFindings() upgrades to tested/in-progress
+      // where there's real evidence (a finding, or an analysed/flagged service).
+      coverage: "untested",
       findings: 0,
       tech,
       parent: orgName && host !== orgName ? orgName : undefined,
@@ -210,7 +213,7 @@ export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
         value: e.path,
         kind: "endpoint",
         scope: "in",
-        coverage: "tested",
+        coverage: "untested", // upgraded by overlayAssetFindings() when a finding hits this path
         findings: 0,
         tech: e?.method ? [String(e.method)] : undefined,
         parent: primaryHost,
@@ -231,18 +234,32 @@ export function hostRoot(services: Service[], fallback: string): string {
   return fallback || hosts[0] || "target";
 }
 
-/** Overlay real reportable-finding counts onto assets (host + endpoint match). */
-export function overlayAssetFindings(assets: Asset[], findings: Finding[]): Asset[] {
+/**
+ * Overlay real reportable-finding counts AND evidence-driven coverage onto assets.
+ * Coverage is derived, never assumed: a host is only "tested" if it carries a
+ * reportable finding; "in-progress" if a service on it was analysed and flagged
+ * (exposed/outdated) but produced no finding; otherwise "untested" — discovered
+ * by recon but not individually security-tested. This keeps the asset map honest
+ * (an engagement discovers the whole surface but tests only a slice of it).
+ */
+export function overlayAssetFindings(assets: Asset[], findings: Finding[], services: Service[] = []): Asset[] {
   if (!assets.length) return assets;
   const rep = findings.filter(isReportable);
+  // "examined" = a conclusion was drawn or work was done but no REPORTABLE finding landed:
+  // an analysed/flagged service, or any finding (incl. open/unconfirmed) touching the host.
+  const examined = new Set<string>();
+  for (const s of services) if (s.flagged === "exposed" || s.flagged === "outdated") examined.add(s.host);
+  for (const f of findings) if (!f.composite) for (const h of assetHosts(f.asset)) examined.add(h);
   return assets.map((a) => {
     let n = 0;
     if (a.kind === "endpoint") {
       n = rep.filter((f) => f.asset && f.asset.replace(/[?#].*$/, "").endsWith(a.value)).length;
     } else {
-      n = rep.filter((f) => hostOf(f.asset) === a.value).length;
+      n = rep.filter((f) => assetHosts(f.asset).includes(a.value)).length;
     }
-    return n === a.findings ? a : { ...a, findings: n };
+    const coverage: Asset["coverage"] =
+      n > 0 ? "tested" : a.kind !== "endpoint" && examined.has(a.value) ? "in-progress" : "untested";
+    return n === a.findings && coverage === a.coverage ? a : { ...a, findings: n, coverage };
   });
 }
 
@@ -257,7 +274,7 @@ export function deriveAssetsFromScope(eng: Engagement, findings: Finding[]): Ass
   const assets: Asset[] = [];
   const seen = new Set<string>();
   const tested = new Set<string>();
-  for (const f of findings) if (isReportable(f)) tested.add(hostOf(f.asset));
+  for (const f of findings) if (isReportable(f)) for (const h of assetHosts(f.asset)) tested.add(h);
   const norm = (raw: string) =>
     (raw || "").replace(/^\*\./, "").replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
   const addHost = (raw: string) => {
