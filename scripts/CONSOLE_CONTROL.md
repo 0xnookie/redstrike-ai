@@ -2,9 +2,10 @@
 
 `scripts/console.py` is a **read-only** viewer. `scripts/console_control.py` is an **opt-in**
 backend that lets the console *launch and steer* an engagement, closing the "viewer vs. doer"
-gap. It is a **scaffold**: the endpoints are real, but the `console/` Next.js frontend is not yet
-wired to call them, and only autonomous runs are supported (a web server has no TTY for an
-interactive Claude Code session).
+gap. The `console/` Next.js frontend's **Control plane** view (`console/app/control/`) is wired
+to these routes — connect with the token, scaffold or pick an engagement, launch an autonomous
+run, watch the live stream, and approve deferrals. Only autonomous runs are supported (a web
+server has no TTY for an interactive Claude Code session).
 
 ## Why it's locked down
 
@@ -60,11 +61,26 @@ curl -sN -H "Authorization: Bearer $T" \
   http://127.0.0.1:8788/api/engagements/acme-corp-2026-11-01/stream
 ```
 
-## Not done yet (scaffold boundaries)
+## Using it from the console
 
-- Frontend: `console/` doesn't call these routes — needs a launch form, a live run view (consume
-  the SSE), and an approvals panel wired to `/approve` + `/run …?resume`.
+Start the plane (above), open the URL it prints, and go to **Control plane** in the sidebar
+(it also appears for the read-only `console.py`, where it explains how to start this backend).
+Paste the token it printed — it's held only for the browser tab and sent in the `Authorization`
+header. Then:
+
+- **Launch** — pick an existing engagement (or *New engagement* to scaffold one via `init`,
+  with the written-authorization checkbox that mirrors `--i-confirm-authorization`), set the
+  allowlist / turn & budget caps, and start an autonomous run.
+- **Live run** — the engine's tool calls stream in from the engagement's audit log (`autorun.jsonl`).
+- **Approvals** — deferred commands show up for review; approve some/all, then **Resume** re-runs
+  (approved commands execute; new un-allowlisted ones defer again).
+
+The view reads the token-gated routes over `fetch` (the SSE stream too, so the bearer header can
+be sent — `EventSource` can't). Nothing is persisted beyond the tab's `sessionStorage`.
+
+## Still out of scope (by design)
+
 - Interactive runs: unsupported over HTTP (no TTY) — autonomous only.
 - `init` validation is minimal (delegates to the CLI); no scope-editing UI.
-- Multi-user/remote: out of scope by design — localhost + single token only. Do not expose this
-  beyond the loopback interface.
+- The live stream tails from connect-time (it doesn't replay a run's earlier events).
+- Multi-user/remote: localhost + single token only. Do not expose this beyond the loopback interface.
