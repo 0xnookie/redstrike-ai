@@ -214,6 +214,23 @@ if escp.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"escalation.py selftest failed: {e}")
 
+# 8e — surface-coverage ledger self-test (route/validate/plan stay deterministic)
+surfp = ROOT / "scripts" / "surface.py"
+if surfp.is_file():
+    try:
+        import importlib.util
+        _sfspec = importlib.util.spec_from_file_location("rs_surface_lint", surfp)
+        _sf = importlib.util.module_from_spec(_sfspec)
+        sys.modules["rs_surface_lint"] = _sf
+        _sfspec.loader.exec_module(_sf)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _sf.selftest()
+        checked["surface"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"surface.py selftest failed: {e}")
+
 # 8d — recall_audit self-test (the "what did we miss?" altitude stays deterministic)
 raup = ROOT / "scripts" / "recall_audit.py"
 if raup.is_file():
