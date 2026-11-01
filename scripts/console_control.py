@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """console_control.py -- EXPERIMENTAL control plane for the Redstrike console.
 
-`console.py` is a READ-ONLY viewer (no backend). This scaffold wraps it with a small,
-guarded control plane so the web console can *launch and steer* an engagement instead of
-only rendering results — closing the "viewer vs. doer" gap. It is a scaffold: the backend
-routes are real and runnable, but the Next.js frontend (console/) is NOT yet wired to call
-them, init validation is minimal, and only autonomous runs are supported (a web server has
-no TTY for an interactive Claude Code session).
+`console.py` is a READ-ONLY viewer (no backend). This wraps it with a small, guarded control
+plane so the web console can *launch and steer* an engagement instead of only rendering
+results — closing the "viewer vs. doer" gap. The Next.js frontend's **Control plane** view
+(console/app/control/) drives these routes: connect with the token, scaffold or pick an
+engagement, launch an autonomous run, watch the live event stream, and approve deferrals.
+init validation is minimal (delegated to the CLI), and only autonomous runs are supported
+(a web server has no TTY for an interactive Claude Code session).
 
     SECURITY MODEL (read before enabling)
     -------------------------------------
