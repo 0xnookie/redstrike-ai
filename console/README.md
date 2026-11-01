@@ -16,6 +16,7 @@ there is **no bundled demo data**.
 | `/chains` | **Attack chains** | Kill-chain flow graph composed from accepted findings |
 | `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, force-directed coverage map, asset table, and **open ports & services** from host discovery |
 | `/activity` | **Activity** | Execution timeline derived from each finding's reviewer record (findings → reviews) |
+| `/control` | **Control plane** | *(opt-in)* Launch & steer an engagement: scaffold/pick, run autonomously, watch the live event stream, approve deferrals. Needs `scripts/console_control.py` |
 | `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier; per-skill produced/accepted counts derived from the loaded findings |
 | `/report` | **Report** | Client-ready assembly: executive summary, risk-ordered findings, demonstration-limited section, attack chains; export JSON / print to PDF |
 | `/settings` | **Settings** | Theme, data source, about |
@@ -61,6 +62,23 @@ state. No Node is needed to serve once the console is built.
 ```sh
 cd console && npm install && npm run dev        # http://localhost:3000
 ```
+
+## Launch & steer (opt-in control plane)
+
+By default the console is a **viewer**: engagements are launched from the `redstrike` CLI. To
+launch and steer them from the **Control plane** view instead, serve the console with the opt-in
+backend rather than `console.py`:
+
+```sh
+python ../scripts/console_control.py --enable-control    # prints a URL + a bearer token
+```
+
+Open the URL, go to **Control plane**, paste the token, then scaffold or pick an engagement,
+start an autonomous run, watch the live event stream, and approve deferred commands. The view
+talks to token-gated, localhost-only `/api/*` routes and shells out to the same `redstrike` CLI,
+so every gate (scope, fail-closed launch, deny-by-default allowlist, audit trail) still applies —
+nothing is bypassed. See `../scripts/CONSOLE_CONTROL.md` for the security model and endpoints.
+Served by the plain `console.py`, the Control plane view just explains how to start the backend.
 
 ## Loading data manually
 
