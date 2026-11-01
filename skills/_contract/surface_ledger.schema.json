@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/surface_ledger.schema.json",
+  "title": "Redstrike Surface-Coverage Ledger",
+  "description": "Per-engagement record of which DISCOVERED attack-surface elements (endpoints, params, identities, forms, API operations, sinks, headers, uploads, auth flows) were actually CONSUMED by an executor vs merely discovered by recon. Category coverage (coverage_ledger.json) proves which vuln CLASSES ran; this proves how much of the real SURFACE each class was tested against. A surface discovered but never tested (and not skipped with a reason) is a recall gap a category-level ledger cannot see. Produced by scripts/surface.py --plan from the recon feeders, updated with --mark as executors consume each element.",
+  "type": "object",
+  "required": ["engagement", "generated_at", "surfaces"],
+  "additionalProperties": false,
+  "properties": {
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string", "description": "ISO-8601 timestamp of the plan/last update." },
+    "surfaces": { "type": "array", "items": { "$ref": "#/$defs/surface" } }
+  },
+  "$defs": {
+    "surface": {
+      "type": "object",
+      "required": ["id", "kind", "value", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "stable id (e.g. kind:hash-of-value)." },
+        "kind": {
+          "enum": ["endpoint", "param", "identity", "form", "api-operation", "sink", "header", "upload", "auth-flow"],
+          "description": "what kind of surface element this is."
+        },
+        "value": { "type": "string", "description": "the element itself (path, param name, identity label, sink location...)." },
+        "discovered_by": { "type": "string", "description": "recon source that found it (host-discovery/content-discovery/js-analysis/authz-context...)." },
+        "routed_to": { "type": "array", "items": { "type": "string" }, "description": "category ids whose executors SHOULD consume this element." },
+        "status": {
+          "enum": ["discovered", "tested", "skipped", "n/a"],
+          "description": "discovered=enumerated, NOT yet fed to any executor (a gap if still so at close); tested=an executor consumed it; skipped=deliberately not tested (needs reason); n/a=routes to no in-scope category."
+        },
+        "consumed_by": { "type": "array", "items": { "type": "string" }, "description": "executor/skill ids that tested this element." },
+        "reason": { "type": "string", "description": "why — REQUIRED for skipped/n/a." }
+      }
+    }
+  }
+}

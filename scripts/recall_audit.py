@@ -127,7 +127,26 @@ def load_and_audit(eng: Path) -> dict:
     led = json.loads(led_p.read_text(encoding="utf-8"))
     mp = json.loads((_repo_root() / "skills" / "_contract" / "routing-map.json").read_text(encoding="utf-8"))
     escalations = {c["id"]: c.get("escalations", []) for c in led.get("categories", []) if c.get("escalations")}
-    return audit(led.get("categories", []), _load_signals(eng), mp.get("categories", []), escalations)
+    res = audit(led.get("categories", []), _load_signals(eng), mp.get("categories", []), escalations)
+    # fold in surface-coverage gaps (fix #5): discovered-but-untested surface elements are concrete misses
+    surf_p = eng / "surface_ledger.json"
+    if surf_p.is_file():
+        try:
+            import surface as _sf  # scripts/ on sys.path
+        except ImportError:  # pragma: no cover
+            import importlib.util as _ilu
+            _sp = _ilu.spec_from_file_location("surface", str(_repo_root() / "scripts" / "surface.py"))
+            _sf = _ilu.module_from_spec(_sp); _sp.loader.exec_module(_sf)
+        try:
+            sgaps = _sf.surface_gaps(json.loads(surf_p.read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            sgaps = []
+        if sgaps:
+            res["gaps"] = sgaps + res["gaps"]
+            res["summary"]["total"] += len(sgaps)
+            res["summary"]["high"] += sum(1 for g in sgaps if g["severity"] == "high")
+            res["summary"].setdefault("by_type", {})["untested-surface"] = len(sgaps)
+    return res
 
 
 def selftest() -> None:

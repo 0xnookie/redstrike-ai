@@ -331,6 +331,49 @@ def _coverage_hard_errors(eng: Path) -> list:
     return [f"coverage gate (report present → ledger must be complete): {msg}" for msg in msgs]
 
 
+def _try_import_surface():
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "surface.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_surface", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def _surface_hard_errors(eng: Path) -> list:
+    """HARD surface gate (fix #5) — active only when a report AND a surface_ledger.json both exist.
+
+    If the engagement tracks surface coverage, a report must not ship with surface elements recon
+    discovered but no executor tested (the leak category coverage can't see). A MISSING surface ledger
+    stays a soft warning for now (not every engagement emits one yet) — see _surface_warnings."""
+    if not _report_present(eng) or not (eng / "surface_ledger.json").is_file():
+        return []
+    sf = _try_import_surface()
+    if not sf:
+        return []
+    try:
+        led = json.loads((eng / "surface_ledger.json").read_text(encoding="utf-8"))
+        ok, _lines, msgs = sf.validate(led, strict=False)
+    except Exception:  # noqa: BLE001
+        return []
+    if ok:
+        return []
+    return [f"surface gate (report present → surface must be tested/accounted): {m}" for m in msgs]
+
+
+def _surface_warnings(eng: Path) -> list:
+    """Soft nudge: a report with no surface ledger means surface coverage is untracked."""
+    if _report_present(eng) and not (eng / "surface_ledger.json").is_file():
+        return ["no surface_ledger.json — surface coverage untracked "
+                "(run scripts/surface.py --plan --engagement <dir> after recon)"]
+    return []
+
+
 def _asset_host(asset: str) -> str:
     """Best-effort registrable host from an asset URL/endpoint (for a soft scope check)."""
     s = re.sub(r"^[a-z]+://", "", str(asset)).strip()
@@ -478,6 +521,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     coverage_errors = _coverage_hard_errors(eng)
     if not coverage_errors:
         top_warnings.extend(_coverage_warnings(eng))
+    # Surface coverage (fix #5): HARD once a report + a surface ledger both exist; else a soft nudge.
+    coverage_errors += _surface_hard_errors(eng)
+    top_warnings.extend(_surface_warnings(eng))
     if not any(eng.rglob("host_discovery.json")):
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
