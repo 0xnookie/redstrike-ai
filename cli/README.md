@@ -12,7 +12,10 @@ gated, and resumed by reading/writing that directory.
 
 ## Status
 `v0.1.0` — **interactive, gated**, plus an opt-in **autonomous headless** mode with a defer → approve →
-resume loop (M0–M5.1). See `PLAN.md`.
+resume loop (M0–M5.1). The engine is pluggable behind a seam (global `--engine`; **Claude Code** is the
+one live-safe engine today — see [`ENGINES.md`](ENGINES.md)), and an opt-in **web control plane**
+(`scripts/console_control.py`) can launch and steer runs from the console's **Control plane** view.
+See `PLAN.md`.
 
 ## Install
 One command — Linux (Kali/Ubuntu/Debian), macOS, or WSL. After it, **`redstrike` is a global command**
@@ -57,6 +60,12 @@ browser instead of stacking a second server — and the console re-scans `engage
 request, so a scan that finished after launch shows up on refresh. `redstrike console` starts it
 on demand (foreground; `--background` to detach, `--no-open` to skip the browser).
 
+The console is **read-only** by default (it renders results; engagements are launched from this CLI).
+To launch and steer from the console's **Control plane** view instead, serve it with the opt-in
+backend — `python scripts/console_control.py --enable-control` — which exposes token-gated,
+localhost-only `/api/*` routes that shell out to this same `redstrike` CLI (so every gate still
+applies). See `scripts/CONSOLE_CONTROL.md`.
+
 ## Autonomous mode (`--autonomous`)
 Runs headless via `claude -p` with a streamed progress view + run summary, **deny-by-default**
 (`--permission-mode dontAsk`), bounded by `--max-turns` / `--max-budget-usd`, MCP-isolated
@@ -80,6 +89,23 @@ redstrike run <eng> --autonomous --resume      # approved commands re-run; new o
 Approvals and the pending queue live in `runtime/approvals.json` + `runtime/approvals_pending.json`
 (launcher-owned; the agent is denied writing `runtime/`). For a fully unattended host, authenticate with a
 long-lived token: `claude setup-token` → `export CLAUDE_CODE_OAUTH_TOKEN=…` (the launcher inherits it).
+
+## Engines (`--engine`)
+The launcher drives an **engine** behind a small seam, so the methodology isn't hardwired to one
+backend. Select it with the **global** `--engine <id>` flag (it goes *before* the subcommand) or
+`$REDSTRIKE_ENGINE`; the default is `claude-code`:
+
+```bash
+redstrike --engine claude-code doctor      # global flag precedes the subcommand
+REDSTRIKE_ENGINE=claude-code redstrike run <eng>
+```
+
+`redstrike doctor` prints the active engine and the **live-safe** set. An engine is live-safe only if
+it enforces tool gating at parity with the Claude Code scope gate — **fail-closed** — so `get_engine()`
+refuses to hand back one that doesn't, and `run` against such an engine **fails closed** instead of
+launching ungated (`doctor` still *reports* any engine, for triage). Today **`claude-code`** is the only
+live-safe engine; `codex` and `agent-sdk` are declared skeletons that refuse to run until their gating
+reaches parity. The seam and how to add an engine are documented in [`ENGINES.md`](ENGINES.md).
 
 ## How it works
 `redstrike run` materializes a per-engagement `runtime/` and execs:
