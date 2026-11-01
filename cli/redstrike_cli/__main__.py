@@ -11,10 +11,10 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, autorun, engagement, gate, launch, preflight, ui
+from . import __version__, engagement, gate, launch, preflight, ui
 from . import approvals as approvalsmod
+from . import engines as enginesmod
 from . import scope as scopemod
-from . import settings as settingsmod
 
 
 def _is_repo(p: Path) -> bool:
@@ -86,7 +86,19 @@ def cmd_doctor(args, repo: Path) -> int:
     if not args.no_banner:
         ui.print_banner("preflight — engine, auth, platform, tools")
     print(ui.rule("launcher preflight"))
-    checks = preflight.gather(repo)
+    try:
+        engine = enginesmod.get_engine(args.engine, allow_ungated=True)  # doctor reports any engine
+    except KeyError as e:
+        print(ui.err(str(e)))
+        return 2
+    gating = "" if engine.supports_tool_gating else "  (no fail-closed gating — lab/offline only)"
+    print(ui.kv("engine", f"{engine.name}{gating}"))
+    print(ui.kv("engines", "live-safe: " + (", ".join(enginesmod.available()) or "none")))
+    try:
+        checks = engine.preflight(repo)
+    except NotImplementedError:
+        print(ui.warn(f"engine '{engine.name}' preflight not implemented yet — skipping engine checks"))
+        checks = []
     render = {"ok": ui.ok, "warn": ui.warn, "err": ui.err}
     for c in checks:
         print(render[c.level](f"{c.label:<12} {c.detail}"))
@@ -263,14 +275,22 @@ def cmd_run(args, repo: Path) -> int:
     if not eng_dir:
         print(ui.err(f"engagement '{args.engagement}' not found under {repo / 'engagements'}"))
         return 1
+    try:
+        engine = enginesmod.get_engine(args.engine)
+    except (KeyError, RuntimeError) as e:
+        print(ui.err(str(e)))
+        return 2
     if not args.no_banner:
-        ui.print_banner(f"engagement {eng_dir.name}" + ("  ·  AUTONOMOUS" if args.autonomous else ""))
+        suffix = "  ·  AUTONOMOUS" if args.autonomous else ""
+        if engine.name != enginesmod.DEFAULT_ENGINE:
+            suffix += f"  ·  engine: {engine.name}"
+        ui.print_banner(f"engagement {eng_dir.name}" + suffix)
 
     if args.autonomous:
-        return _run_autonomous(args, repo, eng_dir)
+        return _run_autonomous(args, repo, eng_dir, engine)
 
     try:
-        prep = launch.prepare_runtime(eng_dir, repo, sys.executable)
+        prep = engine.prepare(eng_dir, repo, sys.executable)
     except FileNotFoundError as e:
         print(ui.err(str(e)))
         return 1
@@ -278,7 +298,7 @@ def cmd_run(args, repo: Path) -> int:
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
 
-    problems = launch.gate(prep)
+    problems = engine.gate(prep)
     if problems:
         print()
         for p in problems:
@@ -286,43 +306,41 @@ def cmd_run(args, repo: Path) -> int:
         print(ui.err("launch blocked (fail-closed). Fix scope.yaml / window and re-run."))
         return 2
 
-    claude_bin = preflight.find_claude()
     prompt = args.prompt or launch.default_prompt(prep.engagement_id)
-    argv = launch.build_argv(claude_bin or "claude", repo, prep, prompt, args.permission_mode)
+    inv = engine.build_invocation(prep, repo, prompt, mode="interactive", permission_mode=args.permission_mode)
+    available = engine.is_available()
 
-    if args.dry_run or not claude_bin:
+    if args.dry_run or not available:
         print()
         print(ui.rule("DRY RUN — generated runtime artifacts"))
-        print(ui.kv("scope.json", str(prep.scope_json.relative_to(repo))))
-        print(ui.kv("settings", str(prep.settings_path.relative_to(repo))))
-        print(ui.kv("roe", str(prep.roe_path.relative_to(repo))))
-        print(ui.kv("session", prep.session_id))
+        for label, val in engine.runtime_artifacts(prep, repo):
+            print(ui.kv(label, val))
         print()
         print(ui.rule("would exec"))
-        print("  " + " ".join(shlex.quote(a) for a in argv))
-        if not claude_bin and not args.dry_run:
+        print("  " + " ".join(shlex.quote(a) for a in inv.argv))
+        if not available and not args.dry_run:
             print()
-            print(ui.err("`claude` not on PATH — printed the plan instead of launching."))
+            print(ui.err(f"`{engine.name}` engine not available on PATH — printed the plan instead of launching."))
             return 127
         return 0
 
-    authed, detail = preflight.claude_auth(claude_bin)
+    authed, detail = engine.auth_status()
     if authed is False:
-        print(ui.err(f"claude not authenticated: {detail}"))
+        print(ui.err(f"{engine.name} not authenticated: {detail}"))
         return 1
     print()
-    print(ui.ok("scope gate armed · launching Claude Code engine (interactive, gated)…"))
+    print(ui.ok(f"scope gate armed · launching {engine.name} engine (interactive, gated)…"))
     print()
-    rc = launch.exec_claude(argv, cwd=eng_dir)
-    rc = _post_run_gate(repo, eng_dir, rc)
+    res = engine.run(prep, eng_dir, inv, mode="interactive")
+    rc = _post_run_gate(repo, eng_dir, res.rc)
     maybe_launch_console(args, repo)
     return rc
 
 
-def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
+def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
     extra_allow = args.allow or []
     try:
-        prep = launch.prepare_runtime(
+        prep = engine.prepare(
             eng_dir, repo, sys.executable, mode="autonomous", extra_allow=extra_allow
         )
     except FileNotFoundError as e:
@@ -331,7 +349,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
 
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
-    problems = launch.gate(prep)
+    problems = engine.gate(prep)
     if problems:
         print()
         for p in problems:
@@ -339,8 +357,6 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
         print(ui.err("launch blocked (fail-closed). Fix scope.yaml / window and re-run."))
         return 2
 
-    claude_bin = preflight.find_claude()
-    allowed = settingsmod.autonomous_allowlist(extra_allow)
     prompt = args.prompt
     if args.resume and not prompt:
         queue = approvalsmod.take_resume_queue(prep.approvals_path)
@@ -355,32 +371,34 @@ def _run_autonomous(args, repo: Path, eng_dir: Path) -> int:
             prompt = "Continue the engagement from where it was paused."
     if not prompt:
         prompt = launch.autonomous_prompt(prep.engagement_id)
-    argv = launch.build_autonomous_argv(
-        claude_bin or "claude", repo, prep, prompt, allowed,
+
+    inv = engine.build_invocation(
+        prep, repo, prompt, mode="autonomous", allow=extra_allow,
         max_turns=args.max_turns, max_budget=args.max_budget_usd, resume=args.resume,
     )
+    available = engine.is_available()
 
-    if args.dry_run or not claude_bin:
+    if args.dry_run or not available:
         print()
         print(ui.rule("DRY RUN — autonomous argv"))
-        print(ui.kv("allowlist", " ".join(allowed)))
+        print(ui.kv("allowlist", " ".join(inv.allowed or [])))
         print(ui.kv("caps", f"max_turns={args.max_turns}  budget=${args.max_budget_usd}"))
-        print("  " + " ".join(shlex.quote(a) for a in argv))
-        if not claude_bin and not args.dry_run:
-            print(ui.err("`claude` not on PATH — printed the plan instead of launching."))
+        print("  " + " ".join(shlex.quote(a) for a in inv.argv))
+        if not available and not args.dry_run:
+            print(ui.err(f"`{engine.name}` engine not available on PATH — printed the plan instead of launching."))
             return 127
         return 0
 
-    authed, detail = preflight.claude_auth(claude_bin)
+    authed, detail = engine.auth_status()
     if authed is False:
-        print(ui.err(f"claude not authenticated: {detail}"))
+        print(ui.err(f"{engine.name} not authenticated: {detail}"))
         return 1
     print()
     print(ui.ok(f"scope gate armed · autonomous headless run (dontAsk, max_turns={args.max_turns}, budget=${args.max_budget_usd})…"))
     print()
     audit = eng_dir / "runtime" / "autorun.jsonl"
-    rc, _summary = autorun.run_autonomous(claude_bin, argv, eng_dir, audit, pending_path=prep.pending_path)
-    rc = _post_run_gate(repo, eng_dir, rc)
+    res = engine.run(prep, eng_dir, inv, mode="autonomous", audit=audit)
+    rc = _post_run_gate(repo, eng_dir, res.rc)
     maybe_launch_console(args, repo)
     return rc
 
@@ -450,6 +468,7 @@ def cmd_status(args, repo: Path) -> int:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="redstrike", description="Run Claude Code as a scoped pentest engine.")
     ap.add_argument("--repo", help="path to the redstrike-ai repo (default: autodetect / $REDSTRIKE_REPO)")
+    ap.add_argument("--engine", help="engine backend id (default: $REDSTRIKE_ENGINE or claude-code)")
     ap.add_argument("--no-color", action="store_true", help="disable ANSI colour")
     ap.add_argument("--no-banner", action="store_true", help="suppress the REDSTRIKE banner")
     sub = ap.add_subparsers(dest="command")
