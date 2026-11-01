@@ -435,6 +435,97 @@ class TestValidateEngagementE2E(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Fix #2: coverage is a HARD gate once a report exists (no report over silent gaps)
+# --------------------------------------------------------------------------- #
+class TestCoverageHardGate(unittest.TestCase):
+    """While hunting, coverage gaps are warnings. But once report/findings_consolidated.json
+    exists the engagement claims DONE — a missing ledger or any `pending` category must then
+    FAIL the gate (the juice-shop-2026-10-20 failure: whole classes never ran, clean report)."""
+
+    def _cov(self):
+        cov = vc._try_import_coverage()
+        self.assertIsNotNone(cov, "scripts/coverage.py must import for this test")
+        return cov
+
+    def _ledger(self, cov, *, all_terminal: bool):
+        """A plan for web phase; optionally flip every routed `pending` to a terminal status so
+        the ledger is 'complete'. Leaving one `pending` models an un-run routed class."""
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if all_terminal and c["status"] == "pending":
+                c["status"] = "attempted"
+                c["findings_count"] = 0
+        return led
+
+    def _write_report(self, eng):
+        f = valid_finding()
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        # evidence refs resolve from the engagement root
+        for item in f.get("evidence", []):
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+
+    def test_report_with_pending_category_fails(self):
+        cov = self._cov()
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._write_report(eng)
+            (eng / "coverage_ledger.json").write_text(
+                json.dumps(self._ledger(cov, all_terminal=False)), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=False)
+            self.assertFalse(ok, buf.getvalue())
+            self.assertIn("coverage gate", buf.getvalue())
+
+    def test_report_with_missing_ledger_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._write_report(eng)  # no coverage_ledger.json at all
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["pass"])
+            self.assertTrue(payload["coverage_errors"])
+
+    def test_report_with_complete_ledger_passes(self):
+        cov = self._cov()
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._write_report(eng)
+            (eng / "coverage_ledger.json").write_text(
+                json.dumps(self._ledger(cov, all_terminal=True)), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=False)
+            self.assertTrue(ok, buf.getvalue())
+
+    def test_no_report_pending_is_warning_not_failure(self):
+        """Mid-hunt (no consolidated report): a pending ledger must NOT fail the gate."""
+        cov = self._cov()
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            (eng / "coverage_ledger.json").write_text(
+                json.dumps(self._ledger(cov, all_terminal=False)), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["pass"], buf.getvalue())
+            self.assertFalse(payload["coverage_errors"])
+            self.assertTrue(any("coverage" in w for w in payload["warnings"]))
+
+
+# --------------------------------------------------------------------------- #
 # E4: cve_intel schema reconciliation (cves|entries drift) + manifest wiring
 # --------------------------------------------------------------------------- #
 class TestCveIntelSchema(unittest.TestCase):

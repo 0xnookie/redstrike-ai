@@ -275,6 +275,11 @@ def _try_import_coverage():
         return None
 
 
+def _report_present(eng: Path) -> bool:
+    """A consolidated report means the engagement is claiming DONE (reporting ran)."""
+    return (eng / "report" / "findings_consolidated.json").is_file()
+
+
 def _coverage_warnings(eng: Path) -> list:
     """Soft, non-fatal coverage-ledger check folded into the engagement gate. The hard gate is the
     dedicated `scripts/coverage.py --validate`; here a gap is surfaced as a warning only."""
@@ -295,6 +300,35 @@ def _coverage_warnings(eng: Path) -> list:
     if not ok:
         return [f"coverage: {msg}" for msg in msgs if not str(msg).startswith("no coverage_ledger")]
     return []
+
+
+def _coverage_hard_errors(eng: Path) -> list:
+    """HARD coverage gate — only active once a consolidated report exists.
+
+    While the hunt is in progress, coverage gaps are legitimately open and stay a warning (above).
+    But once `report/findings_consolidated.json` exists the engagement is claiming to be finished,
+    and a report cannot honestly coexist with routed-but-never-run vuln classes or an untracked
+    ledger (the juice-shop-2026-10-20 failure: XSS/auth/XXE never ran, clean report anyway). At that
+    point a MISSING ledger (strict) or any `pending`/absent category is a FAIL, not a warning.
+
+    Returns [] when no report is present (hunting phase) or coverage can't be checked (surfaced
+    elsewhere — don't fabricate a failure)."""
+    if not _report_present(eng):
+        return []
+    cov = _try_import_coverage()
+    if not cov:
+        return []
+    try:
+        m = cov.load_map()
+    except (SystemExit, Exception):  # noqa: BLE001
+        return []
+    try:
+        ok, _lines, msgs = cov.validate(eng, m, strict=True)
+    except Exception:  # noqa: BLE001
+        return []
+    if ok:
+        return []
+    return [f"coverage gate (report present → ledger must be complete): {msg}" for msg in msgs]
 
 
 def _asset_host(asset: str) -> str:
@@ -440,7 +474,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     top_warnings = []
     if not scope_text:
         top_warnings.append("scope.yaml absent — scope compliance cannot be auto-checked (flagged, not failed)")
-    top_warnings.extend(_coverage_warnings(eng))
+    # Coverage: soft while hunting, HARD once a report exists (fix #2 — no report over silent gaps).
+    coverage_errors = _coverage_hard_errors(eng)
+    if not coverage_errors:
+        top_warnings.extend(_coverage_warnings(eng))
     if not any(eng.rglob("host_discovery.json")):
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
@@ -494,10 +531,12 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
 
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
+    gate_ok = (not failed) and (not coverage_errors)
 
     if as_json:
-        print(json.dumps({"engagement": str(eng), "pass": not failed,
+        print(json.dumps({"engagement": str(eng), "pass": gate_ok,
                           "findings_checked": len(results), "failed": len(failed),
+                          "coverage_errors": coverage_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -505,6 +544,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         for r in results:
             box = "x" if r["passed"] else " "
             print(f"- [{box}] {r['id']}  [{r['severity']}/{r['status']}]  -- {r['detail']}")
+        if coverage_errors:
+            print("\n✗ coverage gate FAILED (a report is present, so the ledger must be complete):")
+            for ce in coverage_errors:
+                print(f"  - {ce}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -514,12 +557,16 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   f"(e.g. {orphans[0]})")
         if not cvss_mod:
             print("\nℹ scripts/cvss.py not importable — CVSS/severity drift check skipped")
-        verdict = "PASS" if not failed else "FAIL"
+        verdict = "PASS" if gate_ok else "FAIL"
         print(f"\n{verdict}: {len(results) - len(failed)}/{len(results)} finding(s) pass hard checks; "
-              f"{len(failed)} failure(s), {len(all_warnings)} warning(s).")
+              f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
+              f"{len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
-    return not failed
+        if coverage_errors:
+            print("A report is present but routed categories are unaccounted for => run every pending category, "
+                  "or record an explicit skip reason, before reporting.")
+    return gate_ok
 
 
 def main() -> None:

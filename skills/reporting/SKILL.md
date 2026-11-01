@@ -15,7 +15,19 @@
 
 ## Goal
 Assemble the engagement report from ACCEPTED findings only.
-DONE = `checklist.md` all `- [x]` · `review.md` PASS (report + consolidated JSON exist, non-empty; CVSS present on each finding).
+DONE = `checklist.md` all `- [x]` · **coverage gate PASS** · `review.md` PASS (report + consolidated JSON exist, non-empty; CVSS present on each finding).
+
+## 0. Coverage gate — MANDATORY precondition, before any aggregation
+A report must not coexist with routed-but-never-run vuln classes (the juice-shop-2026-10-20 failure:
+XSS/auth/XXE never ran, clean report anyway). Before step 1, the coverage ledger must be complete:
+```
+python scripts/coverage.py --validate --strict --engagement <dir>    # exit 0 required
+```
+Exit non-zero ⇒ **STOP, do not assemble the report.** Either run every `pending` category (then re-mark
+the ledger), or record an explicit `skipped`/`blocked` with a reason (`coverage.py --mark … --note`). A
+missing ledger is a hard fail under `--strict` — plan it first (`coverage.py --plan`). This is also enforced
+deterministically: once `report/findings_consolidated.json` exists, `verify_completion.py --engagement`
+HARD-FAILS on any unaccounted category, so a report over silent gaps cannot pass the gate.
 
 ## What do we want
 - Every `accepted` finding, de-duped (e.g. the same bug found by `idor` and `bola-bfla` = one entry)
