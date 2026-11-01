@@ -19,7 +19,7 @@ Prove SQLi by extracting data in-band (error/union) with a benign, read-only pro
 ## Steps  (action · tool · output)
 1. Ingest in-band points · `jq sqli_context.json` · (into tests)
 2. Break out of query context; confirm error/union with a benign marker (`version()`) · interceptor + refs · `extractions.jsonl`
-3. Column count/types (union) · `ORDER BY` / `UNION SELECT NULL..` · `extractions.jsonl`
+3. Column count/types (union) — **DERIVE, never assume**: open-ended `ORDER BY` sweep (no 9/16 ceiling) via `scripts/sqli_union.py` (`derive_column_count`), then confirm with `UNION SELECT NULL..`. A UNION/`ORDER BY` error on a guessed N is **wrong-N → open-proof-gap** (`_contract/counterevidence.md`), **never** "not injectable". · `ORDER BY` / `UNION SELECT NULL..` / `sqli_union.py` · `extractions.jsonl`
 4. Extract a MINIMAL proof (db name, user, version, one benign row — no PII) · refs · `poc/<id>/`
 5. Rate (CVSS) + write finding · synth · `findings.json`
 6. Emit report + curl · synth · `report.md`, `curl_commands.sh`

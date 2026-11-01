@@ -182,6 +182,22 @@ try:
 except BaseException as e:  # noqa: BLE001 — selftest may sys.exit on a bad map
     err(f"coverage.py selftest failed: {e}")
 
+# 8b — sqli_union self-test (UNION column-count derivation must stay open-ended; Juice Shop 10-col regression)
+sqliu = ROOT / "scripts" / "sqli_union.py"
+if sqliu.is_file():
+    try:
+        import importlib.util
+        _sspec = importlib.util.spec_from_file_location("rs_sqliunion_lint", sqliu)
+        _su = importlib.util.module_from_spec(_sspec)
+        _sspec.loader.exec_module(_su)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _su.selftest()
+        checked["sqli_union"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"sqli_union.py selftest failed: {e}")
+
 # 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():
