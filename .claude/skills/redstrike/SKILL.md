@@ -76,8 +76,15 @@ Human-readable mirror of the map:
 - **AI/LLM** (chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
 
 **c. Gate on coverage.** `python scripts/coverage.py --validate --engagement <dir>` must pass before
-reporting: every map category is accounted for and **nothing is left `pending`**. `verify_completion.py
---engagement` also surfaces any coverage gap as a warning.
+reporting: every map category is accounted for and **nothing is left `pending`**. Once a consolidated
+report exists, `verify_completion.py --engagement` HARD-FAILS on any unaccounted category.
+
+**d. Recall audit — the "what did we miss?" altitude (before reporting).** Coverage proves categories ran;
+this checks the clears are REAL. Launch the independent **`recall-audit`** reviewer subagent
+(`skills/_contract/recall-audit.md`; deterministic engine `scripts/recall_audit.py <dir>`). It flags
+`shallow-clear` (empty on a recon-signalled surface with the `escalation.md` ladder unexhausted),
+`skipped-but-signalled`, and never-run routes. Every **REAL-MISS** it returns must be re-hunted (run the
+next escalation step / un-skip the route) or explicitly operator-accepted with a reason **before reporting**.
 
 **After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
 `<skill>-verify` reviewer subagent. **Only `accepted` findings advance.**
