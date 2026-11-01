@@ -1,8 +1,10 @@
 # Engine adapters — driving Redstrike with an engine other than Claude Code
 
-**Status: design sketch.** `redstrike_cli/engines/__init__.py` defines the seam and names
-today's Claude Code engine; the other adapters are skeletons. Nothing here is wired into
-`__main__.py` yet, so current behavior is unchanged. This doc is the plan to finish it.
+**Status: wired.** `redstrike_cli/engines/__init__.py` defines the seam and names today's Claude
+Code engine; `redstrike run` / `doctor` resolve an engine via `get_engine()` and drive it through
+the adapter. A `--engine <id>` flag (default `$REDSTRIKE_ENGINE` or `claude-code`) selects it. The
+other adapters are still skeletons — selecting one is refused fail-closed for live runs. The
+`claude-code` path is behaviorally unchanged (same runtime artifacts, same argv, same gates).
 
 ## Why
 
@@ -81,15 +83,24 @@ three (no reliance on an external hook contract). Work: the loop, tool wiring, a
 for reviewers, turn/budget accounting. `PLAN.md` already names the Agent SDK the escape hatch for
 autonomous / in-process approval UI (M5+).
 
-## Wiring plan (not done here)
+## Wiring (done)
 
-1. `redstrike run` / `doctor` take `--engine <id>` (default `$REDSTRIKE_ENGINE` or `claude-code`)
-   and call `engines.get_engine(...)` instead of calling `launch`/`preflight` directly.
-2. `cmd_run` / `_run_autonomous` call `eng.prepare` / `eng.gate` / `eng.run_*` — the control flow
-   is already shaped this way, so the diff is mechanical.
-3. `doctor` renders `eng.preflight(repo)` and lists `engines.available()`.
-4. Tests: a fake engine exercising the dispatch; the ClaudeCodeEngine path asserted equivalent to
-   the current direct calls (no behavior change).
+1. `redstrike --engine <id> …` (global flag; default `$REDSTRIKE_ENGINE` or `claude-code`) selects
+   the backend; `cmd_run` / `_run_autonomous` / `doctor` resolve it via `engines.get_engine(...)`.
+2. `cmd_run` / `_run_autonomous` drive `eng.prepare` → `eng.gate` → `eng.build_invocation` →
+   (`eng.runtime_artifacts` + argv on `--dry-run` / unavailable engine) → `eng.auth_status` →
+   `eng.run`. No module calls `launch.*` / `preflight.*` for the run path directly any more.
+3. `doctor` prints the selected engine (+ whether it's live-safe), lists `engines.available()`,
+   and renders `eng.preflight(repo)` (guarded: a not-yet-implemented engine is reported, not fatal).
+4. Tests (`cli/tests/test_engines.py`): registry defaults + fail-closed refusal + skeleton-on-use;
+   a fake engine asserts `run` dispatches through the adapter; the `claude-code` dry-run is asserted
+   unchanged (runtime artifacts + key flags). Existing CLI/autonomous tests stay green.
 
-Keeping `get_engine()` fail-closed by default means adding an engine can't silently weaken a live
-run — a half-built adapter refuses to launch rather than running ungated.
+`get_engine()` is fail-closed by default, so selecting a half-built engine (`--engine codex`) for a
+live run is refused rather than running ungated — adding an engine can't silently weaken a run.
+
+## Next (per-engine, still open)
+
+Implement a `CodexEngine` / `AgentSDKEngine` per **Per-engine work** above, and flip its capability
+flags to `True` only once its tool-gating reaches fail-closed parity (then it appears in
+`engines.available()` and `get_engine` stops refusing it).
