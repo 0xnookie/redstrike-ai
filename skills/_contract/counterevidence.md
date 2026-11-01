@@ -19,6 +19,13 @@ It is the inverse of a per-skill gauntlet: that one stops false **positives**; t
 - querying a CVE database / diffing patch versions as a substitute for actually triggering it.
 - a scanner line with no corroborating request/response you can reproduce.
 
+## Before you call a high-prior surface clean — exhaust the ladder
+0 findings on a surface recon flagged as a real candidate is a **shallow clear**, not safety, until the
+class's escalation ladder is tried. Consult [`escalation.md`](escalation.md) (deterministic:
+`scripts/escalation.py assess(...)`): `verdict == "escalate"` ⇒ try the `remaining` techniques (e.g. SQLi
+`derive-not-assume`, XSS `browser-render`, JWT `token-cookie-and-header`) before closing the surface. Only
+`clear-ok` (low-prior) or `clear-after-escalation` may close an empty surface.
+
 ## Does NOT rule a candidate out (invalid reasons to call it clean)
 - "a library/helper handles it" — without checking THAT call in ITS context.
 - a control on a **different** route / caller / job than the one in question.
