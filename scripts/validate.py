@@ -198,6 +198,22 @@ if sqliu.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"sqli_union.py selftest failed: {e}")
 
+# 8c — escalation ladder self-test (empty-class escalation decisions stay deterministic)
+escp = ROOT / "scripts" / "escalation.py"
+if escp.is_file():
+    try:
+        import importlib.util
+        _espec = importlib.util.spec_from_file_location("rs_escalation_lint", escp)
+        _esc = importlib.util.module_from_spec(_espec)
+        _espec.loader.exec_module(_esc)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _esc.selftest()
+        checked["escalation"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"escalation.py selftest failed: {e}")
+
 # 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():
