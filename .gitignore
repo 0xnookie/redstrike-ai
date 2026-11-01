@@ -54,6 +54,14 @@ env/
 # ---- Recall benchmark ----
 benchmark/results/          # scored run outputs (scratch); commit a baseline deliberately, not every score
 
+# ---- Engagement scratch / output (SENSITIVE — keep local, deliver out-of-band) ----
+# Stray recon / findings / PoC output that lands at the repo ROOT instead of under
+# engagements/ (which has its own .gitignore). Anchored with a leading slash so only the
+# top-level dirs are swept up — a nested out/ or poc/ elsewhere is left alone. If you see
+# findings or PoCs here, they belong under engagements/<client>-<date>/, not at the root.
+/out/
+/poc/
+
 # ---- Misc ----
 tmp/
 temp/
