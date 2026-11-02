@@ -167,6 +167,35 @@ else:
             if not c.get("baseline") and c.get("phase") != "capability" and not c.get("skip_reason"):
                 err(f"routing-map.json: category '{c['id']}' is non-baseline but has no skip_reason")
 
+        # 7b — signal provenance: every category trigger signal must have a DECLARED emitter in
+        # signal_sources, else it is a STARVED EXECUTOR — nothing emits the signal, so the category
+        # silently skips itself on a signal-driven coverage plan (the subdomain-takeover/asset:dangling-dns
+        # leak). Producers must be a real recon-feeder skills/ dir or a special (operator/post-ex/pipeline).
+        sources = {k: v for k, v in rmap.get("signal_sources", {}).items() if k != "_comment"}
+        SPECIAL_PRODUCERS = {"operator", "post-exploitation", "pipeline"}
+        skill_dirs = {p.name for p in (ROOT / "skills").iterdir() if p.is_dir()}
+        for c in rmap.get("categories", []):
+            if c.get("phase") == "capability":
+                continue
+            for t in c.get("triggers", []):
+                if not sources.get(t):
+                    err(f"routing-map.json: category '{c['id']}' trigger '{t}' has NO producer in "
+                        f"signal_sources — starved executor (nothing emits '{t}', so it silently skips)")
+        for sig, producers in sources.items():
+            if sig not in vocab:
+                err(f"routing-map.json: signal_sources has unknown signal '{sig}' (not in the vocab)")
+            if not isinstance(producers, list) or not producers:
+                err(f"routing-map.json: signal_sources['{sig}'] must be a non-empty producer list")
+                continue
+            for p in producers:
+                if p not in SPECIAL_PRODUCERS and p not in skill_dirs:
+                    err(f"routing-map.json: signal_sources['{sig}'] names unknown producer '{p}' "
+                        f"(not a skills/ feeder, not a special {sorted(SPECIAL_PRODUCERS)})")
+        for sig in sorted(vocab - set(sources)):
+            err(f"routing-map.json: signal '{sig}' is in the vocab but has no signal_sources producer "
+                f"(dead signal — give it a producer or remove it)")
+        checked["signal_provenance"] = len(sources)
+
 # 8 — coverage.py routing/ledger self-test
 try:
     import importlib.util
