@@ -14,9 +14,13 @@ should have been found but wasn't?** You did NOT run the hunt — be adversarial
 `findings.json`, and any `escalations` recorded on ledger entries). Repo root is cwd.
 
 1. Run the deterministic engine: `python scripts/recall_audit.py ENG` → a ranked list of recall gaps
-   (`shallow-clear`, `skipped-but-signalled`, `weak-skip-reason`, `pending-at-close`, `no-ledger`). It
-   also folds in the escalation ladder (`scripts/escalation.py`): an empty high-prior class whose ladder
-   is unexhausted is a `shallow-clear`, not a clean result.
+   (`shallow-clear`, `skipped-but-signalled`, `weak-skip-reason`, `pending-at-close`, `untested-surface`,
+   `no-ledger`). It also folds in the escalation ladder (`scripts/escalation.py`): an empty high-prior
+   class whose ladder is unexhausted is a `shallow-clear`, not a clean result.
+1b. Run the re-convergence check: `python scripts/reconverge.py --validate ENG` (`reconvergence.md`). An
+   un-converged inbox means surface discovered DURING the hunt (an internal host, a new identity, a leaked
+   API base-url / subdomain / params) was never routed back — treat each as a REAL-MISS: `--apply` and run
+   the re-opened classes, or have the operator accept it, before reporting.
 2. Load `skills/_contract/recall-audit.md` + `counterevidence.md` + `escalation.md`.
 3. For EACH gap, adjudicate from the engagement evidence — classify, do not rubber-stamp:
    - **REAL-MISS** — the class plausibly had a finding; the clear is shallow / the skip is unjustified.

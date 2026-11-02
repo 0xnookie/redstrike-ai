@@ -94,8 +94,24 @@ this checks the clears are REAL. Launch the independent **`recall-audit`** revie
 `skipped-but-signalled`, and never-run routes. Every **REAL-MISS** it returns must be re-hunted (run the
 next escalation step / un-skip the route) or explicitly operator-accepted with a reason **before reporting**.
 
+**e. Re-convergence — feed findings BACK into recon until a fixpoint (before reporting).** The hunt
+DISCOVERS new surface the initial recon never saw: an SSRF reaching an internal host / cloud metadata, a
+finding leaking an API base-url / vhost / subdomain / new params, an auth bypass yielding the second
+identity, a config leak exposing new endpoints. **When an executor discovers new surface/signal it appends
+an observation to `<engagement>/reconvergence/inbox.jsonl`** (`{"source","signals":[…],"surface":[{kind,
+value}]}`). Then loop: `python scripts/reconverge.py --plan --engagement <dir>` → `--apply` flips the
+classes that new signal/surface routes to back to `pending` and folds the delta into both ledgers → **run
+those re-opened classes against the new surface** → repeat until `reconverge.py --validate` passes (the
+fixpoint — a pass that adds nothing new). A new signal that matches an **out-of-phase** class (e.g.
+`asset:smart-contract` ⇒ web3) is a `replan_candidate` for YOU to decide on (scope), never auto-activated.
+Once a report exists over a non-empty inbox that hasn't re-converged, `verify_completion.py` hard-fails.
+See `skills/_contract/reconvergence.md`. This is breadth DISCOVERED DURING the hunt — the symmetric control
+to the escalation ladder (depth) and the surface ledger (recon-time breadth).
+
 **After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
-`<skill>-verify` reviewer subagent. **Only `accepted` findings advance.**
+`<skill>-verify` reviewer subagent. **Only `accepted` findings advance.** **If a finding reveals new surface
+(internal host, new identity, API base-url, subdomain, new params), append it to the re-convergence inbox
+(§2e) so it gets routed — a finding is also a recon signal.**
 
 ## 3. Chain + exploit  (approval-gated)
 `redstrike-attack-chain-discovery` composes accepted findings into kill chains. For high-value accepted

@@ -26,6 +26,9 @@ independent **`recall-audit` reviewer agent** (`.claude/agents/recall-audit.md`)
    - `weak-skip-reason` — skipped with a missing/too-terse reason.
    - `pending-at-close` — a routed class never ran (also the coverage gate's domain; repeated for a
      self-contained recall report).
+   - `un-reconverged` — run `python scripts/reconverge.py --validate <engagement>`: an un-converged
+     re-convergence inbox (`reconvergence.md`) means surface discovered DURING the hunt (an internal host,
+     a new identity, a leaked API base-url) was never routed back → a REAL-MISS to adjudicate.
 2. **Adjudication** — the reviewer classifies each gap from the evidence as **REAL-MISS** /
    **JUSTIFIED-CLEAR** / **BLOCKED (open-proof-gap)**, and sanity-checks for an unconsumed recon signal.
 3. **Record** — `reviews/recall_audit.verdict.json`.
