@@ -93,6 +93,41 @@ class SurfaceGaps(unittest.TestCase):
         self.assertEqual(sf.surface_gaps(led), [])
 
 
+class MergeReplan(unittest.TestCase):
+    """Universal emission: `--plan` must be idempotent — re-running preserves tested/skipped progress
+    and adds only new elements, so recon can emit the ledger every run (and late feeders / the
+    re-convergence loop can re-emit) without clobbering a mark."""
+
+    def _tested_base(self):
+        led = sf.plan_from_items("demo", [{"kind": "param", "value": "q"}, {"kind": "param", "value": "id"}])
+        q = next(s for s in led["surfaces"] if s["value"] == "q")
+        q["status"] = "tested"
+        q.setdefault("consumed_by", []).append("sqli")
+        return led
+
+    def test_merge_preserves_progress_and_adds_new(self):
+        led = self._tested_base()
+        merged = sf.merge_plan(led, [
+            {"kind": "param", "value": "q"},           # present -> untouched (stays tested)
+            {"kind": "param", "value": "id"},          # present -> untouched
+            {"kind": "identity", "value": "userB"},    # NEW
+        ])
+        self.assertEqual(merged["_last_merge_added"], 1)
+        bv = {s["value"]: s for s in merged["surfaces"]}
+        self.assertEqual(bv["q"]["status"], "tested")
+        self.assertIn("sqli", bv["q"]["consumed_by"])
+        self.assertEqual(bv["userB"]["status"], "discovered")
+        self.assertEqual(len(merged["surfaces"]), 3)
+
+    def test_merge_is_idempotent(self):
+        led = self._tested_base()
+        once = sf.merge_plan(led, [{"kind": "identity", "value": "userB"}])
+        self.assertEqual(once["_last_merge_added"], 1)
+        twice = sf.merge_plan(once, [{"kind": "identity", "value": "userB"}])
+        self.assertEqual(twice["_last_merge_added"], 0)
+        self.assertEqual(len(twice["surfaces"]), 3)
+
+
 class SchemaConformance(unittest.TestCase):
     def test_planned_ledger_matches_schema_keys(self):
         import json
