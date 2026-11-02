@@ -8,6 +8,11 @@ tampered. Re-send the forged token and confirm authed access.
 - [ ] **Forged token ACCEPTED.** The PoC shows the server accepting a token with a broken/forged
       signature or tampered claims (authed action/data returned) — not a 401. Decoding/tampering alone
       is not a finding; acceptance is.
+- [ ] **All carriers tried before any "not accepted".** A forged token that did not land must have
+      been sent in BOTH an `Authorization: Bearer` header AND the `token` cookie (the mandatory core;
+      `scripts/jwt_placements.py confirmation_complete` True). A header-only attempt that got a 401 is an
+      open-proof-gap, NOT a clean/ruled-out result — cookie-reading apps (e.g. Juice Shop) accept the
+      cookie the header missed. This guards RECALL, not a reported finding.
 - [ ] **Specific flaw identified.** `alg:none` accepted / HMAC secret cracked + re-sign / RS256→HS256
       key confusion / `kid`/`jku` injection / unverified claim — the exact flaw is evidenced.
 - [ ] **Privilege actually gained.** The tampered claim (e.g. `role:admin`) produced elevated access,

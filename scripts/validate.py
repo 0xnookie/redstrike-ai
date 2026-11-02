@@ -198,6 +198,23 @@ if sqliu.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"sqli_union.py selftest failed: {e}")
 
+# 8b2 — jwt_placements self-test (forged token must ride a header AND a cookie; no header-only clean)
+jwtp = ROOT / "scripts" / "jwt_placements.py"
+if jwtp.is_file():
+    try:
+        import importlib.util
+        _jspec = importlib.util.spec_from_file_location("rs_jwtplacements_lint", jwtp)
+        _jp = importlib.util.module_from_spec(_jspec)
+        sys.modules["rs_jwtplacements_lint"] = _jp  # dataclass needs its module registered
+        _jspec.loader.exec_module(_jp)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _jp.selftest()
+        checked["jwt_placements"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"jwt_placements.py selftest failed: {e}")
+
 # 8c — escalation ladder self-test (empty-class escalation decisions stay deterministic)
 escp = ROOT / "scripts" / "escalation.py"
 if escp.is_file():

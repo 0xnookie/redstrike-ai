@@ -12,7 +12,7 @@ You are the **independent semantic reviewer** for the Redstrike `jwt` skill — 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/jwt --out OUT` (exit 0); else stop.
 2. Load `skills/_contract/verify-base.md` + `skills/jwt/verify.md` + `skills/_contract/finding.schema.json`.
 3. Read `OUT/findings.json` + every evidence/poc file.
-4. Apply the 7 base checks + the gauntlet. Decisive: the server ACCEPTED a token with a broken/forged signature or tampered claims (authed action/data returned, 200 not 401) — decoding/tampering alone is not a finding. The specific flaw is identified; any privilege gained is verified (not echoed). Test account; offline cracking; approved.
+4. Apply the 7 base checks + the gauntlet. Decisive: the server ACCEPTED a token with a broken/forged signature or tampered claims (authed action/data returned, 200 not 401) — decoding/tampering alone is not a finding. The specific flaw is identified; any privilege gained is verified (not echoed). Test account; offline cracking; approved. **Recall guard:** any forged token the executor marked "not accepted" must have ridden BOTH an `Authorization: Bearer` header AND the `token` cookie (the mandatory carriers — `scripts/jwt_placements.py confirmation_complete`); a header-only 401 is an open-proof-gap to bounce back, not a clean result, since cookie-reading apps accept the cookie the header missed.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `jwt-verify`) + set `status`.
 6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
 
