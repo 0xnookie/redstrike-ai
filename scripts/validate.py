@@ -231,6 +231,23 @@ if surfp.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"surface.py selftest failed: {e}")
 
+# 8f — reconverge self-test (finding->recon re-convergence fixpoint stays deterministic + terminates)
+recp = ROOT / "scripts" / "reconverge.py"
+if recp.is_file():
+    try:
+        import importlib.util
+        _rcspec = importlib.util.spec_from_file_location("rs_reconverge_lint", recp)
+        _rc = importlib.util.module_from_spec(_rcspec)
+        sys.modules["rs_reconverge_lint"] = _rc
+        _rcspec.loader.exec_module(_rc)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _rc.selftest()
+        checked["reconverge"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"reconverge.py selftest failed: {e}")
+
 # 8d — recall_audit self-test (the "what did we miss?" altitude stays deterministic)
 raup = ROOT / "scripts" / "recall_audit.py"
 if raup.is_file():
