@@ -60,6 +60,9 @@ Routing is **deterministic, not improvised.** The authoritative source is
 
 **a. Plan the coverage ledger.** After recon, gather the recon signals and run:
 `python scripts/coverage.py --plan --signals <signals.json|-> --phases web[,ai-llm,web3,…] --engagement <dir>`
+The recon feeders emit the signals; e.g. host-discovery's dangling-DNS triage (`scripts/dangling_dns.py`,
+`dangling_dns.json`) emits **`asset:dangling-dns`** when a takeover candidate surfaces, so
+`subdomain-takeover` is routed rather than skipped — fold every feeder's emitted signals into `signals.json`.
 → writes `<dir>/coverage_ledger.json`, marking every category `pending` (routed → **must run**),
 `skipped` (no trigger matched — **with a stated reason**), or `n/a` (phase not in scope). With no signals
 it attempts every in-scope category (recall-safe default). **A category is never skipped silently** — only

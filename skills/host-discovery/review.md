@@ -8,6 +8,8 @@
   - [ ] B.1 `hosts.json` valid JSON, non-empty
 - [ ] C — Consolidated
   - [ ] C.1 `host_discovery.json` valid JSON, non-empty
+  - [ ] C.2 `dangling_dns.json` present — the dangling-DNS triage (emits `asset:dangling-dns` when a
+        takeover candidate is surfaced, so `subdomain-takeover` is routed not skipped)
 - [ ] D — Summary
   - [ ] D.1 `summary.md` non-zero
 - [ ] E — Logs
@@ -23,6 +25,7 @@
     { "id": "A.1", "path": "subdomains.txt", "type": "text" },
     { "id": "B.1", "path": "hosts.json", "type": "json" },
     { "id": "C.1", "path": "host_discovery.json", "type": "json" },
+    { "id": "C.2", "path": "dangling_dns.json", "type": "json", "required": false },
     { "id": "D.1", "path": "summary.md", "type": "text" },
     { "id": "E.1", "path": "logs", "type": "dir" }
   ]
