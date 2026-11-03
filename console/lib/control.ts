@@ -330,6 +330,20 @@ export function parseRunLine(line: string): RunEvent[] {
   return [];
 }
 
+/* ---- bootstrap: same-origin token hand-off so the console self-connects (no paste) ---- */
+export async function getBootstrapToken(): Promise<string | null> {
+  // Unauthenticated by design: the control plane only answers this to a same-origin request
+  // (Host/Origin-guarded). A cross-origin page is rejected, so it can't read the token.
+  try {
+    const res = await fetch("/api/bootstrap", { cache: "no-store" });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return typeof d?.token === "string" && d.token ? d.token : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ---- token persistence (sessionStorage: a secret, cleared when the tab closes) ---- */
 const TOKEN_KEY = "redstrike.controlToken";
 export function loadToken(): string {

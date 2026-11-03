@@ -165,15 +165,23 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     [stopStream, refresh, refreshApprovals],
   );
 
-  /* ---- boot: presence probe (distinguishes locked vs offline before a token exists) ---- */
+  /* ---- boot: auto-connect via same-origin token hand-off, else presence probe ---- */
   useEffect(() => {
-    const t = loadToken();
-    if (t) {
-      setToken(t);
-      void probe(t);
-    } else {
-      void probe(""); // 401 → plane up (locked); network/404 → offline
-    }
+    void (async () => {
+      const saved = loadToken();
+      if (saved) {
+        setToken(saved);
+        if ((await probe(saved)) === "ready") return;
+      }
+      // self-connect: the control plane hands its token to its own (same-origin) page — no paste
+      const boot = await api.getBootstrapToken();
+      if (boot) {
+        setToken(boot);
+        saveToken(boot);
+        if ((await probe(boot)) === "ready") return;
+      }
+      void probe(""); // 401 → plane up (locked, manual entry); network/404 → offline
+    })();
   }, [probe]);
 
   /* ---- poll status while connected (tracks live run pids) ---- */
