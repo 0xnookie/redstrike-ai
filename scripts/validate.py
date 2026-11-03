@@ -227,6 +227,22 @@ if sqliu.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"sqli_union.py selftest failed: {e}")
 
+# 8b3 — dangling_dns self-test (recon emits asset:dangling-dns so subdomain-takeover isn't skipped)
+ddp = ROOT / "scripts" / "dangling_dns.py"
+if ddp.is_file():
+    try:
+        import importlib.util
+        _ddspec = importlib.util.spec_from_file_location("rs_danglingdns_lint", ddp)
+        _dd = importlib.util.module_from_spec(_ddspec)
+        _ddspec.loader.exec_module(_dd)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _dd.selftest()
+        checked["dangling_dns"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"dangling_dns.py selftest failed: {e}")
+
 # 8c — escalation ladder self-test (empty-class escalation decisions stay deterministic)
 escp = ROOT / "scripts" / "escalation.py"
 if escp.is_file():
