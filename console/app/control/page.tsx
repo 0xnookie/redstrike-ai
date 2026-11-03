@@ -4,6 +4,7 @@ import { ShieldAlert } from "lucide-react";
 import { PageHeader, Pill } from "@/components/ui/primitives";
 import { ControlProvider, useControl } from "@/components/control/ControlProvider";
 import { ConnectCard } from "@/components/control/ConnectCard";
+import { LlmConnectCard } from "@/components/control/LlmConnectCard";
 import { LaunchPanel } from "@/components/control/LaunchPanel";
 import { RunStream } from "@/components/control/RunStream";
 import { ApprovalsPanel } from "@/components/control/ApprovalsPanel";
@@ -33,6 +34,8 @@ function ControlInner() {
                 outside your allowlist defers for approval; nothing here bypasses a gate.
               </p>
             </div>
+
+            <LlmConnectCard />
 
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <div className="lg:row-span-2">

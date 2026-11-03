@@ -57,6 +57,28 @@ export interface CliResult {
 }
 
 /* ---- errors ---- */
+/* ---- LLM provider auth ---- */
+export interface ProviderAuth {
+  label: string;
+  live: boolean;
+  methods: string[];      // e.g. ["oauth_token","api_key"] or ["api_key"]
+  connected: boolean;
+  via: string | null;     // which method is active
+  masked: string | null;  // last-4 hint — never the secret
+  source: string | null;  // "ui" (set here) | "env" (present at startup)
+  model?: string;         // claude only
+}
+export interface AuthSnapshot {
+  providers: Record<string, ProviderAuth>;
+  engine: string;
+}
+export interface SetAuthBody {
+  method?: string;
+  value?: string;
+  model?: string;
+  action?: "disconnect";
+}
+
 export type ControlErrorKind =
   | "offline"      // nothing answering the /api route (read-only console, or plane down)
   | "unauthorized" // 401 — token missing/rejected
@@ -140,6 +162,15 @@ export const approve = (token: string, id: string, body: { ids?: string[]; all?:
 
 export const stopRun = (token: string, id: string) =>
   request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/stop`, token, { method: "POST", body: "{}" });
+
+/* ---- LLM provider auth (set a key/token the launched runs inherit — no .env editing) ---- */
+export const getAuth = (token: string) => request<AuthSnapshot>("/api/auth", token);
+
+export const setProviderAuth = (token: string, provider: string, body: SetAuthBody) =>
+  request<AuthSnapshot>(`/api/auth/${encodeURIComponent(provider)}`, token, { method: "POST", body: JSON.stringify(body) });
+
+export const disconnectProvider = (token: string, provider: string) =>
+  request<AuthSnapshot>(`/api/auth/${encodeURIComponent(provider)}`, token, { method: "POST", body: JSON.stringify({ action: "disconnect" }) });
 
 /* ---- SSE run stream (fetch-based; EventSource can't set Authorization) ---- */
 export async function openRunStream(

@@ -66,6 +66,47 @@ _RUNS: dict[str, subprocess.Popen] = {}
 _RUNS_LOCK = threading.Lock()
 
 
+# --- LLM provider auth (set from the console, inherited by launched runs) ------------------
+# The console's "Connect LLM" card POSTs a key/token here; we set it in THIS process's
+# environment so every `redstrike run` child inherits it — the user never edits a .env file.
+# In-memory only: nothing is written to disk, and it is lost on restart. Reachable only over the
+# loopback, bearer-token-gated /api surface, exactly like every other control endpoint.
+_PROVIDERS = {
+    "claude": {"label": "Claude", "live": True,
+               "methods": {"oauth_token": "CLAUDE_CODE_OAUTH_TOKEN", "api_key": "ANTHROPIC_API_KEY"},
+               "model_var": "ANTHROPIC_MODEL", "default_model": "claude-opus-5-5"},
+    "codex":  {"label": "Codex (OpenAI)", "live": False,
+               "methods": {"api_key": "OPENAI_API_KEY"}},
+    "gemini": {"label": "Gemini (Google)", "live": False,
+               "methods": {"api_key": "GEMINI_API_KEY"}},
+}
+_CRED_SOURCE: dict[str, str] = {}  # provider -> "ui" (set here) | "env" (present at startup)
+
+
+def _mask(val: str):
+    return ("…" + val[-4:]) if val and len(val) >= 8 else ("set" if val else None)
+
+
+def auth_snapshot() -> dict:
+    """Per-provider connection state for the console (never returns the secret itself)."""
+    providers = {}
+    for pid, spec in _PROVIDERS.items():
+        connected, via, masked = False, None, None
+        for method, var in spec["methods"].items():
+            v = os.environ.get(var)
+            if v:
+                connected, via, masked = True, method, _mask(v)
+                break
+        entry = {"label": spec["label"], "live": spec["live"],
+                 "methods": list(spec["methods"].keys()),
+                 "connected": connected, "via": via, "masked": masked,
+                 "source": _CRED_SOURCE.get(pid, "env" if connected else None)}
+        if spec.get("model_var"):
+            entry["model"] = os.environ.get(spec["model_var"]) or spec.get("default_model")
+        providers[pid] = entry
+    return {"providers": providers, "engine": os.environ.get("REDSTRIKE_ENGINE", "claude-code")}
+
+
 # --- redstrike CLI resolution ----------------------------------------------
 def _redstrike_base() -> tuple[list[str], dict | None]:
     """argv prefix + env to invoke the `redstrike` CLI (installed binary, else module)."""
@@ -176,6 +217,8 @@ def make_control_handler(target: Path, token: str):
                     "engagements": [e.name for e in console.discover(target)],
                     "runs": runs,
                 })
+            if path == "/api/auth":
+                return self._json(HTTPStatus.OK, auth_snapshot())
             parts = path.strip("/").split("/")  # api / engagements / <id> / <verb>
             if len(parts) == 4 and parts[1] == "engagements":
                 eid, verb = parts[2], parts[3]
@@ -192,6 +235,8 @@ def make_control_handler(target: Path, token: str):
 
         def _api_post(self, path: str):
             parts = path.strip("/").split("/")
+            if len(parts) == 3 and parts[1] == "auth":  # api / auth / <provider>
+                return self._set_auth(parts[2], self._body())
             if path == "/api/engagements":
                 return self._init_engagement(self._body())
             if len(parts) == 4 and parts[1] == "engagements":
@@ -274,6 +319,34 @@ def make_control_handler(target: Path, token: str):
             except (ProcessLookupError, PermissionError) as e:
                 return self._json(HTTPStatus.OK, {"ok": False, "note": str(e)})
             return self._json(HTTPStatus.OK, {"ok": True, "stopped": proc.pid})
+
+        # -- LLM provider auth ----------------------------------------------
+        def _set_auth(self, provider: str, body: dict):
+            spec = _PROVIDERS.get(provider)
+            if not spec:
+                return self._json(HTTPStatus.NOT_FOUND, {"error": f"unknown provider {provider}"})
+            if body.get("action") == "disconnect":
+                for var in spec["methods"].values():
+                    os.environ.pop(var, None)
+                _CRED_SOURCE.pop(provider, None)
+                return self._json(HTTPStatus.OK, auth_snapshot())
+            method = body.get("method")
+            value = (body.get("value") or "").strip()
+            if method not in spec["methods"]:
+                return self._json(HTTPStatus.BAD_REQUEST,
+                                  {"error": f"method must be one of {list(spec['methods'])}"})
+            if not value:
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": "value required"})
+            # set the chosen var; clear this provider's other method so status stays unambiguous
+            for m, var in spec["methods"].items():
+                if m == method:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
+            if spec.get("model_var") and body.get("model"):
+                os.environ[spec["model_var"]] = str(body["model"]).strip()
+            _CRED_SOURCE[provider] = "ui"
+            return self._json(HTTPStatus.OK, auth_snapshot())
 
         # -- SSE tail --------------------------------------------------------
         def _stream_jsonl(self, path: Path, *, max_seconds: int = 1800):
