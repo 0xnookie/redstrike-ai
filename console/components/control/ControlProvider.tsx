@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import * as api from "@/lib/control";
-import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, CliResult, AuthSnapshot, SetAuthBody } from "@/lib/control";
+import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus } from "@/lib/control";
 import { ControlError, loadToken, saveToken, parseRunLine } from "@/lib/control";
 
 // Connection state machine:
@@ -40,6 +40,9 @@ interface ControlCtx {
   refreshAuth: () => Promise<void>;
   setProviderAuth: (provider: string, body: SetAuthBody) => Promise<boolean>;
   disconnectProvider: (provider: string) => Promise<void>;
+  setModel: (provider: string, model: string) => Promise<boolean>;
+  startLogin: (provider: string) => Promise<LoginStatus | null>;
+  pollLogin: (provider: string) => Promise<LoginStatus | null>;
 }
 
 const Ctx = createContext<ControlCtx | null>(null);
@@ -347,6 +350,35 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const setModel = useCallback(async (provider: string, model: string): Promise<boolean> => {
+    try {
+      setAuthState(await api.setModel(tokenRef.current, provider, model));
+      return true;
+    } catch (e) {
+      setLastError(msgOf(e));
+      return false;
+    }
+  }, []);
+
+  const startLogin = useCallback(async (provider: string): Promise<LoginStatus | null> => {
+    try {
+      return await api.startLogin(tokenRef.current, provider);
+    } catch (e) {
+      setLastError(msgOf(e));
+      return null;
+    }
+  }, []);
+
+  const pollLogin = useCallback(async (provider: string): Promise<LoginStatus | null> => {
+    try {
+      const s = await api.getLoginStatus(tokenRef.current, provider);
+      if (s.connected) void refreshAuth();
+      return s;
+    } catch {
+      return null;
+    }
+  }, [refreshAuth]);
+
   // load provider auth once the plane is reachable
   useEffect(() => {
     if (conn === "ready") void refreshAuth();
@@ -378,6 +410,9 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     refreshAuth,
     setProviderAuth,
     disconnectProvider,
+    setModel,
+    startLogin,
+    pollLogin,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

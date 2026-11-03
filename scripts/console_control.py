@@ -74,17 +74,76 @@ _RUNS_LOCK = threading.Lock()
 _PROVIDERS = {
     "claude": {"label": "Claude", "live": True,
                "methods": {"oauth_token": "CLAUDE_CODE_OAUTH_TOKEN", "api_key": "ANTHROPIC_API_KEY"},
-               "model_var": "ANTHROPIC_MODEL", "default_model": "claude-opus-5-5"},
+               "model_var": "ANTHROPIC_MODEL", "default_model": "claude-opus-5-5",
+               "models": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-4-8"],
+               "login_cmd": ["claude", "setup-token"], "cred_paths": ["~/.claude/.credentials.json"]},
     "codex":  {"label": "Codex (OpenAI)", "live": False,
-               "methods": {"api_key": "OPENAI_API_KEY"}},
+               "methods": {"api_key": "OPENAI_API_KEY"},
+               "model_var": "OPENAI_MODEL", "default_model": "gpt-5.5",
+               "models": ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex"],
+               "login_cmd": ["codex", "login"], "cred_paths": ["~/.codex/auth.json"]},
     "gemini": {"label": "Gemini (Google)", "live": False,
-               "methods": {"api_key": "GEMINI_API_KEY"}},
+               "methods": {"api_key": "GEMINI_API_KEY"},
+               "model_var": "GEMINI_MODEL", "default_model": "gemini-2.5-pro",
+               "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-preview"],
+               "login_cmd": ["gemini"], "cred_paths": ["~/.gemini/oauth_creds.json"]},
 }
-_CRED_SOURCE: dict[str, str] = {}  # provider -> "ui" (set here) | "env" (present at startup)
+_CRED_SOURCE: dict[str, str] = {}   # provider -> "ui" (set here) | "env" (present at startup)
+_LOGIN: dict[str, dict] = {}        # provider -> {proc, out:[lines]} for an in-flight CLI login
 
 
 def _mask(val: str):
     return ("…" + val[-4:]) if val and len(val) >= 8 else ("set" if val else None)
+
+
+def _login_present(spec: dict) -> bool:
+    """True if the provider CLI already has a persisted login on disk (mounted config dir)."""
+    for p in spec.get("cred_paths", []):
+        try:
+            if os.path.isfile(os.path.expanduser(p)):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def start_login(provider: str) -> dict:
+    """Spawn the provider CLI's own login flow, capturing its output (the URL/code to follow).
+    Best-effort: these flows are browser/OAuth based, so we surface what the CLI prints rather
+    than inventing our own handshake. A persisted login lands in the mounted config dir."""
+    spec = _PROVIDERS.get(provider)
+    if not spec or not spec.get("login_cmd"):
+        return {"ok": False, "error": "no login flow for this provider"}
+    cur = _LOGIN.get(provider)
+    if cur and cur["proc"].poll() is None:
+        return {"ok": True, "running": True, "output": "".join(cur["out"][-40:])}
+    out: list[str] = []
+    try:
+        proc = subprocess.Popen(spec["login_cmd"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, text=True, bufsize=1,
+                                cwd=str(console.ROOT), start_new_session=True)
+    except (FileNotFoundError, OSError) as e:
+        return {"ok": False, "error": f"could not start {spec['login_cmd'][0]}: {e}"}
+
+    def _pump():
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                out.append(line)
+                if len(out) > 400:
+                    del out[: len(out) - 400]
+        except Exception:  # noqa: BLE001
+            pass
+    threading.Thread(target=_pump, daemon=True).start()
+    _LOGIN[provider] = {"proc": proc, "out": out}
+    return {"ok": True, "running": True, "output": ""}
+
+
+def login_status(provider: str) -> dict:
+    cur = _LOGIN.get(provider)
+    running = bool(cur and cur["proc"].poll() is None)
+    return {"ok": True, "running": running,
+            "output": "".join(cur["out"][-60:]) if cur else "",
+            "connected": _login_present(_PROVIDERS.get(provider, {}))}
 
 
 def auth_snapshot() -> dict:
@@ -97,10 +156,15 @@ def auth_snapshot() -> dict:
             if v:
                 connected, via, masked = True, method, _mask(v)
                 break
+        if not connected and _login_present(spec):
+            connected, via = True, "login"
         entry = {"label": spec["label"], "live": spec["live"],
                  "methods": list(spec["methods"].keys()),
                  "connected": connected, "via": via, "masked": masked,
-                 "source": _CRED_SOURCE.get(pid, "env" if connected else None)}
+                 "source": _CRED_SOURCE.get(pid, "env" if connected else None),
+                 "models": spec.get("models", []),
+                 "can_login": bool(spec.get("login_cmd")),
+                 "login_running": bool((lp := _LOGIN.get(pid)) and lp["proc"].poll() is None)}
         if spec.get("model_var"):
             entry["model"] = os.environ.get(spec["model_var"]) or spec.get("default_model")
         providers[pid] = entry
@@ -220,6 +284,8 @@ def make_control_handler(target: Path, token: str):
             if path == "/api/auth":
                 return self._json(HTTPStatus.OK, auth_snapshot())
             parts = path.strip("/").split("/")  # api / engagements / <id> / <verb>
+            if len(parts) == 4 and parts[1] == "auth" and parts[3] == "login":
+                return self._json(HTTPStatus.OK, login_status(parts[2]))
             if len(parts) == 4 and parts[1] == "engagements":
                 eid, verb = parts[2], parts[3]
                 eng = engagement_dir(eid)
@@ -235,6 +301,8 @@ def make_control_handler(target: Path, token: str):
 
         def _api_post(self, path: str):
             parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[1] == "auth" and parts[3] == "login":  # api / auth / <p> / login
+                return self._json(HTTPStatus.OK, start_login(parts[2]))
             if len(parts) == 3 and parts[1] == "auth":  # api / auth / <provider>
                 return self._set_auth(parts[2], self._body())
             if path == "/api/engagements":
@@ -329,6 +397,10 @@ def make_control_handler(target: Path, token: str):
                 for var in spec["methods"].values():
                     os.environ.pop(var, None)
                 _CRED_SOURCE.pop(provider, None)
+                return self._json(HTTPStatus.OK, auth_snapshot())
+            if body.get("action") == "set_model":
+                if spec.get("model_var") and body.get("model"):
+                    os.environ[spec["model_var"]] = str(body["model"]).strip()
                 return self._json(HTTPStatus.OK, auth_snapshot())
             method = body.get("method")
             value = (body.get("value") or "").strip()
