@@ -39,21 +39,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# 3) Provider CLIs.
-#    - Claude Code  -> the ONE live engine today.
-#    - Codex / Gemini -> installed so their auth (login or key) works in this image;
-#      they are NOT yet live-capable engines (see cli/ENGINES.md + docker/README.md).
-#    CLI_CHANNEL pins/refreshes the Claude engine (a dist-tag like `latest`/`stable`, or an exact
-#    version). Bumping it busts this layer's cache so a rebuild can't keep shipping a stale `claude`
-#    from an old cached layer — the floor check in step 6b fails the build if the baked version is too old.
-ARG CLI_CHANNEL=latest
-RUN npm install -g "@anthropic-ai/claude-code@${CLI_CHANNEL}" @openai/codex @google/gemini-cli \
-    && npm cache clean --force
-
 WORKDIR /opt/redstrike
 
-# 4) The tool roster FIRST, keyed only on the installer inputs, so editing the
-#    framework later does not bust this big, slow layer. install.sh is non-fatal
+# 3) The tool roster FIRST, keyed only on the installer inputs, so editing the framework (or
+#    refreshing the engine in step 4) does not bust this big, slow layer. install.sh is non-fatal
 #    (it logs a miss and continues); `|| true` guards the build against a hard stop.
 #    Scope defaults to --core (fast). Build the full roster, or named categories, with:
 #      docker compose -f docker/docker-compose.yml build --build-arg REDSTRIKE_INSTALL_ARGS=--all
@@ -61,6 +50,17 @@ WORKDIR /opt/redstrike
 ARG REDSTRIKE_INSTALL_ARGS=--core
 COPY scripts/tools.manifest scripts/install.sh scripts/doctor.sh /opt/redstrike/scripts/
 RUN bash scripts/install.sh ${REDSTRIKE_INSTALL_ARGS} -y || true
+
+# 4) Provider CLIs — AFTER the toolchain, so refreshing the engine doesn't rebuild the big layer.
+#    - Claude Code  -> the ONE live engine today.
+#    - Codex / Gemini -> installed so their auth (login or key) works in this image;
+#      they are NOT yet live-capable engines (see cli/ENGINES.md + docker/README.md).
+#    CLI_CHANNEL pins/refreshes the Claude engine (a dist-tag like `latest`/`stable`, or an exact
+#    version). Bumping it busts only this layer (+ the fast ones after it), so a rebuild can't keep
+#    shipping a stale `claude` — the floor check in step 6b fails the build if the baked one is too old.
+ARG CLI_CHANNEL=latest
+RUN npm install -g "@anthropic-ai/claude-code@${CLI_CHANNEL}" @openai/codex @google/gemini-cli \
+    && npm cache clean --force
 
 # 5) The rest of the framework.
 COPY . /opt/redstrike
