@@ -507,6 +507,21 @@
       "notes": "baseline: dir/file/VCS/backup/actuator fuzzing"
     },
     {
+      "id": "forbidden-bypass",
+      "name": "Forbidden / 403 access-restriction bypass",
+      "owasp": "A01/A05",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "forbidden-bypass"
+      ],
+      "baseline": true,
+      "triggers": [],
+      "skip_reason": "",
+      "notes": "baseline: reach 401/403-restricted endpoints via path/method/header manipulation; de-dup vs exposed-surface/auth-bypass"
+    },
+    {
       "id": "business-logic",
       "name": "Business logic",
       "owasp": "-",
