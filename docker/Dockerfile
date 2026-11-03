@@ -43,7 +43,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 #    - Claude Code  -> the ONE live engine today.
 #    - Codex / Gemini -> installed so their auth (login or key) works in this image;
 #      they are NOT yet live-capable engines (see cli/ENGINES.md + docker/README.md).
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli \
+#    CLI_CHANNEL pins/refreshes the Claude engine (a dist-tag like `latest`/`stable`, or an exact
+#    version). Bumping it busts this layer's cache so a rebuild can't keep shipping a stale `claude`
+#    from an old cached layer — the floor check in step 6b fails the build if the baked version is too old.
+ARG CLI_CHANNEL=latest
+RUN npm install -g "@anthropic-ai/claude-code@${CLI_CHANNEL}" @openai/codex @google/gemini-cli \
     && npm cache clean --force
 
 WORKDIR /opt/redstrike
@@ -63,6 +67,22 @@ COPY . /opt/redstrike
 
 # 6) The redstrike CLI on PATH, with this repo baked in as the engagement home.
 RUN REDSTRIKE_PREFIX=/usr/local bash cli/install.sh || true
+
+# 6b) Fail the build if the baked-in `claude` is below the launcher's required floor
+#     (cli/redstrike_cli MIN_CLAUDE_VERSION) — this defeats a stale npm layer silently shipping an
+#     old engine (which `redstrike doctor` would then reject at run time). Bump CLI_CHANNEL (step 3)
+#     or rebuild that layer to refresh.
+RUN python3 <<'PY'
+import subprocess, re, sys
+floor = tuple(map(int, re.search(r"MIN_CLAUDE_VERSION\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)",
+               open("cli/redstrike_cli/__init__.py").read()).groups()))
+out = subprocess.run(["claude", "--version"], capture_output=True, text=True).stdout
+m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+got = tuple(map(int, m.groups())) if m else (0, 0, 0)
+print(f"baked claude {got}, launcher floor {floor}")
+if got < floor:
+    sys.exit(f"ERROR: claude {got} < floor {floor} -- bump CLI_CHANNEL or rebuild the CLI layer (--no-cache)")
+PY
 
 # 7) Prebuild the console (Next.js static export) so the first open is instant.
 RUN npm --prefix console install && npm --prefix console run build \
