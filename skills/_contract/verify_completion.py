@@ -382,6 +382,36 @@ def _surface_warnings(eng: Path) -> list:
     return []
 
 
+def _try_import_reconverge():
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "reconverge.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_reconverge", p)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rs_reconverge"] = mod  # dataclass-free, but keep the import self-consistent
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def _reconverge_hard_errors(eng: Path) -> list:
+    """HARD re-convergence gate (fix #6) — active only when a report AND a non-empty re-convergence
+    inbox both exist. A report must not ship while mid-hunt discoveries (new signals/surface recorded
+    in reconvergence/inbox.jsonl) remain un-routed — the single-pass leak. No inbox => no gate."""
+    if not _report_present(eng):
+        return []
+    rc = _try_import_reconverge()
+    if not rc:
+        return []
+    try:
+        return rc.reconverge_hard_errors(eng)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _asset_host(asset: str) -> str:
     """Best-effort registrable host from an asset URL/endpoint (for a soft scope check)."""
     s = re.sub(r"^[a-z]+://", "", str(asset)).strip()
@@ -532,6 +562,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # Surface coverage (fix #5): HARD once a report + a surface ledger both exist; else a soft nudge.
     coverage_errors += _surface_hard_errors(eng)
     top_warnings.extend(_surface_warnings(eng))
+    # Re-convergence (fix #6): HARD once a report + a non-empty inbox exist — no report over un-routed
+    # mid-hunt discoveries (the single-pass leak).
+    coverage_errors += _reconverge_hard_errors(eng)
     if not any(eng.rglob("host_discovery.json")):
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
