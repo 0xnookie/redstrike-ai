@@ -325,6 +325,11 @@ def main() -> int:
     ap.add_argument("--enable-control", action="store_true",
                     help="REQUIRED: acknowledge this exposes launch/steer endpoints (opt-in)")
     ap.add_argument("--build", action="store_true", help="force a fresh console build")
+    ap.add_argument("--host", default=os.environ.get("REDSTRIKE_CONSOLE_HOST", "127.0.0.1"),
+                    help="bind address (default 127.0.0.1 / $REDSTRIKE_CONSOLE_HOST). Use 0.0.0.0 ONLY "
+                         "behind a trusted boundary — e.g. a container published to the host loopback "
+                         "(-p 127.0.0.1:8788:8788). The bearer token and the Host/Origin checks remain "
+                         "the access control regardless of bind address.")
     args = ap.parse_args()
 
     if not args.enable_control:
@@ -342,11 +347,18 @@ def main() -> int:
     console.ensure_build(args.build)
 
     handler = make_control_handler(target, token)
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
-    url = f"http://127.0.0.1:{args.port}/"
+    httpd = http.server.ThreadingHTTPServer((args.host, args.port), handler)
+    loopback = args.host in ("127.0.0.1", "::1", "localhost")
+    browse_host = "127.0.0.1" if loopback or args.host in ("0.0.0.0", "", "::") else args.host
+    url = f"http://{browse_host}:{args.port}/"
     print(f"\n  Redstrike console CONTROL PLANE (experimental)")
     print(f"  source : {target}")
-    print(f"  url    : {url}  (127.0.0.1 only)")
+    print(f"  bind   : {args.host}:{args.port}")
+    print(f"  url    : {url}")
+    if not loopback:
+        print(f"  note   : bound to {args.host} (not loopback) — expose ONLY behind a trusted boundary")
+        print(f"           (e.g. published to the host loopback). The bearer token + Host/Origin checks")
+        print(f"           are the access control, so keep them and never put this on a public interface.")
     print(f"  token  : {token}")
     print(f"  use    : send  Authorization: Bearer {token}  on every /api/* request")
     print(f"  (Ctrl+C to stop)\n")
