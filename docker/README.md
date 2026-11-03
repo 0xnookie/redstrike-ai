@@ -18,7 +18,7 @@ scope, and run.
 |---|---|
 | Web console (dashboard, findings, assets, coverage, CVE intel, …) | ✅ prebuilt |
 | Control plane (init engagement, launch autonomous run, live stream, approvals, stop) | ✅ |
-| Full tool roster (`scripts/install.sh --all` — ~168 tools) | ✅ |
+| Tool roster — `--core` web-pentest set by default (`--all` ~168 tools is opt-in) | ✅ |
 | **Claude** engine | ✅ **live** (authorized runs) |
 | **Codex** CLI | ✅ installed, auth works — **not a live engine yet** (lab-only until parity) |
 | **Gemini** CLI | ✅ installed, auth works — **no redstrike engine yet** |
@@ -33,8 +33,9 @@ they are ready the moment their engine adapters land — see `cli/ENGINES.md`.
 - **macOS / Windows:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (it runs
   Linux containers via its built-in VM / WSL2 — nothing else to install).
 - **Linux:** Docker Engine + the Compose plugin.
-- Disk + patience: the `--all` roster makes this a **large image (several GB)** and the first
-  build takes a while. Subsequent builds are cached.
+- Disk + patience: the default `--core` roster builds in minutes (a few GB). The opt-in `--all`
+  roster is a **large image** and a long first build (it compiles many Go/Rust tools from source).
+  Subsequent builds are cached.
 
 ---
 
@@ -68,7 +69,15 @@ Codex / Gemini auth (optional, staged for later): set `OPENAI_API_KEY` / `GEMINI
 ## 2. Build
 
 ```sh
-docker compose -f docker/docker-compose.yml build
+docker compose -f docker/docker-compose.yml build                  # default: --core (fast)
+```
+
+**Tool scope.** The image bakes in the `--core` web-pentest set by default (glue + recon + web +
+password + interceptors). For the full roster or specific categories, set `REDSTRIKE_INSTALL_ARGS`:
+
+```sh
+REDSTRIKE_INSTALL_ARGS=--all docker compose -f docker/docker-compose.yml build          # everything (~168 tools; large, slow)
+REDSTRIKE_INSTALL_ARGS="recon web ad cloud" docker compose -f docker/docker-compose.yml build   # named categories
 ```
 
 ---
