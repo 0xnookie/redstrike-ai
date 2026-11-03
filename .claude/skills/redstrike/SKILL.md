@@ -34,13 +34,17 @@ missing/incomplete, the window is closed, or a target falls outside scope.
 client-side JS; for a pure API / JS-less target, skip it with an explicit N/A note)*.
 Run `redstrike-cve-intelligence` to prioritize.
 
-**After recon, build the surface-coverage ledger:** `python scripts/surface.py --plan --engagement <dir>`
-enumerates every discovered surface element (endpoint/param/identity/form/API/sink/header/upload/auth-flow)
-as `discovered`. As each executor consumes an element, mark it (`surface.py --mark <id> --status tested
---by <skill>`), or `--status skipped --reason …`. This is the capstone recall control: category coverage
-proves which CLASSES ran; this proves how much of the real SURFACE each was tested against. A surface left
-`discovered` at close is an `untested-surface` recall gap (the recall-audit altitude reports it; once a
-report exists `verify_completion.py` hard-fails on it). See `skills/_contract/surface-ledger.md`.
+**After recon, build the surface-coverage ledger — MANDATORY, every engagement:**
+`python scripts/surface.py --plan --engagement <dir>` enumerates every discovered surface element
+(endpoint/param/identity/form/API/sink/header/upload/auth-flow) as `discovered`. It is **idempotent** —
+re-run it as late feeders (authz-context identities, js-analysis) and the re-convergence loop add surface;
+it preserves marks and only appends new elements (`--fresh` forces a rebuild). As each executor consumes an
+element, mark it (`surface.py --mark <id> --status tested --by <skill>`), or `--status skipped --reason …`.
+This is the capstone recall control: category coverage proves which CLASSES ran; this proves how much of the
+real SURFACE each was tested against. A surface left `discovered` at close is an `untested-surface` recall
+gap. **The gate is strict:** once a report exists, `verify_completion.py` hard-fails if the ledger is
+MISSING, empty-but-present, or still has untested routed surface — so emitting it is not optional. See
+`skills/_contract/surface-ledger.md`.
 
 **Host-discovery MUST persist `<engagement>/host-discovery/host_discovery.json`** (the structured
 `{live_hosts, api_endpoints}` map) — even for a single in-scope host. It is what populates the console's

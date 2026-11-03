@@ -346,19 +346,26 @@ def _try_import_surface():
 
 
 def _surface_hard_errors(eng: Path) -> list:
-    """HARD surface gate (fix #5) — active only when a report AND a surface_ledger.json both exist.
+    """HARD surface gate (fix #5, strict since fix: universal emission) — active once a report exists.
 
-    If the engagement tracks surface coverage, a report must not ship with surface elements recon
-    discovered but no executor tested (the leak category coverage can't see). A MISSING surface ledger
-    stays a soft warning for now (not every engagement emits one yet) — see _surface_warnings."""
-    if not _report_present(eng) or not (eng / "surface_ledger.json").is_file():
+    A report must not ship with surface recon discovered but no executor tested (the leak category
+    coverage can't see). Now that the recon feeders emit the ledger universally and `surface.py --plan`
+    is idempotent, a MISSING ledger at report time is itself a FAIL (not a warning) — it means surface
+    coverage was never tracked, the juice-shop-2026-10-20 blind spot. A PRESENT ledger is validated
+    STRICT, so an empty-but-present ledger (feeders didn't populate it) also fails. Mirrors how
+    `_coverage_hard_errors` treats a missing/incomplete coverage ledger at report time."""
+    if not _report_present(eng):
         return []
+    if not (eng / "surface_ledger.json").is_file():
+        return ["surface gate (report present → a surface ledger is required): no surface_ledger.json — "
+                "surface coverage was never tracked (run scripts/surface.py --plan --engagement <dir> "
+                "after recon; it is idempotent and safe to re-run)"]
     sf = _try_import_surface()
     if not sf:
         return []
     try:
         led = json.loads((eng / "surface_ledger.json").read_text(encoding="utf-8"))
-        ok, _lines, msgs = sf.validate(led, strict=False)
+        ok, _lines, msgs = sf.validate(led, strict=True)
     except Exception:  # noqa: BLE001
         return []
     if ok:
@@ -367,10 +374,11 @@ def _surface_hard_errors(eng: Path) -> list:
 
 
 def _surface_warnings(eng: Path) -> list:
-    """Soft nudge: a report with no surface ledger means surface coverage is untracked."""
-    if _report_present(eng) and not (eng / "surface_ledger.json").is_file():
-        return ["no surface_ledger.json — surface coverage untracked "
-                "(run scripts/surface.py --plan --engagement <dir> after recon)"]
+    """Soft nudge DURING the hunt (no report yet): emit the surface ledger after recon so the
+    report-time strict gate has something to check."""
+    if not _report_present(eng) and not (eng / "surface_ledger.json").is_file():
+        return ["no surface_ledger.json yet — emit it after recon (scripts/surface.py --plan "
+                "--engagement <dir>); it becomes a hard gate once a report exists"]
     return []
 
 

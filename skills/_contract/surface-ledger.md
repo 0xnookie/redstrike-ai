@@ -16,9 +16,13 @@ which recon feeder `discovered_by` it, which categories it is `routed_to`, and i
 - `n/a` — routes to no in-scope category.
 
 ## Lifecycle
-1. **Plan** (after recon): `python scripts/surface.py --plan --engagement <dir>` reads the feeders
-   (host-discovery, content-discovery, js-analysis, authz-context) and enumerates every element as
-   `discovered`, routing each by kind to the categories that should test it.
+1. **Plan** (after recon — ALWAYS, every engagement): `python scripts/surface.py --plan --engagement <dir>`
+   reads the feeders (host-discovery, content-discovery, js-analysis, authz-context) and enumerates every
+   element as `discovered`, routing each by kind to the categories that should test it. **`--plan` is
+   idempotent**: re-running it preserves every element's progress (`tested`/`skipped`/`consumed_by`) and
+   appends only newly-discovered elements, so it is safe to emit early and re-emit as late feeders
+   (authz-context identities, js-analysis) — and any surface found mid-hunt — are added.
+   (`--fresh` forces a clean rebuild.)
 2. **Mark** (during the hunt): as an executor consumes an element,
    `surface.py --mark <id> --status tested --by <skill>` (or `--status skipped --reason …`).
 3. **Validate / gate**: `surface.py --validate --engagement <dir>` — a `discovered` routed element, or a
@@ -33,8 +37,12 @@ It upgrades the two prior recall fixes from inference to fact:
 - **Escalation ladder (#3)** closes an empty surface only after its ladder; this says WHICH surfaces
   existed to close.
 
-## Gate posture (incremental, like coverage started)
-Once a consolidated report exists AND a surface ledger exists, `verify_completion.py --engagement`
-**hard-fails** on any untested routed surface. A *missing* surface ledger is currently a soft warning
-(not every engagement emits one yet); making a missing ledger strict-fail at report time is the planned
-follow-on once the recon feeders emit it universally.
+## Gate posture (strict — universal emission)
+The surface ledger is emitted on **every** engagement (step 1 is mandatory after recon and idempotent),
+so the gate is now strict. Once a consolidated report exists, `verify_completion.py --engagement`:
+- **hard-fails if the ledger is MISSING** — a report with no surface ledger means surface coverage was
+  never tracked (the juice-shop-2026-10-20 blind spot), no longer a soft warning;
+- validates a present ledger **strict**, so an untested routed element, a `skipped`-without-reason
+  element, **or an empty-but-present ledger** (feeders didn't populate it) all fail.
+During the hunt (before a report exists) a missing ledger is a soft nudge to emit it, not a failure. This
+mirrors how `_coverage_hard_errors` treats the coverage ledger: soft while hunting, hard at report time.
