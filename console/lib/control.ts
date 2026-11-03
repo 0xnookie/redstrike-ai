@@ -63,10 +63,19 @@ export interface ProviderAuth {
   live: boolean;
   methods: string[];      // e.g. ["oauth_token","api_key"] or ["api_key"]
   connected: boolean;
-  via: string | null;     // which method is active
+  via: string | null;     // which method is active ("api_key" | "oauth_token" | "login")
   masked: string | null;  // last-4 hint — never the secret
   source: string | null;  // "ui" (set here) | "env" (present at startup)
-  model?: string;         // claude only
+  model?: string;         // providers with a model var
+  models: string[];       // dropdown options
+  can_login: boolean;     // a click-to-login flow exists
+  login_running: boolean; // a login flow is in progress
+}
+export interface LoginStatus {
+  ok: boolean;
+  running: boolean;
+  output: string;         // what the provider CLI printed (the URL/code to follow)
+  connected: boolean;
 }
 export interface AuthSnapshot {
   providers: Record<string, ProviderAuth>;
@@ -171,6 +180,16 @@ export const setProviderAuth = (token: string, provider: string, body: SetAuthBo
 
 export const disconnectProvider = (token: string, provider: string) =>
   request<AuthSnapshot>(`/api/auth/${encodeURIComponent(provider)}`, token, { method: "POST", body: JSON.stringify({ action: "disconnect" }) });
+
+export const setModel = (token: string, provider: string, model: string) =>
+  request<AuthSnapshot>(`/api/auth/${encodeURIComponent(provider)}`, token, { method: "POST", body: JSON.stringify({ action: "set_model", model }) });
+
+// click-to-login: start the provider CLI's own browser/OAuth flow, then poll for completion
+export const startLogin = (token: string, provider: string) =>
+  request<LoginStatus>(`/api/auth/${encodeURIComponent(provider)}/login`, token, { method: "POST", body: "{}" });
+
+export const getLoginStatus = (token: string, provider: string) =>
+  request<LoginStatus>(`/api/auth/${encodeURIComponent(provider)}/login`, token);
 
 /* ---- SSE run stream (fetch-based; EventSource can't set Authorization) ---- */
 export async function openRunStream(
