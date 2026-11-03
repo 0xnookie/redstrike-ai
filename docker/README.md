@@ -80,6 +80,14 @@ REDSTRIKE_INSTALL_ARGS=--all docker compose -f docker/docker-compose.yml build  
 REDSTRIKE_INSTALL_ARGS="recon web ad cloud" docker compose -f docker/docker-compose.yml build   # named categories
 ```
 
+**Engine version.** The image installs `@anthropic-ai/claude-code@latest`, and the build **fails** if that
+version is below the launcher's floor (`MIN_CLAUDE_VERSION`) — so a stale cached layer can't silently ship an
+old `claude`. To force a refresh (or pin a channel/version), set `CLI_CHANNEL`:
+
+```sh
+docker compose -f docker/docker-compose.yml build --build-arg CLI_CHANNEL=stable
+```
+
 ---
 
 ## 3. Run
