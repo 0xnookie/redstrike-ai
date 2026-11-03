@@ -5,8 +5,9 @@
 # Claude Code as the live engine and the Codex / Gemini CLIs installed for auth.
 #
 # Build (from the repo root):   docker compose -f docker/docker-compose.yml build
-# This is a LARGE image (the `--all` tool roster is ~168 tools): expect several GB
-# and a long first build. See docker/README.md.
+# The tool scope defaults to --core (the everyday web-pentest set): a few GB, minutes.
+# The full --all roster (~168 tools) is opt-in via REDSTRIKE_INSTALL_ARGS — see below
+# and docker/README.md (it is large and compiles many tools from source).
 #
 # AUTHORIZED TESTING ONLY. The scope gate, launch gate, allowlist and audit trail
 # are enforced by the redstrike launcher inside the container — unchanged here.
@@ -50,8 +51,12 @@ WORKDIR /opt/redstrike
 # 4) The tool roster FIRST, keyed only on the installer inputs, so editing the
 #    framework later does not bust this big, slow layer. install.sh is non-fatal
 #    (it logs a miss and continues); `|| true` guards the build against a hard stop.
+#    Scope defaults to --core (fast). Build the full roster, or named categories, with:
+#      docker compose -f docker/docker-compose.yml build --build-arg REDSTRIKE_INSTALL_ARGS=--all
+#      docker compose -f docker/docker-compose.yml build --build-arg REDSTRIKE_INSTALL_ARGS="recon web ad cloud"
+ARG REDSTRIKE_INSTALL_ARGS=--core
 COPY scripts/tools.manifest scripts/install.sh scripts/doctor.sh /opt/redstrike/scripts/
-RUN bash scripts/install.sh --all -y || true
+RUN bash scripts/install.sh ${REDSTRIKE_INSTALL_ARGS} -y || true
 
 # 5) The rest of the framework.
 COPY . /opt/redstrike

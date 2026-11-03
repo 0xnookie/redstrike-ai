@@ -12,6 +12,11 @@ services:
     build:
       context: ..                     # repo root (the root .dockerignore applies)
       dockerfile: docker/Dockerfile
+      args:
+        # Tool scope baked into the image. Default --core (web-pentest set; fast, a few GB).
+        # Build the full roster or named categories by exporting REDSTRIKE_INSTALL_ARGS, e.g.:
+        #   REDSTRIKE_INSTALL_ARGS=--all docker compose -f docker/docker-compose.yml build
+        REDSTRIKE_INSTALL_ARGS: ${REDSTRIKE_INSTALL_ARGS:---core}
     image: redstrike-ai:latest
     env_file:
       - .env
