@@ -2,3 +2,5 @@
 # regardless of the committer's OS / core.autocrlf setting.
 *.sh        text eol=lf
 *.manifest  text eol=lf
+Dockerfile  text eol=lf
+entrypoint.sh text eol=lf
