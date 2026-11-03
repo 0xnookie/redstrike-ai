@@ -23,6 +23,14 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 4. Key confusion RS256→HS256 (sign with public key as HMAC secret) · `jwt_tool -X k` · `jwt_tests.jsonl`
 5. `kid`/`jku`/`x5u` injection; claim tamper (`role`/`sub`/`admin`) · refs · `jwt_tests.jsonl`
 6. Confirm the forged token is ACCEPTED (authed action/data) · interceptor · `poc/<id>/`
+   **Send the forged token in BOTH an `Authorization: Bearer` header AND the `token` cookie
+   — always, every placement, before concluding "not accepted".** Many apps (express-jwt +
+   cookie middleware, e.g. Juice Shop) read the token from a cookie recon never surfaced; a
+   header-only send is a silent false negative. Enumerate carriers with
+   `scripts/jwt_placements.py` (`enumerate_placements` = mandatory header+cookie core +
+   observed carriers + common defaults). A "not accepted" verdict is only clean when
+   `confirmation_complete(sent)` is True (the full mandatory set was tried); otherwise it is
+   an open-proof-gap (`_contract/counterevidence.md`), never a ruled-out result.
 7. Rate (CVSS) + write finding · synth · `findings.json`
 8. Emit report + curl · synth · `report.md`, `curl_commands.sh`
 9. /REVIEW · `review.md` · 10. /VERIFY · `verify.md`
