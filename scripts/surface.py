@@ -86,6 +86,26 @@ def plan_from_items(engagement: str, items) -> dict:
             "surfaces": surfaces}
 
 
+def merge_plan(existing: dict, items) -> dict:
+    """Idempotent re-plan (universal emission): keep every element already in the ledger AND its
+    progress (`status`/`consumed_by`/`reason`), and append only genuinely NEW discovered elements.
+
+    This is what lets recon emit the ledger universally and re-run `--plan` safely as late feeders
+    (authz-context identities, js-analysis) and the re-convergence loop add surface, without clobbering
+    a `tested`/`skipped` mark. A fresh `plan_from_items` would reset every element to `discovered`."""
+    fresh = plan_from_items(existing.get("engagement", ""), items)
+    have = {s["id"] for s in existing.get("surfaces", [])}
+    added = 0
+    for s in fresh["surfaces"]:
+        if s["id"] not in have:
+            existing.setdefault("surfaces", []).append(s)
+            have.add(s["id"])
+            added += 1
+    existing["generated_at"] = fresh["generated_at"]
+    existing["_last_merge_added"] = added
+    return existing
+
+
 def validate(led: dict, strict: bool = False):
     """Return (ok, lines, msgs). ok=False => a surface gap (discovered-but-untested, or skipped w/o reason)."""
     errors, lines = [], []
@@ -239,6 +259,22 @@ def selftest() -> None:
     assert validate({"surfaces": []})[0] is True
     assert validate({"surfaces": []}, strict=True)[0] is False
 
+    # merge_plan (idempotent universal emission): preserves progress, adds only new elements.
+    base = plan_from_items("demo", [{"kind": "param", "value": "q"}, {"kind": "param", "value": "id"}])
+    base["surfaces"][0]["status"] = "tested"            # q was tested
+    base["surfaces"][0].setdefault("consumed_by", []).append("sqli")
+    merged = merge_plan(base, [{"kind": "param", "value": "q"},           # already present -> untouched
+                               {"kind": "param", "value": "id"},          # already present -> untouched
+                               {"kind": "identity", "value": "userB"}])   # NEW -> appended as discovered
+    assert merged["_last_merge_added"] == 1, merged.get("_last_merge_added")
+    bv = {s["value"]: s for s in merged["surfaces"]}
+    assert bv["q"]["status"] == "tested" and "sqli" in bv["q"]["consumed_by"], "progress must survive re-plan"
+    assert bv["userB"]["status"] == "discovered" and bv["userB"]["routed_to"]
+    assert len(merged["surfaces"]) == 3
+    # re-merging the SAME items adds nothing (idempotent).
+    again = merge_plan(merged, [{"kind": "param", "value": "q"}])
+    assert again["_last_merge_added"] == 0
+
     print("surface selftest: OK")
 
 
@@ -252,6 +288,8 @@ def main() -> int:
     ap.add_argument("--reason", default="")
     ap.add_argument("--engagement")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--fresh", action="store_true",
+                    help="--plan: rebuild from scratch instead of the default idempotent merge")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--json", action="store_true", dest="as_json")
     args = ap.parse_args()
@@ -264,9 +302,20 @@ def main() -> int:
         if not args.engagement:
             ap.error("--plan needs --engagement")
         eng = Path(args.engagement)
-        led = plan_from_items(eng.name, load_recon_surfaces(eng))
-        (eng / LEDGER_NAME).write_text(json.dumps(led, indent=2), encoding="utf-8")
-        print(f"wrote {eng / LEDGER_NAME}: {len(led['surfaces'])} surface element(s)")
+        items = load_recon_surfaces(eng)
+        p = eng / LEDGER_NAME
+        if p.is_file() and not args.fresh:
+            # Idempotent re-plan: emit universally + safely re-run as late feeders add surface,
+            # preserving any tested/skipped progress. --fresh forces a clean rebuild.
+            led = merge_plan(json.loads(p.read_text(encoding="utf-8")), items)
+            added = led.pop("_last_merge_added", 0)
+            p.write_text(json.dumps(led, indent=2), encoding="utf-8")
+            print(f"merged {eng / LEDGER_NAME}: +{added} new element(s), "
+                  f"{len(led['surfaces'])} total (progress preserved)")
+        else:
+            led = plan_from_items(eng.name, items)
+            p.write_text(json.dumps(led, indent=2), encoding="utf-8")
+            print(f"wrote {eng / LEDGER_NAME}: {len(led['surfaces'])} surface element(s)")
         return 0
 
     if args.mark:
