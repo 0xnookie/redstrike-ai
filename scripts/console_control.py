@@ -66,6 +66,111 @@ _RUNS: dict[str, subprocess.Popen] = {}
 _RUNS_LOCK = threading.Lock()
 
 
+# --- LLM provider auth (set from the console, inherited by launched runs) ------------------
+# The console's "Connect LLM" card POSTs a key/token here; we set it in THIS process's
+# environment so every `redstrike run` child inherits it — the user never edits a .env file.
+# In-memory only: nothing is written to disk, and it is lost on restart. Reachable only over the
+# loopback, bearer-token-gated /api surface, exactly like every other control endpoint.
+_PROVIDERS = {
+    "claude": {"label": "Claude", "live": True,
+               "methods": {"oauth_token": "CLAUDE_CODE_OAUTH_TOKEN", "api_key": "ANTHROPIC_API_KEY"},
+               "model_var": "ANTHROPIC_MODEL", "default_model": "claude-opus-5-5",
+               "models": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-4-8"],
+               "login_cmd": ["claude", "setup-token"], "cred_paths": ["~/.claude/.credentials.json"]},
+    "codex":  {"label": "Codex (OpenAI)", "live": False,
+               "methods": {"api_key": "OPENAI_API_KEY"},
+               "model_var": "OPENAI_MODEL", "default_model": "gpt-5.5",
+               "models": ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex"],
+               "login_cmd": ["codex", "login"], "cred_paths": ["~/.codex/auth.json"]},
+    "gemini": {"label": "Gemini (Google)", "live": False,
+               "methods": {"api_key": "GEMINI_API_KEY"},
+               "model_var": "GEMINI_MODEL", "default_model": "gemini-2.5-pro",
+               "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-preview"],
+               "login_cmd": ["gemini"], "cred_paths": ["~/.gemini/oauth_creds.json"]},
+}
+_CRED_SOURCE: dict[str, str] = {}   # provider -> "ui" (set here) | "env" (present at startup)
+_LOGIN: dict[str, dict] = {}        # provider -> {proc, out:[lines]} for an in-flight CLI login
+
+
+def _mask(val: str):
+    return ("…" + val[-4:]) if val and len(val) >= 8 else ("set" if val else None)
+
+
+def _login_present(spec: dict) -> bool:
+    """True if the provider CLI already has a persisted login on disk (mounted config dir)."""
+    for p in spec.get("cred_paths", []):
+        try:
+            if os.path.isfile(os.path.expanduser(p)):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def start_login(provider: str) -> dict:
+    """Spawn the provider CLI's own login flow, capturing its output (the URL/code to follow).
+    Best-effort: these flows are browser/OAuth based, so we surface what the CLI prints rather
+    than inventing our own handshake. A persisted login lands in the mounted config dir."""
+    spec = _PROVIDERS.get(provider)
+    if not spec or not spec.get("login_cmd"):
+        return {"ok": False, "error": "no login flow for this provider"}
+    cur = _LOGIN.get(provider)
+    if cur and cur["proc"].poll() is None:
+        return {"ok": True, "running": True, "output": "".join(cur["out"][-40:])}
+    out: list[str] = []
+    try:
+        proc = subprocess.Popen(spec["login_cmd"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, text=True, bufsize=1,
+                                cwd=str(console.ROOT), start_new_session=True)
+    except (FileNotFoundError, OSError) as e:
+        return {"ok": False, "error": f"could not start {spec['login_cmd'][0]}: {e}"}
+
+    def _pump():
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                out.append(line)
+                if len(out) > 400:
+                    del out[: len(out) - 400]
+        except Exception:  # noqa: BLE001
+            pass
+    threading.Thread(target=_pump, daemon=True).start()
+    _LOGIN[provider] = {"proc": proc, "out": out}
+    return {"ok": True, "running": True, "output": ""}
+
+
+def login_status(provider: str) -> dict:
+    cur = _LOGIN.get(provider)
+    running = bool(cur and cur["proc"].poll() is None)
+    return {"ok": True, "running": running,
+            "output": "".join(cur["out"][-60:]) if cur else "",
+            "connected": _login_present(_PROVIDERS.get(provider, {}))}
+
+
+def auth_snapshot() -> dict:
+    """Per-provider connection state for the console (never returns the secret itself)."""
+    providers = {}
+    for pid, spec in _PROVIDERS.items():
+        connected, via, masked = False, None, None
+        for method, var in spec["methods"].items():
+            v = os.environ.get(var)
+            if v:
+                connected, via, masked = True, method, _mask(v)
+                break
+        if not connected and _login_present(spec):
+            connected, via = True, "login"
+        entry = {"label": spec["label"], "live": spec["live"],
+                 "methods": list(spec["methods"].keys()),
+                 "connected": connected, "via": via, "masked": masked,
+                 "source": _CRED_SOURCE.get(pid, "env" if connected else None),
+                 "models": spec.get("models", []),
+                 "can_login": bool(spec.get("login_cmd")),
+                 "login_running": bool((lp := _LOGIN.get(pid)) and lp["proc"].poll() is None)}
+        if spec.get("model_var"):
+            entry["model"] = os.environ.get(spec["model_var"]) or spec.get("default_model")
+        providers[pid] = entry
+    return {"providers": providers, "engine": os.environ.get("REDSTRIKE_ENGINE", "claude-code")}
+
+
 # --- redstrike CLI resolution ----------------------------------------------
 def _redstrike_base() -> tuple[list[str], dict | None]:
     """argv prefix + env to invoke the `redstrike` CLI (installed binary, else module)."""
@@ -176,7 +281,11 @@ def make_control_handler(target: Path, token: str):
                     "engagements": [e.name for e in console.discover(target)],
                     "runs": runs,
                 })
+            if path == "/api/auth":
+                return self._json(HTTPStatus.OK, auth_snapshot())
             parts = path.strip("/").split("/")  # api / engagements / <id> / <verb>
+            if len(parts) == 4 and parts[1] == "auth" and parts[3] == "login":
+                return self._json(HTTPStatus.OK, login_status(parts[2]))
             if len(parts) == 4 and parts[1] == "engagements":
                 eid, verb = parts[2], parts[3]
                 eng = engagement_dir(eid)
@@ -192,6 +301,10 @@ def make_control_handler(target: Path, token: str):
 
         def _api_post(self, path: str):
             parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[1] == "auth" and parts[3] == "login":  # api / auth / <p> / login
+                return self._json(HTTPStatus.OK, start_login(parts[2]))
+            if len(parts) == 3 and parts[1] == "auth":  # api / auth / <provider>
+                return self._set_auth(parts[2], self._body())
             if path == "/api/engagements":
                 return self._init_engagement(self._body())
             if len(parts) == 4 and parts[1] == "engagements":
@@ -275,6 +388,38 @@ def make_control_handler(target: Path, token: str):
                 return self._json(HTTPStatus.OK, {"ok": False, "note": str(e)})
             return self._json(HTTPStatus.OK, {"ok": True, "stopped": proc.pid})
 
+        # -- LLM provider auth ----------------------------------------------
+        def _set_auth(self, provider: str, body: dict):
+            spec = _PROVIDERS.get(provider)
+            if not spec:
+                return self._json(HTTPStatus.NOT_FOUND, {"error": f"unknown provider {provider}"})
+            if body.get("action") == "disconnect":
+                for var in spec["methods"].values():
+                    os.environ.pop(var, None)
+                _CRED_SOURCE.pop(provider, None)
+                return self._json(HTTPStatus.OK, auth_snapshot())
+            if body.get("action") == "set_model":
+                if spec.get("model_var") and body.get("model"):
+                    os.environ[spec["model_var"]] = str(body["model"]).strip()
+                return self._json(HTTPStatus.OK, auth_snapshot())
+            method = body.get("method")
+            value = (body.get("value") or "").strip()
+            if method not in spec["methods"]:
+                return self._json(HTTPStatus.BAD_REQUEST,
+                                  {"error": f"method must be one of {list(spec['methods'])}"})
+            if not value:
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": "value required"})
+            # set the chosen var; clear this provider's other method so status stays unambiguous
+            for m, var in spec["methods"].items():
+                if m == method:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
+            if spec.get("model_var") and body.get("model"):
+                os.environ[spec["model_var"]] = str(body["model"]).strip()
+            _CRED_SOURCE[provider] = "ui"
+            return self._json(HTTPStatus.OK, auth_snapshot())
+
         # -- SSE tail --------------------------------------------------------
         def _stream_jsonl(self, path: Path, *, max_seconds: int = 1800):
             self.send_response(HTTPStatus.OK)
@@ -325,6 +470,11 @@ def main() -> int:
     ap.add_argument("--enable-control", action="store_true",
                     help="REQUIRED: acknowledge this exposes launch/steer endpoints (opt-in)")
     ap.add_argument("--build", action="store_true", help="force a fresh console build")
+    ap.add_argument("--host", default=os.environ.get("REDSTRIKE_CONSOLE_HOST", "127.0.0.1"),
+                    help="bind address (default 127.0.0.1 / $REDSTRIKE_CONSOLE_HOST). Use 0.0.0.0 ONLY "
+                         "behind a trusted boundary — e.g. a container published to the host loopback "
+                         "(-p 127.0.0.1:8788:8788). The bearer token and the Host/Origin checks remain "
+                         "the access control regardless of bind address.")
     args = ap.parse_args()
 
     if not args.enable_control:
@@ -342,11 +492,18 @@ def main() -> int:
     console.ensure_build(args.build)
 
     handler = make_control_handler(target, token)
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
-    url = f"http://127.0.0.1:{args.port}/"
+    httpd = http.server.ThreadingHTTPServer((args.host, args.port), handler)
+    loopback = args.host in ("127.0.0.1", "::1", "localhost")
+    browse_host = "127.0.0.1" if loopback or args.host in ("0.0.0.0", "", "::") else args.host
+    url = f"http://{browse_host}:{args.port}/"
     print(f"\n  Redstrike console CONTROL PLANE (experimental)")
     print(f"  source : {target}")
-    print(f"  url    : {url}  (127.0.0.1 only)")
+    print(f"  bind   : {args.host}:{args.port}")
+    print(f"  url    : {url}")
+    if not loopback:
+        print(f"  note   : bound to {args.host} (not loopback) — expose ONLY behind a trusted boundary")
+        print(f"           (e.g. published to the host loopback). The bearer token + Host/Origin checks")
+        print(f"           are the access control, so keep them and never put this on a public interface.")
     print(f"  token  : {token}")
     print(f"  use    : send  Authorization: Bearer {token}  on every /api/* request")
     print(f"  (Ctrl+C to stop)\n")

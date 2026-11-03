@@ -1,0 +1,28 @@
+# Build context excludes for the docker/ image (context = repo root).
+# Keep the context small and never ship local secrets or prior engagement data.
+
+.git
+.github
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# rebuilt inside the image:
+console/node_modules
+console/.next
+console/out
+cli/**/*.egg-info
+**/.venv
+**/venv
+
+# local engagement data + secrets (the compose file bind-mounts engagements/ at runtime):
+engagements
+docker/.env
+**/*.log
+
+# docs-only assets (not needed at runtime):
+assets
+benchmark
+
+.DS_Store
+Thumbs.db

@@ -1,0 +1,56 @@
+# Redstrike AI — one service: console + control plane + full toolchain.
+#
+#   cp docker/.env.example docker/.env     # then fill in auth
+#   docker compose -f docker/docker-compose.yml build
+#   docker compose -f docker/docker-compose.yml up
+#   # open http://localhost:8788  and paste the token printed in the logs
+#
+# AUTHORIZED TESTING ONLY. See docker/README.md.
+
+services:
+  redstrike:
+    build:
+      context: ..                     # repo root (the root .dockerignore applies)
+      dockerfile: docker/Dockerfile
+      args:
+        # Tool scope baked into the image. Default --core (web-pentest set; fast, a few GB).
+        # Build the full roster or named categories by exporting REDSTRIKE_INSTALL_ARGS, e.g.:
+        #   REDSTRIKE_INSTALL_ARGS=--all docker compose -f docker/docker-compose.yml build
+        REDSTRIKE_INSTALL_ARGS: ${REDSTRIKE_INSTALL_ARGS:---core}
+    image: redstrike-ai:latest
+    env_file:
+      - .env
+    environment:
+      # Bind the server to all interfaces INSIDE the container so Docker's published
+      # port can reach it; it is published to the host LOOPBACK only (see `ports`).
+      # The bearer token + Host/Origin checks remain the access control.
+      REDSTRIKE_CONSOLE_HOST: "0.0.0.0"
+      REDSTRIKE_CONSOLE_PORT: "8788"
+    ports:
+      # host loopback only — do NOT change the left side to 0.0.0.0 (that would put a
+      # launch-capable endpoint on your network; it is meant for your machine alone).
+      - "127.0.0.1:8788:8788"
+    volumes:
+      # findings + engagement data persist on the host:
+      - ../engagements:/opt/redstrike/engagements
+      # persisted provider logins (so `... run --rm redstrike claude login` sticks):
+      - claude-auth:/root/.claude
+      - codex-auth:/root/.codex
+      - gemini-auth:/root/.gemini
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+    # The in-container Bash sandbox (defense LAYER 3, bubblewrap) can need extra kernel
+    # privileges that Docker drops by default. If the scope gate / a run reports a
+    # bubblewrap/sandbox failure, uncomment these. WITHOUT them the sandbox degrades but
+    # the scope-gate hook (LAYER 2) and the model's RoE self-refusal (LAYER 1) still apply.
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - seccomp=unconfined
+
+volumes:
+  claude-auth:
+  codex-auth:
+  gemini-auth:
