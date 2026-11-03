@@ -12,6 +12,7 @@
 - [ ] kid / jku / x5u injection
 - [ ] claim tampering (role / sub / admin / exp)
 - [ ] forged token ACCEPTED confirmed (authed action/data)
+- [ ] forged token sent in BOTH `Authorization: Bearer` header AND `token` cookie (all carriers; `scripts/jwt_placements.py confirmation_complete` True before any "not accepted")
 - [ ] CVSS rated
 
 ## Emit
