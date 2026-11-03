@@ -259,6 +259,16 @@ def make_control_handler(target: Path, token: str):
         def do_GET(self):
             path = self.path.split("?")[0]
             if path.startswith("/api/"):
+                if path == "/api/bootstrap":
+                    # Hand the access token to the SAME-ORIGIN console page so it self-connects
+                    # (no manual paste). Host/Origin-guarded but NOT bearer-gated: a cross-origin
+                    # page is rejected (can't read the token), and since a cross-origin fetch that
+                    # could read the body always carries an Origin, and DNS-rebinding is caught by
+                    # the Host check, the token stays unreadable to hostile sites. It therefore
+                    # still can't forge /api/* calls — the CSRF/rebinding defense is unchanged.
+                    if not self._host_ok() or not self._origin_ok():
+                        return self._json(HTTPStatus.FORBIDDEN, {"error": "bad host/origin"})
+                    return self._json(HTTPStatus.OK, {"token": token})
                 if not self._api_guard():
                     return
                 return self._api_get(path)
