@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -107,43 +108,158 @@ def _login_present(spec: dict) -> bool:
     return False
 
 
+# The CLI login flows are terminal UIs (Ink): under a PTY they emit cursor/color codes and
+# OSC-8 hyperlinks. Strip them so the captured text reads cleanly and the OAuth URL is extractable.
+_ANSI_RE = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"   # OSC … BEL / ST  (incl. OSC-8 hyperlinks)
+    r"|\x1b[@-Z\\-_]"                       # two-char escapes
+    r"|\x1b\[[0-?]*[ -/]*[@-~]"             # CSI … final byte
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f]")       # stray control chars (keep \t \n)
+_OSC8_RE = re.compile(r"\x1b\]8;[^;]*;(https?://[^\x07\x1b]+)")   # hyperlink target = clean URL
+_OAT_RE = re.compile(r"sk-ant-[A-Za-z0-9._-]{20,}")              # long-lived token from setup-token
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s).replace("\r", "")
+
+
+def _extract_login_url(raw: str):
+    """The clean OAuth URL — from an OSC-8 hyperlink target (unwrapped by redraws) if present,
+    else the first URL in the stripped visible text."""
+    m = _OSC8_RE.search(raw)
+    if m:
+        return m.group(1)
+    m = re.search(r"https?://[^\s'\"]+", _strip_ansi(raw))
+    return m.group(0) if m else None
+
+
+def _provider_connected(spec: dict) -> bool:
+    for var in spec.get("methods", {}).values():
+        if os.environ.get(var):
+            return True
+    return _login_present(spec)
+
+
+def _login_capture(provider: str, spec: dict, out: list[str]):
+    """On login-process exit, adopt a long-lived token the CLI printed (setup-token) into this
+    process's env, so launched runs inherit it — the same effect as the 'Use a key' path.
+    Idempotent."""
+    var = spec.get("methods", {}).get("oauth_token")
+    if not var or os.environ.get(var):
+        return
+    m = _OAT_RE.search(_strip_ansi("".join(out)))
+    if m:
+        os.environ[var] = m.group(0)
+        _CRED_SOURCE[provider] = "ui"
+
+
 def start_login(provider: str) -> dict:
-    """Spawn the provider CLI's own login flow, capturing its output (the URL/code to follow).
-    Best-effort: these flows are browser/OAuth based, so we surface what the CLI prints rather
-    than inventing our own handshake. A persisted login lands in the mounted config dir."""
+    """Spawn the provider CLI's own login flow UNDER A PTY, capturing its output (the URL/code to
+    follow). These login UIs are terminal apps (Ink): with no TTY they render nothing and stall,
+    so we allocate a pty, surface the URL, and keep the master end writable so the console can
+    submit the pasted-back OAuth code (POST .../login/code). A persisted login lands in the
+    mounted config dir; a printed token is adopted into env on exit (see _login_capture)."""
     spec = _PROVIDERS.get(provider)
     if not spec or not spec.get("login_cmd"):
         return {"ok": False, "error": "no login flow for this provider"}
     cur = _LOGIN.get(provider)
     if cur and cur["proc"].poll() is None:
-        return {"ok": True, "running": True, "output": "".join(cur["out"][-40:])}
+        raw = "".join(cur["out"])
+        cur["url"] = cur.get("url") or _extract_login_url(raw)
+        return {"ok": True, "running": True, "output": _strip_ansi(raw)[-2000:], "url": cur.get("url")}
     out: list[str] = []
+    master = None
     try:
-        proc = subprocess.Popen(spec["login_cmd"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                stdin=subprocess.DEVNULL, text=True, bufsize=1,
-                                cwd=str(console.ROOT), start_new_session=True)
-    except (FileNotFoundError, OSError) as e:
-        return {"ok": False, "error": f"could not start {spec['login_cmd'][0]}: {e}"}
+        import pty  # Unix only; the container is Linux
+        master, slave = pty.openpty()
+        proc = subprocess.Popen(spec["login_cmd"], stdin=slave, stdout=slave, stderr=slave,
+                                cwd=str(console.ROOT), start_new_session=True, close_fds=True,
+                                env={**os.environ, "TERM": "xterm-256color"})
+        os.close(slave)  # the child holds the slave; the parent keeps the master (read + write)
+    except (ImportError, OSError, FileNotFoundError):
+        if master is not None:
+            try:
+                os.close(master)
+            except OSError:
+                pass
+            master = None
+        try:  # fallback for non-PTY platforms (may not render an interactive UI)
+            proc = subprocess.Popen(spec["login_cmd"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.PIPE, text=True, bufsize=1,
+                                    cwd=str(console.ROOT), start_new_session=True)
+        except (FileNotFoundError, OSError) as e2:
+            return {"ok": False, "error": f"could not start {spec['login_cmd'][0]}: {e2}"}
 
-    def _pump():
+    def _pump_pty(fd: int):
         try:
-            for line in proc.stdout:  # type: ignore[union-attr]
+            while True:
+                try:
+                    data = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+                out.append(data.decode("utf-8", "replace"))
+                if len(out) > 800:
+                    del out[: len(out) - 800]
+        finally:
+            _login_capture(provider, spec, out)
+
+    def _pump_pipe(stream):
+        try:
+            for line in stream:
                 out.append(line)
-                if len(out) > 400:
-                    del out[: len(out) - 400]
+                if len(out) > 800:
+                    del out[: len(out) - 800]
         except Exception:  # noqa: BLE001
             pass
-    threading.Thread(target=_pump, daemon=True).start()
-    _LOGIN[provider] = {"proc": proc, "out": out}
-    return {"ok": True, "running": True, "output": ""}
+        finally:
+            _login_capture(provider, spec, out)
+
+    if master is not None:
+        threading.Thread(target=_pump_pty, args=(master,), daemon=True).start()
+        _LOGIN[provider] = {"proc": proc, "out": out, "master": master, "url": None}
+    else:
+        threading.Thread(target=_pump_pipe, args=(proc.stdout,), daemon=True).start()
+        _LOGIN[provider] = {"proc": proc, "out": out, "stdin": proc.stdin, "url": None}
+    return {"ok": True, "running": True, "output": "", "url": None}
+
+
+def submit_login_code(provider: str, code: str) -> dict:
+    """Write the user's pasted-back OAuth code to the in-flight login process (the PTY master,
+    or the pipe stdin on the fallback path) so the CLI can finish the handshake."""
+    cur = _LOGIN.get(provider)
+    if not cur:
+        return {"ok": False, "error": "no login in progress"}
+    if cur["proc"].poll() is not None:
+        return {"ok": False, "error": "login process already exited"}
+    data = (str(code or "").strip() + "\r")
+    try:
+        if cur.get("master") is not None:
+            os.write(cur["master"], data.encode("utf-8"))
+        elif cur.get("stdin") is not None:
+            cur["stdin"].write(data)
+            cur["stdin"].flush()
+        else:
+            return {"ok": False, "error": "login has no writable input"}
+    except OSError as e:
+        return {"ok": False, "error": f"could not submit code: {e}"}
+    return {"ok": True, "submitted": True}
 
 
 def login_status(provider: str) -> dict:
     cur = _LOGIN.get(provider)
     running = bool(cur and cur["proc"].poll() is None)
+    spec = _PROVIDERS.get(provider, {})
+    if cur and not running:
+        _login_capture(provider, spec, cur["out"])  # idempotent; catch the token if the pump raced
+    raw = "".join(cur["out"]) if cur else ""
+    if cur:
+        cur["url"] = cur.get("url") or _extract_login_url(raw)  # cache so it survives buffer rollover
     return {"ok": True, "running": running,
-            "output": "".join(cur["out"][-60:]) if cur else "",
-            "connected": _login_present(_PROVIDERS.get(provider, {}))}
+            "output": _strip_ansi(raw)[-2000:],
+            "url": (cur.get("url") if cur else None),
+            "connected": _provider_connected(spec) if spec else False}
 
 
 def auth_snapshot() -> dict:
@@ -311,6 +427,8 @@ def make_control_handler(target: Path, token: str):
 
         def _api_post(self, path: str):
             parts = path.strip("/").split("/")
+            if len(parts) == 5 and parts[1] == "auth" and parts[3] == "login" and parts[4] == "code":
+                return self._json(HTTPStatus.OK, submit_login_code(parts[2], self._body().get("code", "")))
             if len(parts) == 4 and parts[1] == "auth" and parts[3] == "login":  # api / auth / <p> / login
                 return self._json(HTTPStatus.OK, start_login(parts[2]))
             if len(parts) == 3 and parts[1] == "auth":  # api / auth / <provider>

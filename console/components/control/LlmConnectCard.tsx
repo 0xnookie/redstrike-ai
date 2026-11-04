@@ -68,8 +68,11 @@ function ModelSelect({ id, p }: { id: string; p: ProviderAuth }) {
 
 /* ---- browser-login flow (click connect) ---- */
 function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
-  const { startLogin, pollLogin } = useControl();
+  const { startLogin, pollLogin, submitLoginCode } = useControl();
   const [st, setSt] = useState<LoginStatus | null>(null);
+  const [code, setCode] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -86,21 +89,35 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
         if (timer.current) clearInterval(timer.current);
         if (s.connected) onDone();
       }
-    }, 2500);
+    }, 2000);
     return () => {
       alive = false;
       if (timer.current) clearInterval(timer.current);
     };
   }, [id, startLogin, pollLogin, onDone]);
 
-  const url = firstUrl(st?.output);
+  // Prefer the backend's clean extracted URL; fall back to scraping the output.
+  const url = st?.url ?? firstUrl(st?.output);
   const failed = st && st.ok === false;
+
+  const send = async () => {
+    if (!code.trim()) return;
+    setSending(true);
+    const ok = await submitLoginCode(id, code.trim());
+    setSending(false);
+    if (ok) {
+      setCode("");
+      setSent(true);
+    }
+  };
 
   return (
     <div className="mt-3 rounded-lg border border-line bg-card2/60 p-3 text-xs">
       <div className="flex items-center gap-2 text-muted">
         <Loader2 size={13} className="animate-spin text-brand" />
-        Starting the provider login — complete it in your browser…
+        {url
+          ? "Open the authorization page, approve, then paste the code it shows back here."
+          : "Starting the provider login…"}
       </div>
       {url && (
         <a
@@ -112,6 +129,32 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
           <ExternalLink size={12} /> Open authorization page
         </a>
       )}
+      {url && (
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void send()}
+            placeholder="Paste the code from the authorization page"
+            autoComplete="off"
+            spellCheck={false}
+            className="h-8 flex-1 rounded-lg border border-line bg-card px-2 text-xs outline-none placeholder:text-muted focus:border-brand/50"
+          />
+          <button
+            onClick={() => void send()}
+            disabled={sending || !code.trim()}
+            className={cx(
+              "inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-medium text-brand-fg transition hover:brightness-110",
+              (sending || !code.trim()) && "cursor-not-allowed opacity-60",
+            )}
+          >
+            {sending ? <Loader2 size={13} className="animate-spin" /> : <PlugZap size={13} />} Submit code
+          </button>
+        </div>
+      )}
+      {sent && !st?.connected && (
+        <p className="mt-2 text-muted">Code submitted — finishing the handshake…</p>
+      )}
       {st?.output && (
         <pre className="scroll-thin mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-card p-2 text-[11px] text-muted">
           {st.output}
@@ -119,8 +162,8 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
       )}
       {failed && (
         <p className="mt-2 text-amber-400">
-          The CLI login couldn’t start here (it needs a browser/terminal). Use a key below instead, or run the login
-          once in a terminal — the console auto-detects it.
+          The CLI login couldn’t start here. Use a key below instead, or run the login once in a terminal — the console
+          auto-detects it.
         </p>
       )}
     </div>

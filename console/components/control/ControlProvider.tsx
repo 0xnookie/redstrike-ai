@@ -43,6 +43,7 @@ interface ControlCtx {
   setModel: (provider: string, model: string) => Promise<boolean>;
   startLogin: (provider: string) => Promise<LoginStatus | null>;
   pollLogin: (provider: string) => Promise<LoginStatus | null>;
+  submitLoginCode: (provider: string, code: string) => Promise<boolean>;
 }
 
 const Ctx = createContext<ControlCtx | null>(null);
@@ -387,6 +388,17 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     }
   }, [refreshAuth]);
 
+  const submitLoginCode = useCallback(async (provider: string, code: string): Promise<boolean> => {
+    try {
+      const r = await api.submitLoginCode(tokenRef.current, provider, code);
+      if (!r.ok) setLastError(r.error || "could not submit the code");
+      return !!r.ok;
+    } catch (e) {
+      setLastError(msgOf(e));
+      return false;
+    }
+  }, []);
+
   // load provider auth once the plane is reachable
   useEffect(() => {
     if (conn === "ready") void refreshAuth();
@@ -421,6 +433,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     setModel,
     startLogin,
     pollLogin,
+    submitLoginCode,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

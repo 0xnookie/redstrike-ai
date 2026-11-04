@@ -74,7 +74,8 @@ export interface ProviderAuth {
 export interface LoginStatus {
   ok: boolean;
   running: boolean;
-  output: string;         // what the provider CLI printed (the URL/code to follow)
+  output: string;         // what the provider CLI printed (the URL/code to follow), ANSI-stripped
+  url?: string | null;    // the OAuth URL, extracted clean from the CLI output
   connected: boolean;
 }
 export interface AuthSnapshot {
@@ -190,6 +191,13 @@ export const startLogin = (token: string, provider: string) =>
 
 export const getLoginStatus = (token: string, provider: string) =>
   request<LoginStatus>(`/api/auth/${encodeURIComponent(provider)}/login`, token);
+
+// submit the OAuth code the user pasted back from the authorization page (written to the
+// login process's stdin so the CLI can finish the handshake)
+export const submitLoginCode = (token: string, provider: string, code: string) =>
+  request<{ ok: boolean; submitted?: boolean; error?: string }>(
+    `/api/auth/${encodeURIComponent(provider)}/login/code`, token,
+    { method: "POST", body: JSON.stringify({ code }) });
 
 /* ---- SSE run stream (fetch-based; EventSource can't set Authorization) ---- */
 export async function openRunStream(
