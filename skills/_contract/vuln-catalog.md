@@ -81,10 +81,10 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **File / path** | A01/A05 | family | `file-context` ✅ (path/file/upload params + upload endpoints) | `path-traversal-lfi` ✅ (+rfi/wrappers in refs) · `upload-rce` ✅ | ✅ |
 | **Auth & session** | A07 | family | `auth-context` ✅ (login/session/token flows) | `auth-bypass` ✅ (+ session/mfa/reset) · `jwt` ✅ · `oauth` ✅ | ✅ |
 | **API** | — (WSTG/API Top 10) | family | `api-context` ✅ (REST/GraphQL schema + authz) | `bola-bfla` ✅ (BOLA+BFLA+excessive-data+mass-assign) · `graphql` ✅ ; reuses `authz-*`/`injection-*` | ✅ |
-| **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) · `agent-recon` ✅ (MCP/A2A/OpenAPI agent-protocol recon → agent_context.json) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `excessive-agency` ✅ (LLM06) · `llm-output-handling` ✅ (LLM05) | ✅ |
+| **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) · `agent-recon` ✅ (MCP/A2A/OpenAPI agent-protocol recon → agent_context.json) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `ai-supply-chain` ✅ (LLM03) · `data-poisoning` ✅ (LLM04) · `llm-output-handling` ✅ (LLM05) · `excessive-agency` ✅ (LLM06) | ✅ |
 | **AI agent protocols** | OWASP Agentic Top 10 (ASI01-10) | feeder | `agent-recon` ✅ (MCP/A2A/OpenAPI discovery + enum + posture → agent_context.json) | (feeds the AI/LLM executors) | ✅ |
 | **Web3 / smart contract** | OWASP Smart Contract Top 10 | family | `web3-context` ✅ (contracts/source/proxy/standards/surface + worth-it score → web3_context.json) | `sc-access-control` ✅ · `sc-upgradeability` ✅ · `sc-accounting` ✅ · `sc-oracle-mev` ✅ · `sc-reentrancy` ✅ · `sc-signature` ✅ — findings proven on a local Foundry fork | ✅ |
-| **Active Directory** *(internal / assumed-breach)* | MITRE ATT&CK | family | `ad-context` ✅ (BloodHound + principals/ACL/ADCS/paths) | `ad-kerberos` ✅ · `ad-acl-abuse` ✅ · `ad-adcs` ✅ (ESC1-8) · `ad-lateral-movement` ✅ | ✅ |
+| **Active Directory** *(internal / assumed-breach)* | MITRE ATT&CK | family | `ad-context` ✅ (BloodHound + principals/ACL/ADCS/paths) | `ad-initial-access` ✅ · `ad-kerberos` ✅ · `ad-acl-abuse` ✅ · `ad-adcs` ✅ (ESC1-15) · `ad-lateral-movement` ✅ | ✅ |
 | **CSRF** | — | single | — | `csrf` ✅ | ✅ |
 | **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
 | **Open redirect** | — | single | — | `open-redirect` ✅ | ✅ |
@@ -105,6 +105,26 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **Exposed surface / sensitive files** | A05/A01 | single | — | `exposed-surface` ✅ (active dir/file/param fuzzing → signature-confirmed exposures: VCS `/.git`, backups, `.env`/config, data dumps, directory listing, debug/actuator panels, nuclei info-leaks; de-duped vs `secrets`/`security-headers`/`privesc`) | ✅ |
 | **Forbidden / 403 bypass** | A01/A05 | single | — | `forbidden-bypass` ✅ (reach a 401/403-restricted endpoint via path/method/header/protocol manipulation; confirmed by the REAL restricted content returning — body-signature match, not a bare 200/soft-404; de-duped vs `exposed-surface`/`auth-bypass`) | ✅ |
 | **Framework-specific exploitation** | A06 Vulnerable & Outdated Components | family (base+agents) | `framework-base` ✅ (shared executor pipeline: fingerprint → version-pin → surface enum → version-matched CVE → benign confirm → counterevidence) | `wordpress` ✅ (core · plugins · themes · xmlrpc · REST · users · exposure) · `nextjs` ✅ (middleware CVE-2025-29927 · image-optimizer SSRF · RSC/cache · source maps · data routes) — clone the base for drupal/joomla/laravel/spring/…; **specializes `cve-intelligence`** (deep per-stack recon + ecosystem) | ✅ |
+| **Cryptographic weaknesses** | A02 | single | — | `crypto-attacks` ✅ (padding-oracle CBC decrypt/forge · ECB cut-and-paste · weak/reused IV/nonce · bit-flip malleability · hash length-extension; JWT crypto → `jwt`) | ✅ |
+| **TLS / transport** | A02 | single | — | `tls-attacks` ✅ (weak proto/cipher/cert; Heartbleed/POODLE/ROBOT/BEAST/CCS/Raccoon — benign read-only checks) | ✅ |
+| **Software supply chain** | A06 | single | — | `supply-chain` ✅ (dependency confusion / typosquat / resolver preference, proven benignly in a lab) | ✅ |
+
+## Beyond-web domains (same quint + reviewer each)
+
+The table above is the web surface. The framework also ships these domains as first-class executors
+(each with `review.md` + `verify.md` + a `*-verify` reviewer), approval-gated where active:
+
+- **AI / LLM** (OWASP LLM Top 10): `prompt-injection` · `sensitive-disclosure` · `ai-supply-chain` · `data-poisoning` · `llm-output-handling` · `excessive-agency` (feeders `llm-context` · `agent-recon`).
+- **Web3 / smart contract**: `sc-access-control` · `sc-upgradeability` · `sc-accounting` · `sc-oracle-mev` · `sc-reentrancy` · `sc-signature` (feeder `web3-context`; Foundry-fork-proven).
+- **Active Directory**: `ad-initial-access` · `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` · `ad-lateral-movement` (feeder `ad-context`).
+- **Cloud & container**: `cloud` · `container-escape` · `k8s-attacks` · `sccm-exploitation`.
+- **Host post-exploitation**: `linux-privesc` · `windows-privesc` · `credential-access` · `persistence`.
+- **Mobile / IoT / wireless**: `mobile` · `iot` · `wireless`.
+- **Binary / fuzzing**: `fuzzing` · `exploit-dev`.
+- **Social engineering**: `social-engineering` (authorized, named-population campaigns; aggregate-only).
+
+All active domains import [`roe-gate.md`](roe-gate.md) + human approval gates (exploitation / post-ex
+altitude); confirmation is benign + cleaned up.
 
 ## Notes
 - **Framework agents** (`wordpress`, `nextjs`, …) are Tier-2 executors that **specialize `cve-intelligence`**

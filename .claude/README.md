@@ -22,10 +22,17 @@ Invoke the **`redstrike`** skill (orchestrator): it runs recon → vuln-category
 reviewer subagent, gated, and assembles the report.
 
 ## Registered here
-- **Reviewer subagents** (`.claude/agents/`): `xss-reflected-verify`, `xss-stored-verify`,
-  `xss-dom-verify`, `xss-blind-verify`, `csrf-verify`, `cors-verify`, `open-redirect-verify`, `clickjacking-verify`, `host-header-verify`, `request-smuggling-verify`, `cache-poisoning-verify`, `subdomain-takeover-verify`, `security-headers-verify`, `secrets-verify`, `business-logic-verify`.
-- **Skill bindings** (`.claude/skills/`): `redstrike` (orchestrator) + `redstrike-<skill>` for each
-  built skill (js-analysis, xss-context, xss-reflected/stored/dom/blind, csrf, cors, open-redirect, clickjacking, host-header, request-smuggling, cache-poisoning, subdomain-takeover, security-headers, secrets, business-logic).
+- **Reviewer subagents** (`.claude/agents/`): one **`<name>-verify`** per findings-producing skill —
+  **80** in total (e.g. `xss-reflected-verify`, `sqli-inband-verify`, `ssrf-blind-verify`, `idor-verify`,
+  `jwt-verify`, `sc-reentrancy-verify`, `ad-kerberos-verify`, `cloud-verify`, `fuzzing-verify`, …). Each
+  runs with its **own fresh context**.
+- **Skill bindings** (`.claude/skills/`): the **`redstrike`** orchestrator + a **`redstrike-<name>`**
+  binding per skill — **105** in total (recon feeders, the vuln executors, and the AI/LLM · Web3 · AD ·
+  cloud/container · mobile/IoT/wireless · binary domains, plus the Tier-3 mission/capability agents).
+
+> These lists track `../skills/` one-to-one; rather than enumerate every entry here (and re-drift), see
+> the authoritative catalog in [`../skills/_contract/vuln-catalog.md`](../skills/_contract/vuln-catalog.md)
+> and the tier map in [`../skills/_contract/agent-tiers.md`](../skills/_contract/agent-tiers.md).
 
 ## Discovery
 Claude Code loads `.claude/skills/` and `.claude/agents/` **at session start**, so new entries here

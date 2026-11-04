@@ -8,7 +8,7 @@ Redstrike AI
 
 ### AI-Powered Offensive Security Framework
 
-**A red-team of AI agents for authorized penetration testing — web, AI/LLM (OWASP LLM Top 10), Active Directory, and post-exploitation — where every skill ships a methodology checklist *and* an independent reviewer agent that verifies each finding against evidence.**
+**A red-team of AI agents for authorized penetration testing — web, AI/LLM (OWASP LLM Top 10), Web3 / smart contract, Active Directory, cloud & containers, mobile / IoT / wireless, and post-exploitation — where every skill ships a methodology checklist *and* an independent reviewer agent that verifies each finding against evidence.**
 
 🎯 [What is it](#-what-is-redstrike-ai) • 🖥️ [Console](#️-console) • 🏗️ [Architecture](#️-architecture) • 🔁 [Two-Altitude Review](#-the-two-altitude-review) • 🧩 [Skill Contract](#-the-skill-contract) • 🤖 [Agents](#-agents--skills) • 🚀 [Quickstart](#-quickstart) • 🛡️ [Safety](#️-safety--authorization)
 
@@ -17,11 +17,12 @@ Redstrike AI
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20WSTG%20%7C%20LLM%20Top%2010%20%7C%20ATT%26CK-informational)]()
-[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-68-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-71-blueviolet)]()
+[![Skills](https://img.shields.io/badge/Skills-105-brightgreen)]()
+[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-77-brightgreen)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-80-blueviolet)]()
 [![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-7%20agents-8A2BE2)]()
-[![Families](https://img.shields.io/badge/Vuln%20Families-11-red)]()
-[![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20AD%20%7C%20PostEx-red)]()
+[![Families](https://img.shields.io/badge/Vuln%20Families-13-red)]()
+[![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20Web3%20%7C%20AD%20%7C%20Cloud%20%7C%20Mobile%2FIoT%20%7C%20PostEx-red)]()
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange)]()
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)]()
 
@@ -114,27 +115,39 @@ Build order and the full spec live in [`skills/_contract/README.md`](skills/_con
 
 ## 🤖 Agents & Skills
 
-Each findings-producing agent is a full quint with its own independent reviewer subagent. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
+**105 skills** — **80 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (80 `*-verify` agents), plus **25 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 
 **Recon** (Tier 1) — `osint` (passive intel + wordlist terms) · `host-discovery` (subdomains / live hosts / ports) · `content-discovery` (crawl + brute-force + **custom wordlists**) · `js-analysis` *(gold standard)* · `source-audit` *(white-box: cross-language dangerous-sink grep → routes candidates to the vuln executors)*
 
 **XSS family** — `xss-context` feeder → `xss-reflected` · `xss-stored` · `xss-dom` · `xss-blind`
 
-**Atomic single agents** — `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `business-logic` · `nosql-injection` · `ldap-injection` · `prototype-pollution` · `race-condition` · `parameter-pollution` · `waf-bypass` *(capability — tuned evasion ladder, feeds the vuln agents)*
+**Atomic single agents** — `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `forbidden-bypass` · `business-logic` · `nosql-injection` · `ldap-injection` · `prototype-pollution` · `race-condition` · `parameter-pollution` · `waf-bypass` *(capability — tuned evasion ladder, feeds the vuln agents)*
 
 **Families** ✅ (feeder + variants each) — SSRF (`inband`/`blind`/`cloud`) · SQLi (`inband`/`blind`) · access-control (`idor`/`privesc`) · injection (`ssti`/`command-injection`/`deserialization`) · XXE (`inband`/`blind`) · file/path (`path-traversal-lfi`/`upload-rce`) · auth (`auth-bypass`/`jwt`/`oauth`) · API (`bola-bfla`/`graphql`)
 
-**AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` · `agent-recon` (agent-protocol recon: MCP/A2A/OpenAPI) → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `excessive-agency` (LLM06) · `llm-output-handling` (LLM05)
+**Framework-specific exploitation** ✅ (A06) — `framework-base` → `wordpress` · `nextjs` (fingerprint → version-pin → version-matched reachable CVEs, benign confirm; clone the base per stack; **specializes `cve-intelligence`**)
+
+**Crypto · TLS · supply chain** ✅ — `crypto-attacks` (padding-oracle / ECB / weak-IV / bit-flip / length-extension) · `tls-attacks` (weak proto / cipher / cert; Heartbleed / POODLE / ROBOT …) · `supply-chain` (A06 dependency / resolver confusion)
+
+**AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` · `agent-recon` (agent-protocol recon: MCP/A2A/OpenAPI) → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `ai-supply-chain` (LLM03) · `data-poisoning` (LLM04) · `llm-output-handling` (LLM05) · `excessive-agency` (LLM06)
 
 **Web3 / smart contract** ✅ (OWASP Smart Contract Top 10) — `web3-context` (contracts / proxy / surface + pre-dive worth-it score) → `sc-access-control` · `sc-upgradeability` · `sc-accounting` · `sc-oracle-mev` · `sc-reentrancy` · `sc-signature` — every finding proven on a **local Foundry fork** (no live tx, no real funds)
 
-**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-15) · `ad-lateral-movement`
+**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-initial-access` · `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-15) · `ad-lateral-movement`
 
-**Post-exploitation** ✅ — `linux-privesc` (linpeas-first enumeration) · `windows-privesc` (winPEAS-first) — playbook-driven; benign-proof + cleanup
+**Post-exploitation** ✅ — `linux-privesc` (linpeas-first) · `windows-privesc` (winPEAS-first) · `credential-access` · `persistence` · `container-escape` · `k8s-attacks` · `sccm-exploitation` · `cloud` (AWS/Azure/GCP metadata-cred theft · IAM privesc · public storage) — playbook-driven, approval-gated; benign-proof + cleanup
 
-**Reporting** — `reporting` aggregates every skill's *accepted* findings into the client report (CVSS, evidence, exec summary).
+**Mobile · IoT · wireless** ✅ — `mobile` (Android/iOS, OWASP MASVS) · `iot` (firmware extraction + hardware interfaces) · `wireless` (WPA handshake / WPS / evil-twin / Enterprise) — authorized device/network only, benign-proof
+
+**Binary / fuzzing** ✅ — `fuzzing` (coverage-guided → sanitizer-traced PoC) · `exploit-dev` (triaged crash → benign control-of-execution PoC under the target's real mitigations)
+
+**Social engineering** ✅ — `social-engineering` (authorized, named-population simulated campaigns; aggregate metrics only, no real credentials stored)
+
+**Reporting & docs** — `reporting` aggregates every skill's *accepted* findings into the client report (CVSS, evidence, exec summary) · `engagement-docs` writes the RoE at kickoff and the formal report + attestation letter + retest template at close.
 
 **Single-class hunters** — `xss-hunter`, the first **`<class>-hunter`**: a depth-first entry point that drives one vuln family end-to-end — `bug-bounty` pinned to a single class. It *reuses* the class's `<class>-context` feeder + variants + their reviewers + packaging (a thin wrapper, never a fork), so new hunters (`sqli-hunter`, `ssrf-hunter`, …) are ~30-line clones over [`hunter-base.md`](skills/_contract/hunter-base.md).
+
+**Tier-3 capabilities** — `cve-intelligence` (tech → version-matched reachable CVEs → prioritize) · `exploit-generator` (accepted finding → scoped benign PoC) · `attack-chain-discovery` (compose accepted findings → kill chains) · `parameter-optimization` (WAF/filter model → tuned payloads + throughput). **Missions** — `bug-bounty` · `ctf-solver`, plus the `redstrike` orchestrator.
 
 Under **Claude Code** these are wired as runnable primitives in [`.claude/`](.claude/): executor **skills** (`redstrike-*`) + reviewer **subagents** (`*-verify`) + the **`redstrike`** orchestrator. See [`.claude/README.md`](.claude/README.md).
 
@@ -301,11 +314,13 @@ The roster (168 tools across 19 categories) is defined once in
 
 ## 🗺️ Roadmap
 
-- ✅ **All 9 vuln families complete** (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + 11 atomic agents + the `reporting` aggregator
-- ✅ **Tier-3 red team built**: Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization (the mission + capability agents that orchestrate the lower tiers)
-- ✅ **Single-class hunters** — the `<class>-hunter` pattern (`hunter-base` + `xss-hunter`): `bug-bounty` pinned to one class, depth-first; future hunters are ~30-line clones of the class block
-- ✅ `host-discovery` + `content-discovery` recon feeders
-- ✅ **Tooling setup**: `scripts/doctor.sh` (presence check) + `scripts/install.sh` (category-scoped installer) driven by `scripts/tools.manifest` — see [`INSTALL.md`](INSTALL.md)
+- ✅ **Web complete** — 9 families (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + the atomic agents (incl. `forbidden-bypass`, `parameter-pollution`, `crypto-attacks`, `tls-attacks`, `supply-chain`) + the `reporting` aggregator
+- ✅ **Framework-specific exploitation** — `framework-base` + `wordpress` / `nextjs` (clone per stack), specializing `cve-intelligence`
+- ✅ **Beyond web** — AI/LLM (OWASP LLM Top 10), Web3 / smart contract (Foundry-fork-proven), Active Directory (assumed-breach), cloud & containers (`cloud` / `container-escape` / `k8s-attacks` / `sccm-exploitation`), mobile / IoT / wireless, and binary (`fuzzing` / `exploit-dev`)
+- ✅ **Post-exploitation** — `linux-privesc` · `windows-privesc` · `credential-access` · `persistence`
+- ✅ **Tier-3 red team** — Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization + the `<class>-hunter` pattern (`hunter-base` + `xss-hunter`)
+- ✅ **Recon + tooling** — `osint` / `host-discovery` / `content-discovery` (custom wordlists) / `js-analysis` / `source-audit`; `scripts/doctor.sh` + `scripts/install.sh` (168 tools / 19 categories) — see [`INSTALL.md`](INSTALL.md)
+- ✅ **Web console** + the **`redstrike` CLI** (Claude Code as the engine)
 
 ---
 

@@ -13,11 +13,19 @@ The contract, the two review altitudes, and how to build a new skill live in
 | [`xss-dom`](xss-dom/) | vuln variant (dom) | yes | `review.md` + `verify.md` | xss-context / js-analysis → reporting |
 | [`xss-blind`](xss-blind/) | vuln variant (blind/OOB) | yes | `review.md` + `verify.md` | xss-context / xss-stored → reporting |
 
-**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `business-logic`
+**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `forbidden-bypass` · `business-logic` · `nosql-injection` · `ldap-injection` · `prototype-pollution` · `race-condition` · `parameter-pollution` · `crypto-attacks` · `tls-attacks` · `supply-chain` · `waf-bypass` *(capability)*
 
 **Vuln families** (✅ built — `<class>-context` feeder + variants): **SSRF** (inband/blind/cloud) · **SQLi** (inband/blind) · **access-control** (idor/privesc) · **injection** (ssti/command-injection/deserialization) · **XXE** (inband/blind) · **file/path** (path-traversal-lfi/upload-rce) · **auth** (auth-bypass/jwt/oauth) · **API** (bola-bfla/graphql)
 
-**Reporting** (✅ built): `reporting` aggregates every skill's *accepted* findings into the client report.
+**Framework exploitation** (✅ built): `framework-base` → `wordpress` · `nextjs` (clone per stack; specializes `cve-intelligence`).
+
+**Beyond web** (✅ built — same quint each): **AI/LLM** (`llm-context` · `agent-recon` → `prompt-injection` / `sensitive-disclosure` / `ai-supply-chain` / `data-poisoning` / `llm-output-handling` / `excessive-agency`) · **Web3** (`web3-context` → six `sc-*`, Foundry-fork-proven) · **Active Directory** (`ad-context` → `ad-initial-access` / `ad-kerberos` / `ad-acl-abuse` / `ad-adcs` / `ad-lateral-movement`) · **post-ex** (`linux-privesc` / `windows-privesc` / `credential-access` / `persistence` / `container-escape` / `k8s-attacks` / `sccm-exploitation` / `cloud`) · **mobile/IoT/wireless** (`mobile` / `iot` / `wireless`) · **binary** (`fuzzing` / `exploit-dev`) · **social-engineering**.
+
+**Tier-3 red team** (✅ built): missions `bug-bounty` · `ctf-solver` · `xss-hunter`; capabilities `cve-intelligence` · `exploit-generator` · `attack-chain-discovery` · `parameter-optimization`. See [`_contract/agent-tiers.md`](_contract/agent-tiers.md).
+
+**Reporting & docs** (✅ built): `reporting` aggregates every skill's *accepted* findings into the client report; `engagement-docs` writes the RoE + the formal report / attestation / retest suite.
+
+> **105 skills total** — **80 findings-producing** (one `*-verify` reviewer each) + **25 review-only** (recon feeders, services, missions). The authoritative catalog is [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md).
 
 ## Roadmap (same quad for each)
 - **Recon feeders:** ✅ `osint` · `host-discovery` · `content-discovery` (custom wordlists) · `js-analysis` — all built
