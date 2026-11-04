@@ -40,6 +40,7 @@ XSS is cheap to find and cheap to dismiss — spend the budget where a fire beco
 Main product origin → admin subdomains → APIs (rendered fields) → marketing / help / docs sites.
 ### Surface signals (from recon — route attention)
 - Redirect / return-URL params (one-click reflected XSS); tracking / UTM / analytics params.
+- Params echoed into **response headers** (`Location`, `Set-Cookie`, `Content-Type`) → test CRLF / response-splitting → XSS.
 - Missing or weak CSP, missing `X-Content-Type-Options: nosniff`, permissive upload `Content-Type`.
 - DOM sinks in the app's JS (`js-analysis` gadgets); client-side routers / hash handlers.
 - Tech markers: markdown / documentation / diagram renderers, in-browser template engines,
@@ -56,6 +57,7 @@ benignly (benign marker / OOB token / `document.cookie.length`, never real user 
 | SVG / HTML upload served same-origin | + CSP bypass if one is present | same-origin cookie / session theft |
 | postMessage XSS (weak / absent origin check) | exfil a cross-origin token the frame holds | cross-origin token exfil |
 | Stored XSS rendered to an admin / privileged viewer | fires inside the privileged session | cross-privilege escalation / takeover |
+| Reflected value that lands in a **response header** | + CRLF / response-splitting → inject a same-origin HTML body | same-origin persistent XSS (cache / proxy-amplified) |
 Benign proof of each: a per-chain OOB token + `document.domain` (attributes the fire), or one scoped
 action as the victim shown once — never a mass or destructive action. Stored payloads that can reach
 real users are approval-gated + logged in `cleanup.md` for removal (SKILL §Safety).
