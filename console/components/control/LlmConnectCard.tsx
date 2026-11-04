@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   KeyRound, PlugZap, Unplug, Loader2, Bot, CheckCircle2, LogIn, ExternalLink, X,
 } from "lucide-react";
@@ -73,28 +73,54 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
   const [code, setCode] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [stopped, setStopped] = useState(false); // login ended without connecting (do NOT auto-respawn)
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const aliveRef = useRef(true);
 
-  useEffect(() => {
-    let alive = true;
+  const clear = () => {
+    if (timer.current) {
+      clearInterval(timer.current);
+      timer.current = null;
+    }
+  };
+
+  // Start (or restart) the login ONCE — never from an effect that re-runs on every parent
+  // render. A login that ends without connecting sets `stopped` and waits for an explicit
+  // retry, so a failed/expired code can't spin up an endless chain of fresh logins.
+  const begin = useCallback(() => {
+    setStopped(false);
+    setSent(false);
+    setCode("");
+    setSt(null);
     void (async () => {
       const s = await startLogin(id);
-      if (alive) setSt(s);
+      if (aliveRef.current) setSt(s);
     })();
+    clear();
     timer.current = setInterval(async () => {
       const s = await pollLogin(id);
-      if (!alive) return;
+      if (!aliveRef.current) return;
       if (s) setSt(s);
-      if (s && (s.connected || !s.running)) {
-        if (timer.current) clearInterval(timer.current);
-        if (s.connected) onDone();
+      if (s && s.connected) {
+        clear();
+        onDoneRef.current();
+      } else if (s && !s.running) {
+        clear();
+        setStopped(true);
       }
     }, 2000);
+  }, [id, startLogin, pollLogin]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    begin();
     return () => {
-      alive = false;
-      if (timer.current) clearInterval(timer.current);
+      aliveRef.current = false;
+      clear();
     };
-  }, [id, startLogin, pollLogin, onDone]);
+  }, [begin]);
 
   // Prefer the backend's clean extracted URL; fall back to scraping the output.
   const url = st?.url ?? firstUrl(st?.output);
@@ -113,13 +139,25 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
 
   return (
     <div className="mt-3 rounded-lg border border-line bg-card2/60 p-3 text-xs">
-      <div className="flex items-center gap-2 text-muted">
-        <Loader2 size={13} className="animate-spin text-brand" />
-        {url
-          ? "Open the authorization page, approve, then paste the code it shows back here."
-          : "Starting the provider login…"}
-      </div>
-      {url && (
+      {stopped ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-amber-400">The login ended before completing.</span>
+          <button
+            onClick={begin}
+            className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-brand/40 bg-brand/10 px-2.5 text-xs font-medium text-fg transition hover:brightness-110"
+          >
+            <LogIn size={12} /> Try again
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-muted">
+          <Loader2 size={13} className="animate-spin text-brand" />
+          {url
+            ? "Open the authorization page, approve, then paste the code it shows back here."
+            : "Starting the provider login…"}
+        </div>
+      )}
+      {!stopped && url && (
         <a
           href={url}
           target="_blank"
@@ -129,7 +167,7 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
           <ExternalLink size={12} /> Open authorization page
         </a>
       )}
-      {url && (
+      {!stopped && url && (
         <div className="mt-2 flex flex-col gap-2 sm:flex-row">
           <input
             value={code}
@@ -152,7 +190,7 @@ function LoginFlow({ id, onDone }: { id: string; onDone: () => void }) {
           </button>
         </div>
       )}
-      {sent && !st?.connected && (
+      {!stopped && sent && !st?.connected && (
         <p className="mt-2 text-muted">Code submitted — finishing the handshake…</p>
       )}
       {st?.output && (
