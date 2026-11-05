@@ -310,13 +310,15 @@ function ProviderRow({ id, p }: { id: string; p: ProviderAuth }) {
               <CheckCircle2 size={13} /> {METHOD_LABEL[p.via ?? ""] ?? "connected"}
               {p.masked && <span className="text-muted"> · {p.masked}</span>}
             </span>
-            <button
-              onClick={() => void disconnect()}
-              disabled={working}
-              className="inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-card px-2 text-[11px] text-muted transition hover:border-brand/40 hover:text-fg disabled:opacity-50"
-            >
-              <Unplug size={12} /> Disconnect
-            </button>
+            {p.can_disconnect && (
+              <button
+                onClick={() => void disconnect()}
+                disabled={working}
+                className="inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-card px-2 text-[11px] text-muted transition hover:border-brand/40 hover:text-fg disabled:opacity-50"
+              >
+                <Unplug size={12} /> Disconnect
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-1.5">
@@ -348,6 +350,14 @@ function ProviderRow({ id, p }: { id: string; p: ProviderAuth }) {
           </div>
         )}
       </div>
+
+      {/* connected via a CLI login we don't own → honest hint instead of a dead Disconnect */}
+      {p.connected && !p.can_disconnect && (
+        <p className="mt-2 text-[11px] text-muted">
+          Connected via the {p.label} CLI’s own login (detected on disk). The console never deletes CLI
+          credentials — to disconnect, log out with the {p.label} CLI or unmount its config directory.
+        </p>
+      )}
 
       {/* connected → model dropdown */}
       {p.connected && p.models.length > 0 && (

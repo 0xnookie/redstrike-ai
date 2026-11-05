@@ -69,6 +69,7 @@ export interface ProviderAuth {
   model?: string;         // providers with a model var
   models: string[];       // dropdown options
   can_login: boolean;     // a click-to-login flow exists
+  can_disconnect: boolean;// console-held cred (env/key) — false for a CLI login detected on disk
   login_running: boolean; // a login flow is in progress
 }
 export interface LoginStatus {

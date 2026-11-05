@@ -280,6 +280,11 @@ def auth_snapshot() -> dict:
                  "source": _CRED_SOURCE.get(pid, "env" if connected else None),
                  "models": spec.get("models", []),
                  "can_login": bool(spec.get("login_cmd")),
+                 # The console can only disconnect a credential IT holds (an env var it set / a key
+                 # you typed). A login the provider CLI persisted on disk (via == "login") is NOT
+                 # ours to delete — clearing env vars leaves it detected, so disconnect would no-op.
+                 # Surface that so the UI shows an honest "log out via the CLI" hint instead.
+                 "can_disconnect": bool(connected and via and via != "login"),
                  "login_running": bool((lp := _LOGIN.get(pid)) and lp["proc"].poll() is None)}
         if spec.get("model_var"):
             entry["model"] = os.environ.get(spec["model_var"]) or spec.get("default_model")
