@@ -341,7 +341,8 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
     extra_allow = args.allow or []
     try:
         prep = engine.prepare(
-            eng_dir, repo, sys.executable, mode="autonomous", extra_allow=extra_allow
+            eng_dir, repo, sys.executable, mode="autonomous", extra_allow=extra_allow,
+            resume=args.resume,
         )
     except FileNotFoundError as e:
         print(ui.err(str(e)))

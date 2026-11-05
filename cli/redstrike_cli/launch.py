@@ -75,6 +75,7 @@ def prepare_runtime(
     *,
     mode: str = "interactive",
     extra_allow: list[str] | None = None,
+    resume: bool = False,
 ) -> Prepared:
     engagement_dir = engagement_dir.resolve()
     scope_yaml = engagement_dir / "scope.yaml"
@@ -121,9 +122,20 @@ def prepare_runtime(
     mcp_config = runtime / "mcp-none.json"
     mcp_config.write_text(json.dumps({"mcpServers": {}}, indent=2) + "\n", encoding="utf-8")
 
+    # Session id: claude REJECTS a reused `--session-id` ("Session ID … is already in use"),
+    # so a fresh (non-resume) launch must mint a NEW id every time — reusing the stored one only
+    # works through `--resume`. The stored id is therefore the resume anchor: the last fresh run's
+    # session. (Reusing it on a plain re-launch is what made every 2nd autonomous run die at the
+    # boundary marker.)
     session_file = runtime / "session.json"
+    stored = None
     if session_file.is_file():
-        session_id = json.loads(session_file.read_text(encoding="utf-8")).get("session_id") or str(uuid.uuid4())
+        try:
+            stored = json.loads(session_file.read_text(encoding="utf-8")).get("session_id")
+        except Exception:
+            stored = None
+    if resume and stored:
+        session_id = stored
     else:
         session_id = str(uuid.uuid4())
         session_file.write_text(

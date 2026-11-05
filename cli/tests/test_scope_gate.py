@@ -122,5 +122,31 @@ class TestMcpGate(unittest.TestCase):
         self.assertEqual(self.mdec(["click", "role:button[name=Submit]"]), "pass")
 
 
+class TestPortScopedDomain(unittest.TestCase):
+    """A scope authored as "host:port" must still match the (always port-less) target host —
+    otherwise the whole host is silently out of scope and every active command is denied."""
+
+    PORT_SCOPE = {
+        "in_scope": {"domains": ["pentest-ground.com:4280"], "cidrs": [], "urls": []},
+        "out_of_scope": {"domains": [], "cidrs": []},
+    }
+
+    def pdec(self, tool, inp):
+        return sg.evaluate(tool, inp, self.PORT_SCOPE, PROT, CWD)["decision"]
+
+    def test_classify_host_in_scope(self):
+        self.assertEqual(sg.classify("pentest-ground.com", self.PORT_SCOPE), "in")
+        self.assertEqual(sg.classify("pentest-ground.com:4280", self.PORT_SCOPE), "in")
+
+    def test_bash_against_port_scoped_host_passes(self):
+        self.assertEqual(self.pdec("Bash", {"command": "curl -sS http://pentest-ground.com:4280/"}), "pass")
+
+    def test_webfetch_against_port_scoped_host_passes(self):
+        self.assertEqual(self.pdec("WebFetch", {"url": "http://pentest-ground.com:4280/"}), "pass")
+
+    def test_other_host_still_unknown(self):
+        self.assertEqual(sg.classify("elsewhere.com", self.PORT_SCOPE), "unknown")
+
+
 if __name__ == "__main__":
     unittest.main()

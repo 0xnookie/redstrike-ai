@@ -122,6 +122,7 @@ class Engine(abc.ABC):
         *,
         mode: str = "interactive",
         extra_allow: list[str] | None = None,
+        resume: bool = False,
     ) -> PreparedRuntime:
         """Materialize this engine's ``runtime/`` for the engagement: project scope.yaml ->
         scope.json, render the governance config IN THIS ENGINE'S FORMAT (for Claude Code that is
@@ -224,10 +225,10 @@ class ClaudeCodeEngine(Engine):
             return (None, "claude not on PATH")
         return preflight.claude_auth(cb)
 
-    def prepare(self, engagement_dir, repo, python_exe, *, mode="interactive", extra_allow=None):
+    def prepare(self, engagement_dir, repo, python_exe, *, mode="interactive", extra_allow=None, resume=False):
         from .. import launch
         return launch.prepare_runtime(
-            engagement_dir, repo, python_exe, mode=mode, extra_allow=extra_allow
+            engagement_dir, repo, python_exe, mode=mode, extra_allow=extra_allow, resume=resume
         )
 
     def gate(self, prep) -> list[str]:

@@ -73,7 +73,10 @@ def normalize_host(h: str) -> str:
 
 def domain_matches(host: str, pattern: str) -> bool:
     host = normalize_host(host)
-    pattern = pattern.strip().lower().rstrip(".")
+    # Normalize the scope entry the SAME way as the target: strip a port ("host:port" authored in
+    # scope.yaml), a trailing dot and case. Targets are always matched port-less, so a port left on
+    # the scope pattern would never match and would silently put the whole host out of scope.
+    pattern = normalize_host(pattern)
     if pattern.startswith("*."):
         base = pattern[2:]
         return host == base or host.endswith("." + base)
