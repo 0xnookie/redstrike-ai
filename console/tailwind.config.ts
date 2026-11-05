@@ -29,7 +29,6 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-sans, ui-sans-serif)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
-        pixel: ["var(--font-pixel)", "ui-monospace", "monospace"],
       },
       borderRadius: {
         xl: "0.875rem",

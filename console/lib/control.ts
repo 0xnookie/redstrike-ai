@@ -168,6 +168,17 @@ export async function getApprovals(token: string, id: string): Promise<PendingIt
   return [];
 }
 
+export async function getCoverage(token: string, id: string): Promise<CoverageLedger | null> {
+  // Authoritative, file-backed per-category state (coverage_ledger.json), rewritten live
+  // by the engine. Backend returns {categories:[]} when the file doesn't exist yet.
+  try {
+    const d = await request<any>(`/api/engagements/${encodeURIComponent(id)}/coverage`, token);
+    return d && Array.isArray(d.categories) ? (d as CoverageLedger) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const approve = (token: string, id: string, body: { ids?: string[]; all?: boolean }) =>
   request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/approve`, token, { method: "POST", body: JSON.stringify(body) });
 
@@ -253,7 +264,7 @@ export async function openRunStream(
 
 /* ---- autorun.jsonl event parsing ---- */
 export type RunEventTone = "ok" | "warn" | "muted" | "cyan";
-export type RunEventKind = "run" | "system" | "tool" | "result";
+export type RunEventKind = "run" | "system" | "tool" | "result" | "error";
 export interface RunEvent {
   key: string;
   kind: RunEventKind;
@@ -261,6 +272,7 @@ export interface RunEvent {
   detail?: string;
   tone?: RunEventTone;
   deferred?: number; // result events: how many actions were deferred for approval
+  costUsd?: number;  // result events: the engine's list-price API-equivalent cost — notional on a subscription (not billed)
 }
 
 let _seq = 0;
@@ -291,6 +303,13 @@ export function parseRunLine(line: string): RunEvent[] {
   try {
     o = JSON.parse(s);
   } catch {
+    // Non-JSON line. In stream-json mode the engine emits only JSON, so a plain-text line here
+    // is almost always an error claude printed to stderr (e.g. "Error: Session ID … is already
+    // in use.") before it could stream anything — the kind of failure that otherwise leaves the
+    // run stuck at the boundary marker with nothing shown. Surface those; skip other chatter.
+    if (/^\s*(error|exception|traceback|fatal|panic)\b/i.test(s) || /\berror:/i.test(s)) {
+      return [{ key: nextKey(), kind: "error", tone: "warn", text: s.length > 180 ? s.slice(0, 179) + "…" : s }];
+    }
     return []; // chatty non-JSON line — skip, exactly like the CLI does
   }
   const t = o?.type;
@@ -319,7 +338,6 @@ export function parseRunLine(line: string): RunEvent[] {
     const deferred = Array.isArray(o.deferred_tool_use) ? o.deferred_tool_use.length : o.deferred_tool_use ? 1 : 0;
     const denied = (o.permission_denials || []).length;
     const good = o.subtype === "success";
-    const cost = typeof o.total_cost_usd === "number" ? `$${o.total_cost_usd.toFixed(4)}` : "$0";
     const detail = [
       o.stop_reason ? `stop: ${o.stop_reason}` : "",
       denied ? `${denied} denied` : "",
@@ -331,12 +349,119 @@ export function parseRunLine(line: string): RunEvent[] {
       key: nextKey(),
       kind: "result",
       tone: good ? "ok" : "warn",
-      text: `run ${o.subtype || "ended"} · ${o.num_turns ?? 0} turns · ${cost}`,
+      text: `run ${o.subtype || "ended"} · ${o.num_turns ?? 0} turns`,
       detail: detail || undefined,
       deferred,
+      costUsd: typeof o.total_cost_usd === "number" ? o.total_cost_usd : undefined,
     }];
   }
   return [];
+}
+
+/* ============================================================================
+   Orchestration — a live view of the engine's run, folded from the SAME stream.
+   Steps come from the engine's task list (TaskCreate/TaskUpdate); agents from
+   Skill invocations + subagent (Agent/Task) spawns. Subagent internals are not
+   in the stream (they run opaquely), so an agent is shown spawned → running →
+   returned, with its handoff; not a keylog of its inner tool calls.
+   ========================================================================== */
+export type TaskStatus = "pending" | "running" | "done" | "error";
+export interface RunTask {
+  uid: string;          // the tool_use id of the TaskCreate that made it
+  n?: number;           // the engine's "Task #N" number, once the result reveals it
+  subject: string;
+  activeForm?: string;  // present-continuous label the engine shows while it's active
+  status: TaskStatus;
+}
+export type AgentRole = "orchestrator" | "skill" | "executor" | "reviewer";
+export interface RunAgent {
+  uid: string;
+  name: string;         // skill id or subagent type
+  role: AgentRole;
+  task?: string;
+  status: "running" | "done" | "error";
+}
+export interface OrchState { tasks: RunTask[]; agents: RunAgent[]; }
+export const emptyOrch = (): OrchState => ({ tasks: [], agents: [] });
+
+const STATUS_MAP: Record<string, TaskStatus> = {
+  pending: "pending", todo: "pending",
+  in_progress: "running", running: "running", active: "running", started: "running",
+  completed: "done", complete: "done", done: "done", finished: "done",
+  cancelled: "error", canceled: "error", failed: "error", error: "error", blocked: "error",
+};
+const isReviewer = (name: string) => /-?verify$/i.test(name);
+
+function applyTaskUpdate(s: OrchState, inp: any) {
+  // The engine's TaskUpdate input shape isn't pinned, so match defensively and
+  // fall back to the latest still-open task when we can't key it precisely.
+  const n = Number(inp?.n ?? inp?.task ?? inp?.task_id ?? inp?.taskId ?? inp?.id ?? inp?.number);
+  const st = STATUS_MAP[String(inp?.status ?? inp?.state ?? "").toLowerCase()];
+  let task = Number.isFinite(n) ? s.tasks.find((x) => x.n === n) : undefined;
+  if (!task && inp?.subject) task = s.tasks.find((x) => x.subject === inp.subject);
+  if (!task) task = [...s.tasks].reverse().find((x) => x.status !== "done");
+  if (!task) return;
+  if (st) task.status = st;
+  if (inp?.activeForm) task.activeForm = String(inp.activeForm);
+}
+
+/** Fold one raw autorun.jsonl line into orchestration state (mutates + returns it). */
+export function foldOrchestration(line: string, s: OrchState): OrchState {
+  const t = line.trim();
+  if (!t || t.startsWith("#")) return s;
+  let o: any;
+  try { o = JSON.parse(t); } catch { return s; }
+  const type = o?.type;
+  if (type === "assistant") {
+    for (const b of o.message?.content || []) {
+      if (!b || b.type !== "tool_use") continue;
+      const uid = String(b.id || nextKey());
+      const name = String(b.name || "");
+      const inp = b.input || {};
+      if (name === "TaskCreate") {
+        s.tasks.push({ uid, subject: String(inp.subject || "step"), activeForm: inp.activeForm ? String(inp.activeForm) : undefined, status: "pending" });
+      } else if (name === "TaskUpdate" || name === "TaskStatus") {
+        applyTaskUpdate(s, inp);
+      } else if (name === "Skill") {
+        const skill = String(inp.skill || "skill");
+        if (skill === "redstrike") {
+          if (!s.agents.some((a) => a.role === "orchestrator")) s.agents.push({ uid, name: "redstrike", role: "orchestrator", task: "engagement orchestrator", status: "running" });
+        } else {
+          s.agents.push({ uid, name: skill, role: isReviewer(skill) ? "reviewer" : "skill", task: inp.args ? String(inp.args) : undefined, status: "running" });
+        }
+      } else if (name === "Agent" || name === "Task") {
+        const sub = String(inp.subagent_type || inp.description || "agent");
+        s.agents.push({ uid, name: sub, role: isReviewer(sub) ? "reviewer" : "executor", task: inp.description ? String(inp.description) : undefined, status: "running" });
+      }
+    }
+  } else if (type === "user") {
+    const content = o.message?.content;
+    if (Array.isArray(content)) {
+      for (const b of content) {
+        if (!b || b.type !== "tool_result") continue;
+        const ref = String(b.tool_use_id || "");
+        const ag = s.agents.find((a) => a.uid === ref && a.status === "running");
+        if (ag) ag.status = "done";
+        const txt = typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? "");
+        const m = /Task #(\d+)/.exec(txt);
+        if (m) { const task = s.tasks.find((x) => x.uid === ref); if (task) task.n = Number(m[1]); }
+      }
+    }
+  } else if (type === "result") {
+    for (const a of s.agents) if (a.status === "running") a.status = "done";
+    for (const t2 of s.tasks) if (t2.status === "running") t2.status = "done";
+  }
+  return s;
+}
+
+/* ---- coverage ledger (per-category status, file-backed, authoritative) ---- */
+export interface CoverageCategory {
+  id: string; name: string; phase?: string;
+  skills?: string[]; status?: string; reason?: string; findings_count?: number;
+}
+export interface CoverageLedger {
+  engagement?: string; generated_at?: string; active_phases?: string[];
+  categories: CoverageCategory[];
 }
 
 /* ---- bootstrap: same-origin token hand-off so the console self-connects (no paste) ---- */

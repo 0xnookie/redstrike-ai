@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu, ChevronRight, ChevronDown } from "lucide-react";
 import { useControl } from "./ControlProvider";
 import type { RunEvent } from "@/lib/control";
 import { Card } from "@/components/ui/primitives";
@@ -18,19 +18,24 @@ function EventIcon({ kind }: { kind: RunEvent["kind"] }) {
   if (kind === "tool") return <ArrowRight size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
   if (kind === "system") return <Cpu size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
   if (kind === "result") return <CircleCheck size={13} className="mt-0.5 shrink-0" />;
+  if (kind === "error") return <CircleAlert size={13} className="mt-0.5 shrink-0 text-amber-400" />;
   return <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-muted/50" />;
 }
 
 export function RunStream() {
-  const { events, running, clearEvents } = useControl();
+  const { events, running, clearEvents, auth } = useControl();
+  const [open, setOpen] = useState(false); // raw log is secondary to the orchestration view
+  // a run is only actually billed per-token when Claude is connected via a raw API key;
+  // a login/OAuth connection is subscription usage, so total_cost_usd is notional there.
+  const billed = auth?.providers?.claude?.via === "api_key";
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
 
   // autoscroll only while the user is already pinned to the bottom
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [events]);
+    if (open && el && atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [events, open]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -38,24 +43,27 @@ export function RunStream() {
   };
 
   return (
-    <Card className="flex min-h-[18rem] flex-col">
-      <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Terminal size={15} className="text-brand" /> Live run
+    <Card className={cx("flex flex-col", open && "min-h-[18rem]")}>
+      <div className="flex items-center justify-between px-4 py-2.5">
+        <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-sm font-semibold">
+          {open ? <ChevronDown size={14} className="text-muted" /> : <ChevronRight size={14} className="text-muted" />}
+          <Terminal size={15} className="text-brand" /> Raw engine log
           {running && (
             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
               <Radio size={12} className="animate-pulse" /> streaming
             </span>
           )}
-        </h2>
-        {events.length > 0 && (
+          {!open && events.length > 0 && <span className="text-[11px] font-normal text-muted">· {events.length} events</span>}
+        </button>
+        {open && events.length > 0 && (
           <button onClick={clearEvents} className="inline-flex items-center gap-1 text-xs text-muted transition hover:text-fg">
             <Eraser size={12} /> Clear
           </button>
         )}
       </div>
 
-      <div ref={scrollRef} onScroll={onScroll} className="scroll-thin flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed">
+      {open && (
+      <div ref={scrollRef} onScroll={onScroll} className="scroll-thin flex-1 overflow-y-auto border-t border-line p-3 font-mono text-xs leading-relaxed">
         {events.length === 0 ? (
           <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-1 text-center text-muted">
             <Terminal size={22} className="opacity-50" />
@@ -73,6 +81,18 @@ export function RunStream() {
                   <div className={cx("flex flex-wrap items-baseline gap-x-2", toneClass[ev.tone ?? "muted"])}>
                     <span className={cx(ev.kind === "tool" && "text-fg")}>{ev.text}</span>
                     {ev.detail && <span className="truncate text-muted">{ev.detail}</span>}
+                    {ev.kind === "result" && ev.costUsd != null && (
+                      <span
+                        className="text-muted"
+                        title={
+                          billed
+                            ? "Actual per-token cost (Claude connected via API key)."
+                            : "List-price API-equivalent — not billed on your subscription; this usage counts against your plan limits."
+                        }
+                      >
+                        {billed ? `· $${ev.costUsd.toFixed(4)}` : `· ~$${ev.costUsd.toFixed(2)} est · plan usage`}
+                      </span>
+                    )}
                   </div>
                   {ev.kind === "result" && !!ev.deferred && (
                     <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-400">
@@ -85,6 +105,7 @@ export function RunStream() {
           </ul>
         )}
       </div>
+      )}
     </Card>
   );
 }

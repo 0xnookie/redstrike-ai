@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { cx } from "@/lib/format";
 import { SEVERITY, VERDICT, CONFIDENCE, hexA } from "@/lib/theme";
 import type { Severity, Verdict, Confidence } from "@/lib/types";
@@ -7,6 +8,26 @@ export function Card({ className, children, ...rest }: React.HTMLAttributes<HTML
   return (
     <div className={cx("rounded-xl border border-line bg-card surface", className)} {...rest}>
       {children}
+    </div>
+  );
+}
+
+/* ---------- Select (styled to match inputs: appearance-none + custom chevron) ---------- */
+export function Select({
+  className, wrapperClassName, children, ...rest
+}: React.SelectHTMLAttributes<HTMLSelectElement> & { wrapperClassName?: string }) {
+  return (
+    <div className={cx("relative inline-flex", wrapperClassName)}>
+      <select
+        className={cx(
+          "h-9 w-full cursor-pointer appearance-none rounded-lg border border-line bg-card2 pl-2.5 pr-8 text-sm text-fg outline-none transition focus:border-brand/50",
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </select>
+      <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted" />
     </div>
   );
 }

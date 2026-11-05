@@ -57,7 +57,7 @@ export function ApprovalsPanel() {
         <EmptyState
           icon={<ShieldQuestion size={22} />}
           title="Nothing awaiting approval"
-          hint="When an autonomous run hits a command outside the allowlist, it defers here instead of running it."
+          hint="Autonomous runs clear every in-scope command on their own. Only a Supervised run pauses a command outside its allowlist here for sign-off."
         />
       ) : (
         <>

@@ -426,6 +426,10 @@ def make_control_handler(target: Path, token: str):
                     pend = eng / "runtime" / "approvals_pending.json"
                     data = console._read_json(pend) or {"pending": []}
                     return self._json(HTTPStatus.OK, data)
+                if verb == "coverage":
+                    # authoritative per-category run state the console's live view reads
+                    data = console._read_json(eng / "coverage_ledger.json") or {"categories": []}
+                    return self._json(HTTPStatus.OK, data)
                 if verb == "stream":
                     return self._stream_jsonl(eng / "runtime" / "autorun.jsonl")
             return self._json(HTTPStatus.NOT_FOUND, {"error": "unknown api route"})

@@ -6,6 +6,7 @@ import { ControlProvider, useControl } from "@/components/control/ControlProvide
 import { ConnectCard } from "@/components/control/ConnectCard";
 import { LlmConnectCard } from "@/components/control/LlmConnectCard";
 import { LaunchPanel } from "@/components/control/LaunchPanel";
+import { OrchestrationPanel } from "@/components/control/OrchestrationPanel";
 import { RunStream } from "@/components/control/RunStream";
 import { ApprovalsPanel } from "@/components/control/ApprovalsPanel";
 
@@ -37,12 +38,15 @@ function ControlInner() {
 
             <LlmConnectCard />
 
+            {/* primary live view: which step is running, which agents are working, coverage */}
+            <OrchestrationPanel />
+
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <div className="lg:row-span-2">
                 <LaunchPanel />
               </div>
-              <RunStream />
               <ApprovalsPanel />
+              <RunStream />
             </div>
           </>
         )}

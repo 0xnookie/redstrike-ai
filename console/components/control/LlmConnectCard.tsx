@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { useControl } from "./ControlProvider";
 import type { ProviderAuth, SetAuthBody, LoginStatus } from "@/lib/control";
-import { Card } from "@/components/ui/primitives";
+import { Card, Select } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
 
 const METHOD_LABEL: Record<string, string> = {
@@ -36,14 +36,14 @@ function ModelSelect({ id, p }: { id: string; p: ProviderAuth }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-[11px] text-muted">model</span>
-      <select
+      <Select
         value={sel}
         onChange={(e) => {
           const v = e.target.value;
           setSel(v);
           if (v !== CUSTOM) apply(v);
         }}
-        className="h-8 rounded-lg border border-line bg-card px-2 text-xs outline-none focus:border-brand/50"
+        className="h-8 bg-card pr-7 text-xs"
       >
         {p.models.map((m) => (
           <option key={m} value={m}>
@@ -51,7 +51,7 @@ function ModelSelect({ id, p }: { id: string; p: ProviderAuth }) {
           </option>
         ))}
         <option value={CUSTOM}>Custom…</option>
-      </select>
+      </Select>
       {sel === CUSTOM && (
         <input
           value={custom}

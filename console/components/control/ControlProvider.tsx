@@ -2,8 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import * as api from "@/lib/control";
-import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus } from "@/lib/control";
-import { ControlError, loadToken, saveToken, parseRunLine } from "@/lib/control";
+import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus, OrchState, CoverageLedger } from "@/lib/control";
+import { ControlError, loadToken, saveToken, parseRunLine, foldOrchestration, emptyOrch, getCoverage } from "@/lib/control";
 
 // Connection state machine:
 //   unknown → haven't probed yet
@@ -24,6 +24,8 @@ interface ControlCtx {
   setActiveId: (id: string) => void;
   running: boolean;
   events: RunEvent[];
+  orch: OrchState;
+  coverage: CoverageLedger | null;
   pending: PendingItem[];
   lastError: string;
   busy: boolean;
@@ -59,7 +61,10 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<ControlStatus | null>(null);
   const [activeId, setActiveIdState] = useState("");
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [orch, setOrch] = useState<OrchState>(emptyOrch);
+  const [coverage, setCoverage] = useState<CoverageLedger | null>(null);
   const [pending, setPending] = useState<PendingItem[]>([]);
+  const orchRef = useRef<OrchState>(emptyOrch()); // mutable accumulator folded per stream line
   const [lastError, setLastError] = useState("");
   const [busy, setBusy] = useState(false);
   const [auth, setAuthState] = useState<AuthSnapshot | null>(null);
@@ -142,6 +147,10 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
             tokenRef.current,
             id,
             (line) => {
+              // fold EVERY line into orchestration state (incl. task/result lines the
+              // terminal parser skips), then snapshot fresh array refs to re-render
+              foldOrchestration(line, orchRef.current);
+              setOrch({ tasks: [...orchRef.current.tasks], agents: [...orchRef.current.agents] });
               const evs = parseRunLine(line);
               if (!evs.length) return;
               setEvents((prev) => {
@@ -203,6 +212,25 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(t);
   }, [conn, activeId, refreshApprovals]);
 
+  /* ---- poll the coverage ledger (authoritative per-category run state) ---- */
+  useEffect(() => {
+    if (conn !== "ready" || !activeId) {
+      setCoverage(null);
+      return;
+    }
+    let alive = true;
+    const load = async () => {
+      const c = await getCoverage(tokenRef.current, activeId);
+      if (alive) setCoverage(c);
+    };
+    void load();
+    const t = setInterval(load, 4000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [conn, activeId]);
+
   /* ---- (re)start the stream whenever the active engagement has a live run ---- */
   const runPid = status?.runs?.[activeId];
   useEffect(() => {
@@ -243,6 +271,9 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     (id: string) => {
       stopStream();
       setEvents([]); // the run log is per-engagement
+      orchRef.current = emptyOrch();
+      setOrch(emptyOrch());
+      setCoverage(null);
       setActiveIdState(id);
     },
     [stopStream],
@@ -276,7 +307,11 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
       setBusy(true);
       setLastError("");
       try {
-        if (!body.resume) setEvents([]);
+        if (!body.resume) {
+          setEvents([]);
+          orchRef.current = emptyOrch();
+          setOrch(emptyOrch());
+        }
         const r = await api.runEngagement(tokenRef.current, activeId, body);
         setLastRunConfig({ allow: body.allow, max_turns: body.max_turns, max_budget: body.max_budget });
         await refresh(); // pid shows up fast → the stream effect opens the tail
@@ -414,6 +449,8 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     setActiveId,
     running,
     events,
+    orch,
+    coverage,
     pending,
     lastError,
     busy,

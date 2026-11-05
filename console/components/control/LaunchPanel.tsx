@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Rocket, Plus, FolderOpen, ShieldCheck, Loader2, Square } from "lucide-react";
+import { Rocket, Plus, FolderOpen, ShieldCheck, ShieldQuestion, Zap, Loader2, Square } from "lucide-react";
 import { useControl } from "./ControlProvider";
-import { Card, Pill } from "@/components/ui/primitives";
+import { Card, Pill, Select } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
 
 type Mode = "existing" | "new";
@@ -34,6 +34,7 @@ export function LaunchPanel() {
   const [confirm, setConfirm] = useState(false);
 
   // run fields
+  const [supervise, setSupervise] = useState(false); // default: autonomous — no per-command approvals
   const [allow, setAllow] = useState("");
   const [maxTurns, setMaxTurns] = useState("200");
   const [maxBudget, setMaxBudget] = useState("20");
@@ -41,7 +42,12 @@ export function LaunchPanel() {
   const toList = (s: string) => s.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
 
   const runConfig = () => ({
-    allow: toList(allow),
+    // Autonomous (default): hand the gate `Bash`/`PowerShell`, which it reads as the `*`
+    // pass-glob — every in-scope shell command runs WITHOUT deferring for approval. The scope
+    // gate still DENIES out-of-scope targets and writes to governance files, so scope stays
+    // enforced; only the per-command sign-off is waived. Supervised: only the operator's
+    // explicit patterns pass; everything else defers to the Approvals panel.
+    allow: supervise ? toList(allow) : ["Bash", "PowerShell"],
     max_turns: parseInt(maxTurns || "200", 10),
     max_budget: parseFloat(maxBudget || "20"),
   });
@@ -142,7 +148,7 @@ export function LaunchPanel() {
       <div className="space-y-3">
         <Field label="Engagement">
           {engagements.length ? (
-            <select className={cx(inputCls, "cursor-pointer")} value={activeId} onChange={(e) => setActiveId(e.target.value)}>
+            <Select wrapperClassName="w-full" value={activeId} onChange={(e) => setActiveId(e.target.value)}>
               <option value="" disabled>
                 Select an engagement…
               </option>
@@ -151,7 +157,7 @@ export function LaunchPanel() {
                   {id}
                 </option>
               ))}
-            </select>
+            </Select>
           ) : (
             <p className="rounded-lg border border-dashed border-line bg-card2 px-3 py-2 text-xs text-muted">
               No engagements yet — scaffold one with “New engagement”.
@@ -159,14 +165,43 @@ export function LaunchPanel() {
           )}
         </Field>
 
-        <Field label="Allowlist" hint="one rule per line — everything else defers for approval">
-          <textarea
-            className={cx(inputCls, "h-20 resize-y py-2 font-mono text-xs")}
-            value={allow}
-            onChange={(e) => setAllow(e.target.value)}
-            placeholder={"Bash(nmap *)\nBash(httpx *)"}
-          />
+        <Field label="Supervision" hint="how commands are cleared during the run">
+          <div className="inline-flex w-full rounded-lg border border-line bg-card2 p-0.5">
+            {([
+              { v: false, label: "Autonomous", icon: Zap },
+              { v: true, label: "Supervised", icon: ShieldQuestion },
+            ] as const).map(({ v, label, icon: Icon }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setSupervise(v)}
+                className={cx(
+                  "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition",
+                  supervise === v ? "bg-brand text-brand-fg" : "text-muted hover:text-fg",
+                )}
+              >
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-muted">
+            <ShieldCheck size={13} className="mt-px shrink-0 text-emerald-400" />
+            {supervise
+              ? "Pauses for your approval on each shell command outside the allowlist below."
+              : "Runs end to end within scope — no per-command approvals. The scope gate still blocks anything out of scope."}
+          </p>
         </Field>
+
+        {supervise && (
+          <Field label="Allowlist" hint="one rule per line — everything else defers for approval">
+            <textarea
+              className={cx(inputCls, "h-20 resize-y py-2 font-mono text-xs")}
+              value={allow}
+              onChange={(e) => setAllow(e.target.value)}
+              placeholder={"Bash(nmap *)\nBash(httpx *)"}
+            />
+          </Field>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Max turns">
@@ -198,7 +233,7 @@ export function LaunchPanel() {
                 (!canRun || busy) && "cursor-not-allowed opacity-60",
               )}
             >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />} Launch autonomous run
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />} Launch {supervise ? "supervised" : "autonomous"} run
             </button>
           )}
         </div>
