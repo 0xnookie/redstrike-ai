@@ -1,172 +1,89 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
-import type { Finding, Severity } from "@/lib/types";
+import { ShieldCheck } from "lucide-react";
+import type { Finding } from "@/lib/types";
 import { cvssScore } from "@/lib/cvss";
-import { SEVERITY, SEVERITY_ORDER, VERDICT, sevMeta, CONFIDENCE, hexA } from "@/lib/theme";
-import { cx, verdictOf } from "@/lib/format";
-import { Pill, SeverityBadge } from "@/components/ui/primitives";
+import { VERDICT, sevMeta, hexA } from "@/lib/theme";
+import { cx, relTime, fmtDate, verdictOf } from "@/lib/format";
+import { SeverityBadge, VerdictBadge } from "@/components/ui/primitives";
 
-type SortKey = "id" | "severity" | "title" | "asset" | "cvss" | "category" | "confidence" | "verdict";
+const TH = "px-4 py-2.5 text-left text-[10.5px] font-medium uppercase tracking-wide text-faint";
 
-const COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "id", label: "ID" },
-  { key: "severity", label: "Severity" },
-  { key: "title", label: "Title" },
-  { key: "asset", label: "Asset" },
-  { key: "cvss", label: "CVSS" },
-  { key: "category", label: "Category" },
-  { key: "confidence", label: "Confidence" },
-  { key: "verdict", label: "Verdict" },
-];
-
-export function FindingsTable({ findings, onSelect, initialQuery = "" }: { findings: Finding[]; onSelect: (f: Finding) => void; initialQuery?: string }) {
-  const [sevFilter, setSevFilter] = useState<Set<Severity>>(new Set());
-  const [verdictFilter, setVerdictFilter] = useState<string>("all");
-  const [query, setQuery] = useState(initialQuery);
-  const [sortKey, setSortKey] = useState<SortKey>("cvss");
-  const [sortDir, setSortDir] = useState<1 | -1>(-1);
-
-  const toggleSev = (k: Severity) => {
-    setSevFilter((prev) => {
-      const next = new Set(prev);
-      next.has(k) ? next.delete(k) : next.add(k);
-      if (next.size === SEVERITY_ORDER.length) next.clear();
-      return next;
-    });
-  };
-
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list = findings.filter((f) => !f.composite);
-    if (sevFilter.size) list = list.filter((f) => sevFilter.has(f.severity));
-    if (verdictFilter !== "all") list = list.filter((f) => verdictOf(f) === verdictFilter);
-    if (q)
-      list = list.filter((f) =>
-        [f.id, f.title, f.asset, f.category?.cwe, f.category?.owasp, (f.attack_mapping || []).join(" ")]
-          .join(" ").toLowerCase().includes(q)
-      );
-    const val = (f: Finding): string | number => {
-      switch (sortKey) {
-        case "severity": return sevMeta(f.severity).rank;
-        case "cvss": return cvssScore(f.cvss_vector) ?? -1;
-        case "category": return f.category?.cwe || f.category?.owasp || "";
-        case "confidence": return { confirmed: 3, probable: 2, tentative: 1 }[f.confidence] || 0;
-        case "verdict": return verdictOf(f);
-        default: return (f[sortKey] as string) || "";
-      }
-    };
-    return [...list].sort((a, b) => {
-      const va = val(a), vb = val(b);
-      const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
-      return sortDir * c;
-    });
-  }, [findings, sevFilter, verdictFilter, query, sortKey, sortDir]);
-
-  const onHeader = (k: SortKey) => {
-    if (sortKey === k) setSortDir((d) => (d === 1 ? -1 : 1));
-    else { setSortKey(k); setSortDir(k === "cvss" || k === "severity" || k === "confidence" ? -1 : 1); }
-  };
-
+/** A CVSS base-score chip, tinted by the finding's severity (data color). */
+function CvssChip({ score, severity }: { score: number | null; severity: Finding["severity"] }) {
+  if (score === null) return <span className="font-mono text-xs text-faint">—</span>;
+  const color = sevMeta(severity).color;
   return (
-    <div className="rounded-xl border border-line bg-card shadow-card">
-      {/* filter bar */}
-      <div className="flex flex-col gap-3 border-b border-line p-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Chip active={sevFilter.size === 0} onClick={() => setSevFilter(new Set())} label="All" />
-          {SEVERITY_ORDER.map((k) => (
-            <Chip key={k} active={sevFilter.has(k)} onClick={() => toggleSev(k)} label={SEVERITY[k].label} color={SEVERITY[k].color} />
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search…"
-              className="h-8 w-44 rounded-lg border border-line bg-card2 pl-8 pr-2 text-sm outline-none placeholder:text-muted focus:border-brand/50"
-            />
-          </div>
-          <div className="relative">
-            <select
-              value={verdictFilter}
-              onChange={(e) => setVerdictFilter(e.target.value)}
-              className="h-8 appearance-none rounded-lg border border-line bg-card2 pl-2.5 pr-7 text-sm outline-none focus:border-brand/50"
-            >
-              <option value="all">All verdicts</option>
-              {Object.entries(VERDICT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
-            <ChevronDown size={14} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted" />
-          </div>
-          <span className="hidden whitespace-nowrap text-xs text-muted sm:inline">{rows.length} shown</span>
-        </div>
-      </div>
-
-      {/* table */}
-      <div className="scroll-thin overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted">
-              {COLUMNS.map((c) => (
-                <th key={c.key} onClick={() => onHeader(c.key)} className="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-fg">
-                  <span className="inline-flex items-center gap-1">
-                    {c.label}
-                    {sortKey === c.key && <span className="text-brand">{sortDir === 1 ? "↑" : "↓"}</span>}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((f) => {
-              const score = cvssScore(f.cvss_vector);
-              const v = verdictOf(f);
-              const cat = f.category?.cwe || f.category?.owasp || "—";
-              const c = CONFIDENCE[f.confidence];
-              return (
-                <tr
-                  key={f.id}
-                  onClick={() => onSelect(f)}
-                  className={cx("cursor-pointer border-t border-line transition hover:bg-card2", v === "rejected" && "opacity-50")}
-                >
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs" style={{ boxShadow: `inset 3px 0 0 ${sevMeta(f.severity).color}` }}>{f.id}</td>
-                  <td className="px-4 py-3"><SeverityBadge severity={f.severity} /></td>
-                  <td className="max-w-xs px-4 py-3"><div className="font-medium leading-tight">{f.title}</div></td>
-                  <td className="px-4 py-3"><code className="text-xs text-muted">{f.asset}</code></td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums">
-                    {score === null ? <span className="text-muted">—</span> : <span style={{ color: sevMeta(f.severity).color }}>{score.toFixed(1)}</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted">{cat}</td>
-                  <td className="px-4 py-3">{c && <Pill label={c.label} color={c.color} />}</td>
-                  <td className="px-4 py-3">{v ? <Pill label={VERDICT[v].label} color={VERDICT[v].color} dot /> : <span className="text-xs text-muted">—</span>}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {rows.length === 0 && <div className="py-12 text-center text-sm text-muted">No findings match the current filters.</div>}
-      </div>
-    </div>
+    <span
+      className="inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums"
+      style={{ color, background: hexA(color, "14"), border: `1px solid ${hexA(color, "44")}` }}
+    >
+      {score.toFixed(1)}
+    </span>
   );
 }
 
-function Chip({ active, onClick, label, color }: { active: boolean; onClick: () => void; label: string; color?: string }) {
+/** Pure, presentational strix findings table — rows are already filtered + sorted. */
+export function FindingsTable({ rows, onSelect }: { rows: Finding[]; onSelect: (f: Finding) => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition"
-      style={
-        active
-          ? color
-            ? { color, borderColor: hexA(color, "66"), background: hexA(color, "1a") }
-            : { color: "rgb(var(--fg))", borderColor: "rgb(var(--fg) / 0.35)", background: "rgb(var(--fg) / 0.08)" }
-          : { color: "rgb(var(--muted))", borderColor: "rgb(var(--line))", background: "transparent" }
-      }
-    >
-      {color && <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />}
-      {label}
-    </button>
+    <div className="scroll-thin overflow-x-auto">
+      <table className="w-full min-w-[820px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-line">
+            <th className={TH}>ID</th>
+            <th className={TH}>Finding</th>
+            <th className={TH}>Severity</th>
+            <th className={TH}>CVSS</th>
+            <th className={TH}>Status</th>
+            <th className={TH}>Proof</th>
+            <th className={cx(TH, "text-right")}>Found</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((f) => {
+            const score = cvssScore(f.cvss_vector);
+            const v = verdictOf(f);
+            const hasProof = (f.evidence?.length ?? 0) > 0;
+            const found = f.review?.reviewed_at;
+            return (
+              <tr
+                key={f.id}
+                tabIndex={0}
+                onClick={() => onSelect(f)}
+                onKeyDown={(e) => { if (e.key === "Enter") onSelect(f); }}
+                className={cx(
+                  "cursor-pointer border-t border-line/70 outline-none transition hover:bg-fg/[0.03] focus-visible:bg-fg/[0.04]",
+                  v === "rejected" && "opacity-50",
+                )}
+              >
+                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted" style={{ boxShadow: `inset 3px 0 0 ${sevMeta(f.severity).color}` }}>
+                  {f.id}
+                </td>
+                <td className="max-w-sm px-4 py-3">
+                  <div className="truncate text-fg">{f.title}</div>
+                  <div className="truncate font-mono text-[11px] text-faint">{f.id} · {f.asset}</div>
+                </td>
+                <td className="px-4 py-3"><SeverityBadge severity={f.severity} /></td>
+                <td className="whitespace-nowrap px-4 py-3"><CvssChip score={score} severity={f.severity} /></td>
+                <td className="px-4 py-3">{v ? <VerdictBadge verdict={v} /> : <span className="text-xs text-faint">—</span>}</td>
+                <td className="px-4 py-3">
+                  {hasProof ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium" style={{ color: VERDICT.accepted.color }} title={`${f.evidence.length} evidence item${f.evidence.length === 1 ? "" : "s"}`}>
+                      <ShieldCheck size={13} /> {f.evidence.length}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-faint">—</span>
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-[11px] text-faint" title={fmtDate(found)}>
+                  {found ? relTime(found) : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {rows.length === 0 && <div className="py-14 text-center text-sm text-muted">No findings match the current filters.</div>}
+    </div>
   );
 }

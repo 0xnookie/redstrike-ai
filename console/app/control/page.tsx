@@ -1,12 +1,12 @@
 "use client";
 
-import { ShieldAlert } from "lucide-react";
+import Link from "next/link";
+import { ShieldAlert, Share2 } from "lucide-react";
 import { PageHeader, Pill } from "@/components/ui/primitives";
 import { ControlProvider, useControl } from "@/components/control/ControlProvider";
 import { ConnectCard } from "@/components/control/ConnectCard";
 import { LlmConnectCard } from "@/components/control/LlmConnectCard";
 import { LaunchPanel } from "@/components/control/LaunchPanel";
-import { OrchestrationPanel } from "@/components/control/OrchestrationPanel";
 import { RunStream } from "@/components/control/RunStream";
 import { ApprovalsPanel } from "@/components/control/ApprovalsPanel";
 
@@ -18,7 +18,17 @@ function ControlInner() {
       <PageHeader
         title="Control plane"
         subtitle="Launch and steer an autonomous engagement from the console."
-        actions={<Pill label="Experimental" color="#f59e0b" />}
+        actions={
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/orchestration"
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-line px-3.5 text-sm font-medium text-fg transition hover:border-fg/30"
+            >
+              <Share2 size={15} /> Live orchestration
+            </Link>
+            <Pill label="Experimental" color="#f59e0b" />
+          </div>
+        }
       />
 
       <div className="space-y-3">
@@ -37,9 +47,6 @@ function ControlInner() {
             </div>
 
             <LlmConnectCard />
-
-            {/* primary live view: which step is running, which agents are working, coverage */}
-            <OrchestrationPanel />
 
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <div className="lg:row-span-2">
