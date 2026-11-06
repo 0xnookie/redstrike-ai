@@ -7,9 +7,7 @@ import {
   Bot, FileText, Settings2, ListChecks, ShieldAlert, Terminal, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
-import { useConsole } from "@/lib/store";
-import { ENGAGEMENT_STATUS } from "@/lib/theme";
-import { Dot } from "@/components/ui/primitives";
+import { EngagementSwitcher } from "./EngagementSwitcher";
 
 interface NavItem { href: string; label: string; icon: LucideIcon; }
 const GROUPS: { title: string; items: NavItem[] }[] = [
@@ -47,8 +45,6 @@ export function Logo() {
 
 export function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { activeEngagement } = useConsole();
-  const st = ENGAGEMENT_STATUS[activeEngagement.status];
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
@@ -87,18 +83,7 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
         ))}
       </nav>
 
-      <div className="border-t border-line p-3">
-        <Link href="/engagements" onClick={onNavigate} className="flex items-center gap-2.5 rounded-lg p-2 transition hover:bg-card2">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-card2 text-xs font-semibold">A</div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium">{activeEngagement.name}</div>
-            <div className="flex items-center gap-1.5 text-[11px] text-muted">
-              <Dot color={st.color} pulse={activeEngagement.status === "running"} />
-              {st.label}
-            </div>
-          </div>
-        </Link>
-      </div>
+      <EngagementSwitcher onNavigate={onNavigate} />
     </aside>
   );
 }
