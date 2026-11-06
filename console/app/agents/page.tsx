@@ -20,13 +20,15 @@ const ROLE_ICON: Record<RunAgent["role"], typeof Bot> = {
 
 export default function AgentsPage() {
   const { agents } = useConsole();
-  const { conn, orch, running: runActive } = useControl();
+  const { conn, orch } = useControl();
   const [family, setFamily] = useState<string>("all");
 
-  // live "working now" from the control-plane run stream (real time)
-  const liveRunning = orch.agents.filter((a) => a.status === "running");
-  const runningCount = liveRunning.length;
-  const runningSlugs = useMemo(() => new Set(liveRunning.map((a) => a.name)), [orch.agents]); // eslint-disable-line react-hooks/exhaustive-deps
+  // live "working now" from the control-plane run stream (real time).
+  // the orchestrator (redstrike) is the hub, not a worker — it's the centre of the
+  // orchestration graph, so it's excluded from the agent roster/count here.
+  const liveWorkers = orch.agents.filter((a) => a.status === "running" && a.role !== "orchestrator");
+  const runningCount = liveWorkers.length;
+  const runningSlugs = useMemo(() => new Set(liveWorkers.map((a) => a.name)), [orch.agents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const families = useMemo(() => Array.from(new Set(agents.map((a) => a.family))), [agents]);
   const shown = agents.filter((a) => family === "all" || a.family === family);
@@ -61,7 +63,7 @@ export default function AgentsPage() {
       {/* live working-now strip — real time from the control plane */}
       <div className="mt-5">
         <Panel>
-          <PanelHeader title="Working now" sub="live from the control plane" actions={runActive ? <LivePill /> : undefined} />
+          <PanelHeader title="Working now" sub="live from the control plane" actions={runningCount > 0 ? <LivePill /> : undefined} />
           <div className="panel-body">
             {conn !== "ready" ? (
               <p className="rounded-lg border border-dashed border-line bg-card2 px-3 py-2.5 text-xs text-muted">
@@ -69,14 +71,14 @@ export default function AgentsPage() {
                 <Link href="/settings" className="text-fg underline-offset-2 hover:underline">Settings → Agent runtimes</Link>{" "}
                 to see which agents are working in real time.
               </p>
-            ) : liveRunning.length === 0 ? (
+            ) : liveWorkers.length === 0 ? (
               <p className="py-6 text-center text-xs text-muted">
                 No agents working right now. Launch a run from{" "}
                 <Link href="/engagements" className="text-fg underline-offset-2 hover:underline">Engagements</Link>.
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-                {liveRunning.map((a) => <LiveAgentChip key={a.uid} a={a} />)}
+              <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                {liveWorkers.map((a) => <LiveAgentCard key={a.uid} a={a} />)}
               </div>
             )}
           </div>
@@ -110,18 +112,34 @@ export default function AgentsPage() {
   );
 }
 
-function LiveAgentChip({ a }: { a: RunAgent }) {
+// a live, working agent — rendered as the dashboard's busy agent-card: green hairline across
+// the top, role icon, Running pill, current task, and an animated bar. There's no per-agent
+// progress % in the run stream, so the bar is an honest indeterminate "working" sweep.
+function LiveAgentCard({ a }: { a: RunAgent }) {
   const Icon = ROLE_ICON[a.role] ?? Bot;
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.05] px-3 py-2.5">
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-emerald-500/30 text-emerald-400">
-        <Icon size={15} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[13px] font-medium text-fg-strong">{a.name}</div>
-        <div className="truncate text-[11px] text-faint">{a.task || a.role}</div>
+    <div className="busy-top relative flex flex-col gap-3.5 rounded-[18px] border border-emerald-500/40 bg-emerald-500/[0.03] p-4">
+      <div className="flex items-center gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-emerald-500/30 text-emerald-400">
+          <Icon size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-mono text-sm font-medium text-fg-strong">{a.name}</div>
+          <div className="truncate text-[12.5px] capitalize text-faint">{a.role}</div>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+          <span className="live-dot" /> Running
+        </span>
       </div>
-      <span className="live-dot" />
+
+      <div>
+        <div className="mb-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-faint">Current task</div>
+        <div className="line-clamp-2 min-h-[2.4em] text-[13px] leading-relaxed text-fg">{a.task || "Working…"}</div>
+      </div>
+
+      <div className="h-1 w-full overflow-hidden rounded-full bg-emerald-500/15">
+        <div className="progress-live h-full w-full rounded-full bg-emerald-500/40" />
+      </div>
     </div>
   );
 }

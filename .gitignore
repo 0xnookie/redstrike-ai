@@ -67,3 +67,6 @@ tmp/
 temp/
 *.tmp
 *.bak
+
+# local design mockup — never track
+dashboard.html

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
 import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers } from "lucide-react";
 import { useControl } from "@/components/control/ControlProvider";
@@ -18,7 +18,22 @@ const STATUS_COLOR: Record<RunAgent["status"], string> = {
 
 const VB_W = 1000, VB_H = 620, CX = 500, CY = 300, RX = 384, RY = 224, NODE_R = 34, MAX_NODES = 16;
 
-function OrchestrationGraph({ agents, running }: { agents: RunAgent[]; running: boolean }) {
+// respect the OS "reduce motion" setting for the JS/SMIL-driven packets (CSS keyframes are
+// already neutralised by the globals.css media query).
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const on = () => setReduced(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return reduced;
+}
+
+function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[]; running: boolean; progress: number }) {
+  const reduced = useReducedMotion();
   // the orchestrator is always Redstrike (the center) — never a peripheral node.
   // show running agents first, then the most recent others, capped for layout.
   const nodes = useMemo(() => {
@@ -28,51 +43,73 @@ function OrchestrationGraph({ agents, running }: { agents: RunAgent[]; running: 
     return [...live, ...rest].slice(0, MAX_NODES);
   }, [agents]);
 
+  // precompute geometry once so edges, packets and nodes all agree on positions.
   const n = nodes.length;
+  const geo = useMemo(() => nodes.map((a, i) => {
+    const ang = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / Math.max(1, n);
+    const ax = CX + RX * Math.cos(ang), ay = CY + RY * Math.sin(ang);
+    const dx = ax - CX, dy = ay - CY, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+    const sx = CX + ux * 58, sy = CY + uy * 58, ex = ax - ux * (NODE_R + 6), ey = ay - uy * (NODE_R + 6);
+    const mx = (sx + ex) / 2 - uy * 24, my = (sy + ey) / 2 + ux * 24;
+    const path = `M${sx.toFixed(1)},${sy.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}`;
+    return { a, ax, ay, up: ay < CY - 10, hot: a.status === "running", path };
+  }), [nodes, n]);
+
+  const C = 2 * Math.PI * NODE_R;
+  const RING_R = 61, RING_C = 2 * Math.PI * RING_R;
   return (
     <div className="px-2 pb-1">
       <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="block w-full" style={{ maxHeight: 620 }} role="img" aria-label="Orchestrator dispatching to agents">
         {/* edges */}
-        {nodes.map((a, i) => {
-          const ang = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / Math.max(1, n);
-          const ax = CX + RX * Math.cos(ang), ay = CY + RY * Math.sin(ang);
-          const dx = ax - CX, dy = ay - CY, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
-          const sx = CX + ux * 58, sy = CY + uy * 58, ex = ax - ux * (NODE_R + 6), ey = ay - uy * (NODE_R + 6);
-          const mx = (sx + ex) / 2 - uy * 24, my = (sy + ey) / 2 + ux * 24;
-          const hot = a.status === "running";
-          return (
-            <path
-              key={`e-${a.uid}`}
-              d={`M${sx.toFixed(1)},${sy.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}`}
-              fill="none"
-              className={cx(hot && "edge-flow")}
-              stroke={hot ? "rgb(214 235 253 / 0.5)" : "rgb(214 235 253 / 0.12)"}
-              strokeWidth={1.3}
-            />
-          );
-        })}
+        {geo.map(({ a, hot, path }) => (
+          <path
+            key={`e-${a.uid}`}
+            d={path}
+            fill="none"
+            className={cx(hot && "edge-flow")}
+            stroke={hot ? "rgb(214 235 253 / 0.5)" : "rgb(214 235 253 / 0.12)"}
+            strokeWidth={1.3}
+          />
+        ))}
+
+        {/* dispatch packets — a dot travels orchestrator → working agent along the hot edge */}
+        {!reduced && geo.map(({ a, hot, path }) => hot && (
+          <g key={`p-${a.uid}`}>
+            <circle r={9} fill="rgb(214 235 253 / 0.14)">
+              <animateMotion dur="1.7s" repeatCount="indefinite" path={path} />
+            </circle>
+            <circle r={4} fill="rgb(214 235 253 / 0.95)">
+              <animateMotion dur="1.7s" repeatCount="indefinite" path={path} />
+            </circle>
+          </g>
+        ))}
 
         {/* agent nodes */}
-        {nodes.map((a, i) => {
-          const ang = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / Math.max(1, n);
-          const ax = CX + RX * Math.cos(ang), ay = CY + RY * Math.sin(ang);
-          const up = ay < CY - 10;
+        {geo.map(({ a, ax, ay, up }) => {
           const Icon = ROLE_ICON[a.role] ?? Bot;
           const col = STATUS_COLOR[a.status];
-          const C = 2 * Math.PI * NODE_R;
+          const runningNode = a.status === "running";
           return (
             <g key={a.uid}>
               <circle cx={ax} cy={ay} r={NODE_R} fill="none" className="stroke-line" strokeWidth={2.5} />
-              {/* progress ring: full for done, rotating arc for running, partial for error */}
-              <circle
-                cx={ax} cy={ay} r={NODE_R} fill="none" stroke={col} strokeWidth={2.5} strokeLinecap="round"
-                strokeDasharray={a.status === "running" ? `${(C * 0.28).toFixed(1)} ${C.toFixed(1)}` : a.status === "error" ? `${(C * 0.5).toFixed(1)} ${C.toFixed(1)}` : C.toFixed(1)}
-                transform={`rotate(-90 ${ax} ${ay})`}
-                className={a.status === "running" ? "ring-indeterminate" : undefined}
-                opacity={a.status === "done" ? 0.5 : 1}
-              />
+              {/* ring: running → a clean arc sweeping in place (dash animation, no transform);
+                  error → half arc; done → full faint ring */}
+              {runningNode ? (
+                <circle
+                  cx={ax} cy={ay} r={NODE_R} fill="none" stroke={col} strokeWidth={2.5} strokeLinecap="round"
+                  strokeDasharray={`${(C * 0.3).toFixed(1)} ${(C * 0.7).toFixed(1)}`}
+                  className="ring-spin" style={{ "--circ": C.toFixed(1) } as CSSProperties}
+                />
+              ) : (
+                <circle
+                  cx={ax} cy={ay} r={NODE_R} fill="none" stroke={col} strokeWidth={2.5} strokeLinecap="round"
+                  strokeDasharray={a.status === "error" ? `${(C * 0.5).toFixed(1)} ${C.toFixed(1)}` : C.toFixed(1)}
+                  transform={`rotate(-90 ${ax} ${ay})`}
+                  opacity={a.status === "done" ? 0.5 : 1}
+                />
+              )}
               <circle cx={ax} cy={ay} r={NODE_R - 7} style={{ fill: "rgb(var(--card))", stroke: "rgb(255 255 255 / 0.12)" }} strokeWidth={1} />
-              <g style={{ color: a.status === "running" ? "rgb(var(--fg-strong))" : a.role === "reviewer" ? "rgb(var(--brand))" : "rgb(var(--faint))" }}>
+              <g style={{ color: runningNode ? "rgb(var(--fg-strong))" : a.role === "reviewer" ? "rgb(var(--brand))" : "rgb(var(--faint))" }}>
                 <Icon x={ax - 10} y={ay - 10} width={20} height={20} color="currentColor" />
               </g>
               <circle cx={ax + 24} cy={ay - 24} r={4.5} fill={col} style={{ stroke: "rgb(var(--bg))" }} strokeWidth={2.5} />
@@ -91,6 +128,13 @@ function OrchestrationGraph({ agents, running }: { agents: RunAgent[]; running: 
           {running && <circle cx={CX} cy={CY} r={54} className="orch-pulse" />}
           {/* ambient ring: dashed always, but only SPINS while a run is live */}
           <circle cx={CX} cy={CY} r={68} className={cx("orch-ring", running && "orch-spin")} />
+          {/* overall run progress — real: steps done / total, fills clockwise from the top */}
+          <circle
+            cx={CX} cy={CY} r={RING_R} fill="none" stroke="rgb(34 197 94 / 0.85)" strokeWidth={2.5} strokeLinecap="round"
+            strokeDasharray={RING_C.toFixed(1)} strokeDashoffset={(RING_C * (1 - Math.max(0, Math.min(1, progress)))).toFixed(1)}
+            transform={`rotate(-90 ${CX} ${CY})`} opacity={progress > 0 ? 1 : 0}
+            style={{ transition: "stroke-dashoffset .5s ease" }}
+          />
           <circle cx={CX} cy={CY} r={54} style={{ fill: "rgb(var(--card))", stroke: "rgb(214 235 253 / 0.45)" }} strokeWidth={1.4} />
           <g style={{ color: "rgb(var(--fg-strong))" }}>
             <Cpu x={CX - 13} y={CY - 28} width={26} height={26} color="currentColor" />
@@ -182,16 +226,19 @@ function OrchestrationInner() {
   const covTotal = coverage?.categories?.length ?? 0;
 
   const offline = conn !== "ready";
-  // everything here is folded from the real run stream — nothing is simulated.
-  const idle = !offline && !running && agents.length === 0 && tasks.length === 0;
+  // "live" = real activity on the stream (an agent/orchestrator or task running) — not just
+  // whether the control plane spawned the process, so a terminal-launched run animates too.
+  const live = agentsRunning > 0 || tasks.some((t) => t.status === "running") || running;
+  const idle = !offline && agents.length === 0 && tasks.length === 0;
+  const progress = tasks.length ? stepsDone / tasks.length : 0;
 
   return (
     <>
       <ViewHead
         crumb="redstrike / orchestration"
         title="Orchestration"
-        live={running}
-        sub={offline ? "Control plane not connected" : running ? `Live task routing · ${activeId}` : `${activeId || "no engagement"} · idle`}
+        live={live}
+        sub={offline ? "Control plane not connected" : live ? `Live task routing · ${activeId}` : `${activeId || "no engagement"} · idle`}
         actions={
           <Link href="/engagements" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium text-fg transition hover:border-fg/30">
             <Rocket size={15} /> Launch a run
@@ -224,14 +271,14 @@ function OrchestrationInner() {
 
           <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
             <Panel tall>
-              <PanelHeader title="Task flow" sub="orchestrator → agents" actions={running ? <LivePill /> : undefined} />
+              <PanelHeader title="Task flow" sub="orchestrator → agents" actions={live ? <LivePill /> : undefined} />
               {idle ? (
                 <PanelBody className="flex flex-col items-center gap-2 py-16 text-center">
                   <p className="text-sm font-medium text-fg">No active run</p>
                   <p className="max-w-sm text-xs text-muted">Launch or resume an engagement from Engagements — the orchestrator and its agents animate here as they work.</p>
                 </PanelBody>
               ) : (
-                <OrchestrationGraph agents={agents} running={running} />
+                <OrchestrationGraph agents={agents} running={live} progress={progress} />
               )}
             </Panel>
 
@@ -242,7 +289,7 @@ function OrchestrationInner() {
               </Panel>
               <Panel tall>
                 <PanelHeader title="Dispatch log" sub="newest first" />
-                <DispatchLog events={events} running={running} />
+                <DispatchLog events={events} running={live} />
               </Panel>
             </div>
           </div>

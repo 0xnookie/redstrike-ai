@@ -430,6 +430,10 @@ export function foldOrchestration(line: string, s: OrchState): OrchState {
         if (skill === "redstrike") {
           if (!s.agents.some((a) => a.role === "orchestrator")) s.agents.push({ uid, name: "redstrike", role: "orchestrator", task: "engagement orchestrator", status: "running" });
         } else {
+          // Skills run INLINE: the Skill tool_result returns at once (it just loads the skill),
+          // then the work happens in the main context. So a skill stays "running" until the NEXT
+          // skill supersedes it or the run ends — not when its own tool_result arrives.
+          for (const a of s.agents) if (a.role === "skill" && a.status === "running") a.status = "done";
           s.agents.push({ uid, name: skill, role: isReviewer(skill) ? "reviewer" : "skill", task: inp.args ? String(inp.args) : undefined, status: "running" });
         }
       } else if (name === "Agent" || name === "Task") {
@@ -443,8 +447,10 @@ export function foldOrchestration(line: string, s: OrchState): OrchState {
       for (const b of content) {
         if (!b || b.type !== "tool_result") continue;
         const ref = String(b.tool_use_id || "");
+        // Only subagents (Agent/Task) genuinely finish at their tool_result; a skill's
+        // immediate result just means it loaded, so skills end via supersede / run-end.
         const ag = s.agents.find((a) => a.uid === ref && a.status === "running");
-        if (ag) ag.status = "done";
+        if (ag && (ag.role === "executor" || ag.role === "reviewer")) ag.status = "done";
         const txt = typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? "");
         const m = /Task #(\d+)/.exec(txt);
         if (m) { const task = s.tasks.find((x) => x.uid === ref); if (task) task.n = Number(m[1]); }
