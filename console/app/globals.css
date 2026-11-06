@@ -5,6 +5,7 @@
 /* ============================================================================
    Theme tokens — RGB channels so Tailwind's /alpha modifier works everywhere.
    Light is the default; .dark (set by next-themes on <html>) overrides.
+   The dark palette is the "strix" look: near-black canvas, frameless panels.
    ========================================================================== */
 :root {
   --bg: 246 246 247;
@@ -12,25 +13,32 @@
   --card2: 250 250 251;
   --line: 228 228 231;
   --fg: 24 24 27;
+  --fg-strong: 9 9 11;
   --muted: 113 113 122;
+  --faint: 161 161 170;
   --sidebar: 251 251 252;
   --brand: 24 24 27;       /* monochrome: near-black ink */
   --brand-fg: 255 255 255;
   --grid: 228 228 231;
+  /* Geist (self-hosted via the `geist` package) → the console's sans/mono */
+  --font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
+  --font-mono: var(--font-geist-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   color-scheme: light;
 }
 
 .dark {
-  --bg: 6 7 7;             /* strix-like near-black */
-  --card: 25 25 25;        /* #191919 panels */
-  --card2: 33 33 34;
+  --bg: 0 0 0;             /* strix pure black canvas */
+  --card: 14 14 14;        /* faint lift above the canvas */
+  --card2: 26 26 27;
   --line: 42 42 44;        /* #2a2a2c hairline */
   --fg: 240 240 240;
-  --muted: 161 164 165;
-  --sidebar: 8 9 9;
-  --brand: 250 250 250;    /* monochrome: near-white ink */
-  --brand-fg: 9 9 11;
-  --grid: 42 42 44;
+  --fg-strong: 255 255 255;
+  --muted: 171 171 171;
+  --faint: 120 120 120;
+  --sidebar: 0 0 0;
+  --brand: 245 245 245;    /* monochrome: near-white ink */
+  --brand-fg: 0 0 0;
+  --grid: 36 36 38;
   color-scheme: dark;
 }
 
@@ -53,8 +61,90 @@ body {
 }
 .dark body {
   /* one soft light glow at center-top, like strix — simple, not busy */
-  background-image: radial-gradient(70rem 46rem at 50% -12%, rgb(255 255 255 / 0.04), transparent 60%);
+  background-image: radial-gradient(70rem 46rem at 50% -14%, rgb(214 235 253 / 0.06), transparent 68%);
 }
+
+/* ============================================================================
+   Strix panel — the signature surface. Light = a clean filled card; dark =
+   frameless: a faint top-highlight hairline, edge border, and a fade that
+   dissolves the lower border into the black canvas.
+   ========================================================================== */
+.panel {
+  position: relative;
+  border-radius: 24px;
+  border: 1px solid rgb(var(--line));
+  background-color: rgb(var(--card));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 14px 32px -24px rgb(0 0 0 / 0.3);
+  isolation: isolate;
+}
+.panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 150px;
+  max-width: 70%;
+  height: 1px;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(90deg, transparent, rgb(var(--fg) / 0.35), transparent);
+  z-index: 2;
+  pointer-events: none;
+}
+.panel > *:not(.absolute) { position: relative; z-index: 1; }
+
+.dark .panel {
+  background-color: transparent;
+  border: 1px solid rgb(255 255 255 / 0.13);
+  border-bottom: 0;
+  box-shadow: none;
+}
+.dark .panel::before {
+  background: linear-gradient(90deg, transparent, rgb(214 235 253 / 0.6), transparent);
+}
+.dark .panel::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  bottom: -1px;
+  width: calc(100% + 2px);
+  height: 42%;
+  border-radius: 0 0 24px 24px;
+  background: linear-gradient(transparent, rgb(var(--bg)));
+  z-index: 0;
+  pointer-events: none;
+}
+.dark .panel.tall::after { height: 20%; }
+
+/* panel header / body rhythm (matches the dashboard) */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 8px;
+  min-height: 56px;
+}
+.panel-body { padding: 10px 22px 22px; }
+.panel-body.flush { padding: 4px 0 10px; }
+
+/* tile — thin-edged metric card */
+.tile {
+  position: relative;
+  border: 1px solid rgb(var(--fg) / 0.12);
+  border-radius: 16px;
+  padding: 15px 18px;
+  transition: border-color .15s;
+  background-color: rgb(var(--card));
+}
+.dark .tile { background-color: transparent; border-color: rgb(255 255 255 / 0.1); }
+.tile:hover { border-color: rgb(var(--fg) / 0.22); }
+.dark .tile:hover { border-color: rgb(255 255 255 / 0.2); }
+.tile-ico {
+  width: 34px; height: 34px; border-radius: 12px;
+  border: 1px solid rgb(var(--fg) / 0.12);
+  display: grid; place-items: center; flex: none;
+}
+.dark .tile-ico { border-color: rgb(255 255 255 / 0.12); }
 
 /* premium surfaces — hairline top highlight + layered shadow (theme-aware) */
 .surface {
@@ -64,7 +154,6 @@ body {
     0 12px 32px -20px rgb(0 0 0 / 0.35);
 }
 .dark .surface {
-  /* the little gradient on cards — a gentle light-from-top sheen over the panel color */
   background-image: linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0) 46%);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 0.05),
@@ -73,6 +162,34 @@ body {
 }
 .surface-hover { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
 .surface-hover:hover { transform: translateY(-1px); border-color: rgb(var(--fg) / 0.18); }
+
+/* live pulse dot */
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: #24a372; box-shadow: 0 0 0 3px rgb(36 163 114 / 0.2);
+  animation: live-pulse 2.4s ease-in-out infinite;
+}
+@keyframes live-pulse { 50% { box-shadow: 0 0 0 5px rgb(36 163 114 / 0.03); } }
+
+/* orchestration graph */
+.orch-spin {
+  fill: none; stroke: rgb(214 235 253 / 0.3); stroke-width: 1; stroke-dasharray: 2 7;
+  transform-box: fill-box; transform-origin: center; animation: orch-spin 30s linear infinite;
+}
+@keyframes orch-spin { to { transform: rotate(360deg); } }
+.orch-pulse {
+  fill: none; stroke: rgb(214 235 253 / 0.5); stroke-width: 1;
+  transform-box: fill-box; transform-origin: center;
+  animation: orch-opulse 2.6s ease-out infinite;
+}
+@keyframes orch-opulse { 0% { opacity: .6; transform: scale(1); } 70%,100% { opacity: 0; transform: scale(1.5); } }
+.edge-flow { stroke-dasharray: 4 7; animation: edge-flow 1.4s linear infinite; }
+@keyframes edge-flow { to { stroke-dashoffset: -22; } }
+.ring-indeterminate { transform-box: fill-box; transform-origin: center; animation: orch-spin 1.4s linear infinite; }
+
+/* blinking caret (dispatch log) */
+.caret { display: inline-block; width: 7px; height: 13px; background: rgb(var(--muted)); animation: caret 1s steps(1) infinite; vertical-align: -2px; }
+@keyframes caret { 50% { opacity: 0; } }
 
 /* thin, theme-aware scrollbars */
 .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }

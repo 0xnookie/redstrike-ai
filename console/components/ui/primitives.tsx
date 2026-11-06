@@ -3,12 +3,74 @@ import { cx } from "@/lib/format";
 import { SEVERITY, VERDICT, CONFIDENCE, hexA } from "@/lib/theme";
 import type { Severity, Verdict, Confidence } from "@/lib/types";
 
-/* ---------- Card ---------- */
+/* ---------- Card = strix panel (frameless in dark, filled in light) ---------- */
 export function Card({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cx("rounded-xl border border-line bg-card surface", className)} {...rest}>
+    <div className={cx("panel", className)} {...rest}>
       {children}
     </div>
+  );
+}
+
+/* ---------- Panel + header/body (structured strix layout) ---------- */
+export function Panel({
+  className, tall, children, ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { tall?: boolean }) {
+  return (
+    <div className={cx("panel flex flex-col", tall && "tall", className)} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+export function PanelHeader({
+  title, sub, icon, actions,
+}: { title: React.ReactNode; sub?: React.ReactNode; icon?: React.ReactNode; actions?: React.ReactNode }) {
+  return (
+    <div className="panel-head">
+      <div className="flex min-w-0 items-center gap-2.5">
+        {icon}
+        <span className="truncate text-[15px] font-medium text-fg-strong">{title}</span>
+        {sub && <span className="shrink-0 font-mono text-xs text-faint">{sub}</span>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+    </div>
+  );
+}
+
+export function PanelBody({
+  className, flush, children,
+}: { className?: string; flush?: boolean; children: React.ReactNode }) {
+  return <div className={cx("panel-body flex-1", flush && "flush", className)}>{children}</div>;
+}
+
+/* ---------- View header (crumb · title · live sub · actions) ---------- */
+export function ViewHead({
+  crumb, title, sub, live, actions,
+}: { crumb?: string; title: string; sub?: React.ReactNode; live?: boolean; actions?: React.ReactNode }) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        {crumb && <div className="mb-2 font-mono text-xs tracking-wide text-faint">{crumb}</div>}
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-fg-strong sm:text-[30px]">{title}</h1>
+        {sub && (
+          <div className="mt-2 flex items-center gap-2 font-mono text-[12.5px] text-faint">
+            {live && <span className="live-dot" />}
+            {sub}
+          </div>
+        )}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2.5">{actions}</div>}
+    </div>
+  );
+}
+
+export function LivePill({ label = "LIVE" }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/[0.08] px-2.5 py-0.5 font-mono text-[11px] font-medium tracking-wide text-emerald-500">
+      <span className="live-dot" />
+      {label}
+    </span>
   );
 }
 
@@ -20,24 +82,24 @@ export function Select({
     <div className={cx("relative inline-flex", wrapperClassName)}>
       <select
         className={cx(
-          "h-9 w-full cursor-pointer appearance-none rounded-lg border border-line bg-card2 pl-2.5 pr-8 text-sm text-fg outline-none transition focus:border-brand/50",
+          "h-9 w-full cursor-pointer appearance-none rounded-full border border-line bg-card2 pl-3 pr-8 text-sm text-fg outline-none transition focus:border-fg/40",
           className,
         )}
         {...rest}
       >
         {children}
       </select>
-      <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted" />
+      <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" />
     </div>
   );
 }
 
-/* ---------- Page header ---------- */
+/* ---------- Page header (legacy — used by views not yet migrated) ---------- */
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: React.ReactNode }) {
   return (
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">{title}</h1>
         {subtitle && <p className="mt-0.5 text-sm text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -71,31 +133,34 @@ export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
   return <Pill label={m.label} color={m.color} />;
 }
 
-/* ---------- KPI tile ---------- */
+/* ---------- Tile / KPI (strix metric card) ---------- */
 export function Kpi({
-  label, value, color, sub, icon, onClick, active,
+  label, value, color, sub, note, suffix, icon, onClick, active,
 }: {
-  label: string; value: React.ReactNode; color?: string; sub?: React.ReactNode;
-  icon?: React.ReactNode; onClick?: () => void; active?: boolean;
+  label: string; value: React.ReactNode; color?: string; sub?: React.ReactNode; note?: React.ReactNode;
+  suffix?: React.ReactNode; icon?: React.ReactNode; onClick?: () => void; active?: boolean;
 }) {
   const Comp: any = onClick ? "button" : "div";
   return (
     <Comp
       onClick={onClick}
       className={cx(
-        "flex flex-col rounded-xl border bg-card p-3.5 text-left surface transition",
-        onClick && "surface-hover hover:border-brand/40",
-        active ? "border-brand/60 ring-1 ring-brand/30" : "border-line"
+        "tile flex min-w-0 flex-col text-left",
+        onClick && "cursor-pointer",
+        active && "!border-fg/40 ring-1 ring-fg/15",
       )}
     >
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</span>
-        {icon && <span className="text-muted">{icon}</span>}
+      <div className="flex items-center gap-2.5">
+        {icon && <span className="tile-ico text-muted" style={color ? { color } : undefined}>{icon}</span>}
+        <span className="truncate text-[13px] text-muted">{label}</span>
       </div>
-      <span className="mt-1 text-2xl font-semibold tabular-nums" style={color ? { color } : undefined}>
-        {value}
-      </span>
-      {sub && <span className="mt-0.5 text-xs text-muted">{sub}</span>}
+      <div className="mt-3.5 flex items-baseline gap-2">
+        <span className="text-[28px] font-semibold leading-none tracking-tight tabular-nums text-fg-strong sm:text-[30px]" style={color ? { color } : undefined}>
+          {value}
+        </span>
+        {suffix && <span className="text-[13px] text-faint">{suffix}</span>}
+      </div>
+      {(note ?? sub) != null && <div className="mt-2 font-mono text-[11px] text-faint">{note ?? sub}</div>}
     </Comp>
   );
 }
@@ -105,13 +170,13 @@ export function Segmented<T extends string>({
   options, value, onChange,
 }: { options: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <div className="inline-flex rounded-lg border border-line bg-card2 p-0.5">
+    <div className="inline-flex rounded-full border border-line bg-card2 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
           className={cx(
-            "rounded-md px-2.5 py-1 text-xs font-medium transition",
+            "rounded-full px-2.5 py-1 text-xs font-medium transition",
             value === o.value ? "bg-brand text-brand-fg shadow-sm" : "text-muted hover:text-fg"
           )}
         >

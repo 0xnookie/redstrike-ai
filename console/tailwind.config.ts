@@ -19,7 +19,9 @@ const config: Config = {
         card2: withAlpha("--card2"),
         line: withAlpha("--line"),
         fg: withAlpha("--fg"),
+        "fg-strong": withAlpha("--fg-strong"),
         muted: withAlpha("--muted"),
+        faint: withAlpha("--faint"),
         sidebar: withAlpha("--sidebar"),
         brand: {
           DEFAULT: withAlpha("--brand"),
@@ -28,7 +30,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-sans, ui-sans-serif)", "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        mono: ["var(--font-mono, ui-monospace)", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       borderRadius: {
         xl: "0.875rem",

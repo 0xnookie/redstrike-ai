@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard, Target, Bug, Workflow, Network, Activity,
+  LayoutDashboard, Target, Bug, Workflow, Network, Activity, Share2,
   Bot, FileText, Settings2, ListChecks, ShieldAlert, Terminal, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
@@ -20,6 +20,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { href: "/chains", label: "Attack chains", icon: Workflow },
       { href: "/assets", label: "Assets & scope", icon: Network },
       { href: "/cve-intel", label: "CVE intel", icon: ShieldAlert },
+      { href: "/orchestration", label: "Orchestration", icon: Share2 },
       { href: "/activity", label: "Activity", icon: Activity },
       { href: "/control", label: "Control plane", icon: Terminal },
     ],

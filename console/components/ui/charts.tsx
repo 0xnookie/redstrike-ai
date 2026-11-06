@@ -128,6 +128,45 @@ export function StackedBars({
   );
 }
 
+/* ---------- Area / line chart (currentColor-driven, theme-aware) ---------- */
+export function AreaLine({
+  points, height = 190, className, fill = true,
+}: { points: number[]; height?: number; className?: string; fill?: boolean }) {
+  const W = 600, H = height, pad = 8;
+  const n = points.length;
+  if (n < 2) {
+    return (
+      <div className="flex items-center justify-center text-xs text-muted" style={{ height }}>
+        Not enough dated data yet.
+      </div>
+    );
+  }
+  const max = Math.max(1, ...points);
+  const min = Math.min(0, ...points);
+  const span = max - min || 1;
+  const x = (i: number) => pad + (i / (n - 1)) * (W - 2 * pad);
+  const y = (v: number) => H - pad - ((v - min) / span) * (H - 2 * pad);
+  const line = points.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const area = `${line}L${x(n - 1).toFixed(1)},${(H - pad).toFixed(1)}L${x(0).toFixed(1)},${(H - pad).toFixed(1)}Z`;
+  const gid = `al-${n}-${Math.round(max)}`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={cx("w-full text-fg", className)} style={{ height }} aria-hidden>
+      {[0.25, 0.5, 0.75].map((f) => (
+        <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} className="stroke-line" strokeWidth={1} shapeRendering="crispEdges" vectorEffect="non-scaling-stroke" />
+      ))}
+      <defs>
+        <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="currentColor" stopOpacity={0.22} />
+          <stop offset="100%" stopColor="currentColor" stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      {fill && <path d={area} fill={`url(#${gid})`} />}
+      <path d={line} fill="none" stroke="currentColor" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(n - 1)} cy={y(points[n - 1])} r={3.5} fill="currentColor" />
+    </svg>
+  );
+}
+
 /* ---------- Thin progress bar ---------- */
 export function Progress({ value, max = 100, color = "#22c55e", className }: { value: number; max?: number; color?: string; className?: string }) {
   return (
