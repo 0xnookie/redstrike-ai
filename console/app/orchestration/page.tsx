@@ -2,8 +2,8 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { Cpu, Bot, ShieldCheck, Terminal, Bot as BotIcon, ListChecks, Activity, Layers } from "lucide-react";
-import { ControlProvider, useControl } from "@/components/control/ControlProvider";
+import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers } from "lucide-react";
+import { useControl } from "@/components/control/ControlProvider";
 import type { RunAgent, RunTask, RunEvent } from "@/lib/control";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, LivePill } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
@@ -18,11 +18,13 @@ const STATUS_COLOR: Record<RunAgent["status"], string> = {
 
 const VB_W = 1000, VB_H = 620, CX = 500, CY = 300, RX = 384, RY = 224, NODE_R = 34, MAX_NODES = 16;
 
-function OrchestrationGraph({ agents, queueCount, running }: { agents: RunAgent[]; queueCount: number; running: boolean }) {
-  // show running agents first, then the most recent others, capped for layout
+function OrchestrationGraph({ agents, running }: { agents: RunAgent[]; running: boolean }) {
+  // the orchestrator is always Redstrike (the center) — never a peripheral node.
+  // show running agents first, then the most recent others, capped for layout.
   const nodes = useMemo(() => {
-    const live = agents.filter((a) => a.status === "running");
-    const rest = agents.filter((a) => a.status !== "running").slice(-(MAX_NODES - Math.min(live.length, MAX_NODES)));
+    const peripheral = agents.filter((a) => a.role !== "orchestrator");
+    const live = peripheral.filter((a) => a.status === "running");
+    const rest = peripheral.filter((a) => a.status !== "running").slice(-(MAX_NODES - Math.min(live.length, MAX_NODES)));
     return [...live, ...rest].slice(0, MAX_NODES);
   }, [agents]);
 
@@ -87,15 +89,14 @@ function OrchestrationGraph({ agents, queueCount, running }: { agents: RunAgent[
         {/* center orchestrator core */}
         <g>
           {running && <circle cx={CX} cy={CY} r={54} className="orch-pulse" />}
-          <circle cx={CX} cy={CY} r={68} className="orch-spin" />
+          {/* ambient ring: dashed always, but only SPINS while a run is live */}
+          <circle cx={CX} cy={CY} r={68} className={cx("orch-ring", running && "orch-spin")} />
           <circle cx={CX} cy={CY} r={54} style={{ fill: "rgb(var(--card))", stroke: "rgb(214 235 253 / 0.45)" }} strokeWidth={1.4} />
           <g style={{ color: "rgb(var(--fg-strong))" }}>
             <Cpu x={CX - 13} y={CY - 28} width={26} height={26} color="currentColor" />
           </g>
-          <text x={CX} y={CY + 12} textAnchor="middle" className="fill-fg" style={{ font: "500 12px var(--font-mono)" }}>orchestrator</text>
-          <text x={CX} y={CY + 28} textAnchor="middle" className="fill-faint" style={{ font: "11px var(--font-sans)" }}>
-            {queueCount} in queue
-          </text>
+          <text x={CX} y={CY + 10} textAnchor="middle" className="fill-fg" style={{ font: "600 13px var(--font-sans)" }}>Redstrike</text>
+          <text x={CX} y={CY + 26} textAnchor="middle" className="fill-faint" style={{ font: "11px var(--font-mono)" }}>orchestrator</text>
         </g>
       </svg>
 
@@ -181,6 +182,7 @@ function OrchestrationInner() {
   const covTotal = coverage?.categories?.length ?? 0;
 
   const offline = conn !== "ready";
+  // everything here is folded from the real run stream — nothing is simulated.
   const idle = !offline && !running && agents.length === 0 && tasks.length === 0;
 
   return (
@@ -189,16 +191,10 @@ function OrchestrationInner() {
         crumb="redstrike / orchestration"
         title="Orchestration"
         live={running}
-        sub={
-          offline
-            ? "Control plane not connected"
-            : running
-              ? `Live task routing · ${activeId}`
-              : `${activeId || "no engagement"} · idle`
-        }
+        sub={offline ? "Control plane not connected" : running ? `Live task routing · ${activeId}` : `${activeId || "no engagement"} · idle`}
         actions={
-          <Link href="/control" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium text-fg transition hover:border-fg/30">
-            <Terminal size={15} /> Control plane
+          <Link href="/engagements" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium text-fg transition hover:border-fg/30">
+            <Rocket size={15} /> Launch a run
           </Link>
         }
       />
@@ -209,11 +205,11 @@ function OrchestrationInner() {
             <span className="tile-ico text-muted"><Terminal size={18} /></span>
             <p className="text-sm font-medium text-fg">The control plane isn’t connected</p>
             <p className="max-w-md text-xs text-muted">
-              Live orchestration streams from a running engagement. Start the opt-in control plane and connect, then launch
-              or resume a run — steps, agents and dispatch events will flow in here.
+              Live orchestration streams from a running engagement. Connect the opt-in control plane in Settings → Agent
+              runtimes, then launch a run from Engagements — steps, agents and dispatch events animate here in real time.
             </p>
-            <Link href="/control" className="mt-1 inline-flex h-9 items-center gap-2 rounded-full bg-brand px-4 text-sm font-medium text-brand-fg transition hover:brightness-110">
-              <Terminal size={15} /> Open the control plane
+            <Link href="/engagements" className="mt-1 inline-flex h-9 items-center gap-2 rounded-full bg-brand px-4 text-sm font-medium text-brand-fg transition hover:brightness-110">
+              <Rocket size={15} /> Launch a run
             </Link>
           </PanelBody>
         </Panel>
@@ -232,10 +228,10 @@ function OrchestrationInner() {
               {idle ? (
                 <PanelBody className="flex flex-col items-center gap-2 py-16 text-center">
                   <p className="text-sm font-medium text-fg">No active run</p>
-                  <p className="max-w-sm text-xs text-muted">Launch or resume an engagement from the control plane — the orchestrator and its agents appear here as they spin up.</p>
+                  <p className="max-w-sm text-xs text-muted">Launch or resume an engagement from Engagements — the orchestrator and its agents animate here as they work.</p>
                 </PanelBody>
               ) : (
-                <OrchestrationGraph agents={agents} queueCount={queueDepth} running={running} />
+                <OrchestrationGraph agents={agents} running={running} />
               )}
             </Panel>
 
@@ -257,9 +253,5 @@ function OrchestrationInner() {
 }
 
 export default function OrchestrationPage() {
-  return (
-    <ControlProvider>
-      <OrchestrationInner />
-    </ControlProvider>
-  );
+  return <OrchestrationInner />;
 }

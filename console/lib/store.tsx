@@ -38,6 +38,7 @@ interface ConsoleCtx {
   cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
   clearData: () => void;
+  reloadEngagements: () => Promise<void>;
   selectedFinding: Finding | null;
   openFinding: (f: Finding) => void;
   closeFinding: () => void;
@@ -305,6 +306,29 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     setMode("empty");
   }, []);
 
+  /* ---- re-read the engagement manifest (after a create/delete on the control plane) ---- */
+  const reloadEngagements = useCallback(async () => {
+    const manifest = await fetchJson("/engagements.json");
+    if (!manifest || !Array.isArray(manifest.engagements)) return;
+    const engs: Engagement[] = manifest.engagements.map(toEngagement);
+    if (engs.length) {
+      setEngagements(engs);
+      setMode("live");
+      setActiveIdState((cur) => {
+        const keep = engs.find((e) => e.id === cur)?.id ?? engs[0].id;
+        safeLocalSet(ACTIVE_KEY, keep);
+        void loadEngagement(keep);
+        return keep;
+      });
+    } else {
+      // everything was deleted — fall back to the zero-state placeholder
+      setEngagements(emptyData.engagements);
+      setDatasets({});
+      setActiveIdState(emptyData.activeEngagementId);
+      setMode("empty");
+    }
+  }, [loadEngagement]);
+
   /* ---- boot: load the manifest of all engagements, then the active one ---- */
   const booted = useRef(false);
   useEffect(() => {
@@ -336,7 +360,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const value: ConsoleCtx = {
     mode, engagements, activeEngagement, activeId, setActiveId,
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, tests, coverage, cveIntel,
-    cveFeed, cveLive, loadFiles, clearData,
+    cveFeed, cveLive, loadFiles, clearData, reloadEngagements,
     selectedFinding, openFinding, closeFinding,
     selectedHost, openHost, closeHost,
     selectedEndpoint, openEndpoint, closeEndpoint,

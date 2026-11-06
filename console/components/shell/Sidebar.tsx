@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Target, Bug, Workflow, Network, Activity, Share2,
-  Bot, FileText, Settings2, ListChecks, ShieldAlert, Terminal, type LucideIcon,
+  Bot, FileText, Settings2, ListChecks, ShieldAlert, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { EngagementSwitcher } from "./EngagementSwitcher";
@@ -22,7 +22,6 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { href: "/cve-intel", label: "CVE intel", icon: ShieldAlert },
       { href: "/orchestration", label: "Orchestration", icon: Share2 },
       { href: "/activity", label: "Activity", icon: Activity },
-      { href: "/control", label: "Control plane", icon: Terminal },
     ],
   },
   {

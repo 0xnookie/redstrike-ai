@@ -168,10 +168,10 @@ export function AreaLine({
 }
 
 /* ---------- Thin progress bar ---------- */
-export function Progress({ value, max = 100, color = "#22c55e", className }: { value: number; max?: number; color?: string; className?: string }) {
+export function Progress({ value, max = 100, color = "#22c55e", className, animated = false }: { value: number; max?: number; color?: string; className?: string; animated?: boolean }) {
   return (
     <div className={cx("h-1.5 w-full overflow-hidden rounded-full bg-line", className)}>
-      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, (value / max) * 100)}%`, background: color }} />
+      <div className={cx("h-full rounded-full transition-all", animated && "progress-live")} style={{ width: `${Math.min(100, (value / max) * 100)}%`, background: color }} />
     </div>
   );
 }

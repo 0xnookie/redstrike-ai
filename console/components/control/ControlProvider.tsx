@@ -34,9 +34,11 @@ interface ControlCtx {
   refresh: () => Promise<void>;
   doInit: (body: InitBody) => Promise<CliResult | null>;
   doRun: (body: RunBody) => Promise<boolean>;
+  doRunFor: (id: string, body: RunBody) => Promise<boolean>;
   doApprove: (ids: string[] | "all") => Promise<boolean>;
   doResume: () => Promise<boolean>;
   doStop: () => Promise<void>;
+  doDelete: (id: string) => Promise<boolean>;
   clearEvents: () => void;
   auth: AuthSnapshot | null;
   refreshAuth: () => Promise<void>;
@@ -139,6 +141,11 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
   const startStream = useCallback(
     (id: string) => {
       stopStream();
+      // the backend REPLAYS the current run from the top on connect, and folding isn't
+      // idempotent — so rebuild from empty each time (fixes duplicates + restores on refresh)
+      orchRef.current = emptyOrch();
+      setOrch(emptyOrch());
+      setEvents([]);
       const ac = new AbortController();
       streamAbort.current = ac;
       void (async () => {
@@ -231,10 +238,12 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     };
   }, [conn, activeId]);
 
-  /* ---- (re)start the stream whenever the active engagement has a live run ---- */
+  /* ---- (re)open the stream on connect/select so a refresh or late join replays the
+     current run; it reopens when a run starts/stops (runPid flips). The backend returns
+     immediately when there's no run log, so this never holds an idle socket. ---- */
   const runPid = status?.runs?.[activeId];
   useEffect(() => {
-    if (conn === "ready" && activeId && runPid != null) {
+    if (conn === "ready" && activeId) {
       startStream(activeId);
       return () => stopStream();
     }
@@ -298,9 +307,11 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     [refresh],
   );
 
-  const doRun = useCallback(
-    async (body: RunBody): Promise<boolean> => {
-      if (!activeId) {
+  // Launch a run against an EXPLICIT engagement id — lets a fresh "create & launch"
+  // start the run the same tick it scaffolds, before the new id has become `activeId`.
+  const doRunFor = useCallback(
+    async (id: string, body: RunBody): Promise<boolean> => {
+      if (!id) {
         setLastError("Select an engagement first.");
         return false;
       }
@@ -312,7 +323,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
           orchRef.current = emptyOrch();
           setOrch(emptyOrch());
         }
-        const r = await api.runEngagement(tokenRef.current, activeId, body);
+        const r = await api.runEngagement(tokenRef.current, id, body);
         setLastRunConfig({ allow: body.allow, max_turns: body.max_turns, max_budget: body.max_budget });
         await refresh(); // pid shows up fast → the stream effect opens the tail
         return !!r.ok;
@@ -324,8 +335,10 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
         setBusy(false);
       }
     },
-    [activeId, refresh],
+    [refresh],
   );
+
+  const doRun = useCallback((body: RunBody) => doRunFor(activeId, body), [doRunFor, activeId]);
 
   const doApprove = useCallback(
     async (ids: string[] | "all"): Promise<boolean> => {
@@ -362,6 +375,31 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
       setBusy(false);
     }
   }, [activeId, refresh]);
+
+  const doDelete = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (!id) return false;
+      setBusy(true);
+      setLastError("");
+      try {
+        const r = await api.deleteEngagement(tokenRef.current, id);
+        if (!r.ok) {
+          setLastError((r.error || r.stderr || "delete failed").trim());
+          return false;
+        }
+        if (id === activeId) setActiveId(""); // we were viewing it — clear the live selection
+        await refresh();
+        return true;
+      } catch (e) {
+        if (e instanceof ControlError && e.kind === "conflict") setLastError("A run is in progress — stop it first.");
+        else setLastError(msgOf(e));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeId, refresh, setActiveId],
+  );
 
   const clearEvents = useCallback(() => setEvents([]), []);
 
@@ -459,9 +497,11 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     refresh,
     doInit,
     doRun,
+    doRunFor,
     doApprove,
     doResume,
     doStop,
+    doDelete,
     clearEvents,
     auth,
     refreshAuth,

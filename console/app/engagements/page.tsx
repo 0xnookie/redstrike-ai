@@ -11,6 +11,9 @@ import { cvssScore } from "@/lib/cvss";
 import type { Engagement, EngagementStatus, Severity, Finding } from "@/lib/types";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, Pill, SeverityBadge } from "@/components/ui/primitives";
 import { Progress } from "@/components/ui/charts";
+import { LaunchDrawer } from "@/components/control/LaunchDrawer";
+import { LiveRun } from "@/components/control/LiveRun";
+import { DeleteEngagementButton } from "@/components/control/DeleteEngagementButton";
 
 // status → stepper position; the simple scoping → running → completed lifecycle
 const PHASE_STEPS = ["Scoping", "Running", "Completed"];
@@ -20,9 +23,10 @@ const statusStep = (s: EngagementStatus) => (s === "completed" ? 2 : s === "scop
 type Counts = { findings: number; critical: number; high: number; medium: number; low: number };
 
 export default function EngagementsPage() {
-  const { engagements, activeEngagement, activeId, setActiveId, findings, chains, assets, openFinding } = useConsole();
+  const { engagements, activeEngagement, activeId, setActiveId, findings, chains, assets, openFinding, reloadEngagements } = useConsole();
   const [status, setStatus] = useState<string>("all");
   const [query, setQuery] = useState("");
+  const [launchOpen, setLaunchOpen] = useState(false);
 
   // live severity roll-up for the ACTIVE engagement; the stored summary for the rest
   const rep = reportable(findings);
@@ -66,12 +70,12 @@ export default function EngagementsPage() {
         live={running > 0}
         sub={`${engagements.length} authorized · ${running} running · ${completed} completed`}
         actions={
-          <Link
-            href="/control"
+          <button
+            onClick={() => setLaunchOpen(true)}
             className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-medium text-brand-fg transition hover:brightness-110"
           >
             <Plus size={15} /> New engagement
-          </Link>
+          </button>
         }
       />
 
@@ -138,7 +142,7 @@ export default function EngagementsPage() {
                     <div className="mt-0.5 flex items-center justify-between gap-3">
                       {e.status === "running" && prog ? (
                         <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <Progress value={prog.done} max={prog.total} color={st.color} className="max-w-[120px]" />
+                          <Progress value={prog.done} max={prog.total} color={st.color} className="max-w-[120px]" animated />
                           <span className="shrink-0 font-mono text-[11px] text-faint tabular-nums">{prog.done}/{prog.total}</span>
                         </span>
                       ) : (
@@ -161,15 +165,18 @@ export default function EngagementsPage() {
           chains={chains.length}
           inScopeAssets={assets.filter((a) => a.scope === "in").length}
           openFinding={openFinding}
+          onLaunch={() => setLaunchOpen(true)}
         />
       </div>
+
+      <LaunchDrawer open={launchOpen} onClose={() => { setLaunchOpen(false); void reloadEngagements(); }} />
     </>
   );
 }
 
 /* ---------- right-hand detail ---------- */
 function EngagementDetail({
-  e, rep, totalFindings, chains, inScopeAssets, openFinding,
+  e, rep, totalFindings, chains, inScopeAssets, openFinding, onLaunch,
 }: {
   e: Engagement;
   rep: Finding[];
@@ -177,6 +184,7 @@ function EngagementDetail({
   chains: number;
   inScopeAssets: number;
   openFinding: (f: Finding) => void;
+  onLaunch: () => void;
 }) {
   const st = ENGAGEMENT_STATUS[e.status];
   const cur = statusStep(e.status);
@@ -209,6 +217,7 @@ function EngagementDetail({
         actions={
           <>
             <Pill label={st.label} color={st.color} dot />
+            <DeleteEngagementButton id={e.id} />
             <Link
               href="/"
               className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line px-3 text-xs font-medium text-fg transition hover:border-fg/30"
@@ -223,6 +232,12 @@ function EngagementDetail({
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-faint">
           <span>target {e.target}</span>
           <span>window {fmtDate(e.window.start)} → {fmtDate(e.window.end)}</span>
+        </div>
+
+        {/* live run steering */}
+        <div className="mt-5">
+          <BlockTitle>Live run</BlockTitle>
+          <LiveRun engagementId={e.id} onLaunch={onLaunch} />
         </div>
 
         {/* scope */}

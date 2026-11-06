@@ -3,13 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { Sun, Moon, Monitor, Upload, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useConsole } from "@/lib/store";
+import { useControl } from "@/components/control/ControlProvider";
+import { ConnectCard } from "@/components/control/ConnectCard";
+import { LlmConnectCard } from "@/components/control/LlmConnectCard";
 import { cx } from "@/lib/format";
 import { Card, PageHeader } from "@/components/ui/primitives";
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { mode, clearData, loadFiles } = useConsole();
+  const { conn } = useControl();
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => setMounted(true), []);
@@ -22,9 +27,24 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Appearance, data source and engagement rules." />
+      <PageHeader title="Settings" subtitle="Connections, appearance, data source and engagement rules." />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {/* agent runtimes & control plane */}
+        <div className="lg:col-span-2">
+          <h2 className="text-sm font-semibold">Agent runtimes &amp; control plane</h2>
+          <p className="mb-3 mt-0.5 text-xs text-muted">
+            Connect the opt-in control plane, then give the launched agents an engine — a coding-agent
+            runtime (Claude Code, Codex, Gemini) via subscription login or an API key. Launch and steer
+            engagements from the{" "}
+            <Link href="/engagements" className="text-fg underline-offset-2 hover:underline">Engagements</Link> view.
+          </p>
+          <div className="space-y-3">
+            <ConnectCard />
+            {conn === "ready" && <LlmConnectCard />}
+          </div>
+        </div>
+
         {/* appearance */}
         <Card className="p-5">
           <h2 className="text-sm font-semibold">Appearance</h2>

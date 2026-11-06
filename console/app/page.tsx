@@ -54,7 +54,7 @@ export default function DashboardPage() {
           <>
             <Segmentedish value={range} onChange={setRange} />
             <Link
-              href="/control"
+              href="/engagements"
               className="inline-flex h-10 items-center gap-2 rounded-full bg-brand px-4 text-sm font-medium text-brand-fg transition hover:brightness-110"
             >
               <Plus size={15} /> New engagement

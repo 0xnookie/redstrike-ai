@@ -185,6 +185,9 @@ export const approve = (token: string, id: string, body: { ids?: string[]; all?:
 export const stopRun = (token: string, id: string) =>
   request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/stop`, token, { method: "POST", body: "{}" });
 
+export const deleteEngagement = (token: string, id: string) =>
+  request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/delete`, token, { method: "POST", body: "{}" });
+
 /* ---- LLM provider auth (set a key/token the launched runs inherit — no .env editing) ---- */
 export const getAuth = (token: string) => request<AuthSnapshot>("/api/auth", token);
 

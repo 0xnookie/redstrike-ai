@@ -171,7 +171,24 @@ body {
 }
 @keyframes live-pulse { 50% { box-shadow: 0 0 0 5px rgb(36 163 114 / 0.03); } }
 
+/* animated progress fill — a sheen that sweeps the bar while a run is in flight */
+.progress-live { position: relative; overflow: hidden; }
+.progress-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  animation: progress-sheen 1.3s linear infinite;
+}
+@keyframes progress-sheen { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+
 /* orchestration graph */
+/* dashed ambient ring — static by default; add .orch-spin to rotate it while live */
+.orch-ring {
+  fill: none; stroke: rgb(214 235 253 / 0.3); stroke-width: 1; stroke-dasharray: 2 7;
+  transform-box: fill-box; transform-origin: center;
+}
 .orch-spin {
   fill: none; stroke: rgb(214 235 253 / 0.3); stroke-width: 1; stroke-dasharray: 2 7;
   transform-box: fill-box; transform-origin: center; animation: orch-spin 30s linear infinite;
