@@ -34,6 +34,7 @@ init validation is minimal (delegated to the CLI), and only autonomous runs are 
       GET  /api/engagements/<id>/approvals      -> runtime/approvals_pending.json
       POST /api/engagements/<id>/approve        -> redstrike approve <id> (body: ids[] | all)
       POST /api/engagements/<id>/stop           -> terminate the tracked run process group
+      POST /api/engagements/<id>/delete         -> remove the engagement directory (refused while running)
 
     Run:
       python scripts/console_control.py --enable-control                 # all engagements/
@@ -310,12 +311,31 @@ def _run_cli(args: list[str], *, capture: bool = True, background: bool = False)
     argv = base + ["--no-banner", "--no-color", *args]
     cwd = str(console.ROOT)
     if background:
+        # own process group / job so /stop can signal the whole run (CLI -> engine child tree)
+        popen_kw: dict = (
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if os.name == "nt"
+            else {"start_new_session": True}
+        )
         return subprocess.Popen(
             argv, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,  # own process group so /stop can signal the whole run
+            **popen_kw,
         )
     p = subprocess.run(argv, cwd=cwd, env=env, capture_output=capture, text=True)
     return p
+
+
+def _terminate(proc: subprocess.Popen) -> None:
+    """Terminate a backgrounded run and its child tree, cross-platform.
+    Windows: `taskkill /T` kills the CLI and the engine (claude) process tree it spawned.
+    POSIX: signal the whole process group the run leads (spawned with start_new_session)."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    else:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
 
 
 # --- request handler --------------------------------------------------------
@@ -456,6 +476,8 @@ def make_control_handler(target: Path, token: str):
                     return self._approve(eid, body)
                 if verb == "stop":
                     return self._stop(eid)
+                if verb == "delete":
+                    return self._delete(eid, eng)
             return self._json(HTTPStatus.NOT_FOUND, {"error": "unknown api route"})
 
         # -- actions (thin wrappers over the redstrike CLI) ------------------
@@ -518,12 +540,36 @@ def make_control_handler(target: Path, token: str):
             with _RUNS_LOCK:
                 proc = _RUNS.get(eid)
             if not proc or proc.poll() is not None:
+                with _RUNS_LOCK:
+                    _RUNS.pop(eid, None)
                 return self._json(HTTPStatus.OK, {"ok": True, "note": "no running process"})
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # whole group (start_new_session)
-            except (ProcessLookupError, PermissionError) as e:
+                _terminate(proc)
+            except Exception as e:  # noqa: BLE001 — surface any platform signal/kill failure
                 return self._json(HTTPStatus.OK, {"ok": False, "note": str(e)})
+            # drop the handle so /status stops reporting it as a live run right away
+            with _RUNS_LOCK:
+                _RUNS.pop(eid, None)
             return self._json(HTTPStatus.OK, {"ok": True, "stopped": proc.pid})
+
+        def _delete(self, eid: str, eng: Path):
+            # refuse while a run is live — the operator must stop it first
+            with _RUNS_LOCK:
+                proc = _RUNS.get(eid)
+            if proc and proc.poll() is None:
+                return self._json(HTTPStatus.CONFLICT, {"ok": False, "error": "a run is in progress — stop it first"})
+            resolved = eng.resolve()
+            root = target.resolve()
+            # only ever remove a direct child engagement dir under the served root
+            if resolved == root or resolved.parent != root or not resolved.is_dir():
+                return self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "refusing to delete this path"})
+            try:
+                shutil.rmtree(resolved)
+            except OSError as e:
+                return self._json(HTTPStatus.OK, {"ok": False, "error": str(e)})
+            with _RUNS_LOCK:
+                _RUNS.pop(eid, None)
+            return self._json(HTTPStatus.OK, {"ok": True, "deleted": eid})
 
         # -- LLM provider auth ----------------------------------------------
         def _set_auth(self, provider: str, body: dict):
@@ -565,18 +611,30 @@ def make_control_handler(target: Path, token: str):
             self.send_header("Connection", "close")
             self.end_headers()
             deadline = time.time() + max_seconds
+            f = None
             try:
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
-                f = None
+                if not path.is_file():
+                    # no run log yet — say so and close rather than holding the socket open
+                    self.wfile.write(b": no-run\n\n")
+                    self.wfile.flush()
+                    return
+                f = path.open("r", encoding="utf-8", errors="replace")
+                # Replay the CURRENT run (from the last run-boundary marker) so a refresh or
+                # late join rebuilds the live view, THEN follow new lines appended after.
+                lines = f.readlines()  # reads to EOF; f is now positioned to tail new appends
+                start = 0
+                for i in range(len(lines) - 1, -1, -1):
+                    if lines[i].lstrip().startswith("#"):
+                        start = i
+                        break
+                for ln in lines[start:]:
+                    s = ln.rstrip("\n")
+                    if s:
+                        self.wfile.write(b"data: " + s.encode("utf-8") + b"\n\n")
+                self.wfile.flush()
                 while time.time() < deadline:
-                    if f is None:
-                        if path.is_file():
-                            f = path.open("r", encoding="utf-8", errors="replace")
-                            f.seek(0, os.SEEK_END)  # follow new lines only
-                        else:
-                            time.sleep(0.5)
-                            continue
                     line = f.readline()
                     if line:
                         self.wfile.write(b"data: " + line.rstrip("\n").encode("utf-8") + b"\n\n")
@@ -587,7 +645,7 @@ def make_control_handler(target: Path, token: str):
                 pass  # client went away
             finally:
                 try:
-                    if f:  # type: ignore[has-type]
+                    if f:
                         f.close()
                 except Exception:
                     pass
@@ -652,7 +710,7 @@ def main() -> int:
             for proc in _RUNS.values():
                 if proc.poll() is None:
                     try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                        _terminate(proc)
                     except Exception:
                         pass
     return 0
