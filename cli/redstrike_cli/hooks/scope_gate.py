@@ -35,6 +35,25 @@ _URL = re.compile(r"https?://[^\s\"'<>|)\]}]+", re.IGNORECASE)
 _HOST = re.compile(r"(?<![\w.-])(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?![\w.-])")
 _IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
 _IGNORABLE_TLDS = (".localhost", ".test", ".example", ".invalid")
+# Final labels that mark a dotted token as a FILESYSTEM PATH, not a network host. The bare-host
+# regex (_HOST) otherwise reads `scope.json`, `homepage.html`, `scan.txt`, `wp-config.php` and
+# `--include=*.py` as hostnames, classifies them "unknown" (not in scope) and DENIES the command —
+# which blocks the agent from reading/writing its own engagement artifacts and from saving tool
+# output (`curl ... -o out.html`), stalling an autonomous run. Real web targets carry a scheme
+# (caught by _URL) or a genuine TLD, so filtering these removes the false positives without opening
+# a schemeless out-of-scope host; the OS sandbox network allowlist remains the actual boundary. A
+# few entries double as ccTLDs (sh/md/py/rs/go/rb/pl) — as a BARE token in a shell command they are
+# overwhelmingly filenames, and a real target on one of those TLDs is written with a scheme.
+_FILE_EXTS = frozenset("""
+json jsonl ndjson yaml yml toml ini cfg conf env properties lock
+txt md markdown rst log csv tsv xml html htm xhtml pdf
+js mjs cjs ts tsx jsx css scss sass less
+py sh bash zsh fish ps1 rb go rs java kt kts c h cpp hpp cc cxx php pl lua sql r
+zip tar gz tgz bz2 xz zst 7z rar jar war
+png jpg jpeg gif svg ico webp bmp tiff mp4 mp3 wav webm
+pem crt cer der key pub p12 pfx jks keystore pcap pcapng cap har
+bin exe dll so dylib dat db sqlite sqlite3 bak tmp swp pid sock map
+""".split())
 _WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 _PATH_KEYS = ("file_path", "notebook_path", "path")
 _SHELL_TOOLS = ("Bash", "PowerShell")
@@ -158,7 +177,13 @@ def extract_targets(text: str) -> list[str]:
     for m in _IPV4.finditer(text):
         found.append(m.group(0))
     for m in _HOST.finditer(text):
-        found.append(normalize_host(m.group(0)))
+        tok = normalize_host(m.group(0))
+        # A bare dotted token ending in a known file/code extension is a path argument
+        # (scope.json, out.html, *.py), not a network host — skip it. Schemed targets were
+        # already collected by _URL above, so this only drops false positives.
+        if tok.rsplit(".", 1)[-1] in _FILE_EXTS:
+            continue
+        found.append(tok)
     # de-dupe preserving order
     seen, uniq = set(), []
     for t in found:
