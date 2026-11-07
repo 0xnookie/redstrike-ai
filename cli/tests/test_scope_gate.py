@@ -94,6 +94,39 @@ class TestWriteGuard(unittest.TestCase):
             self.assertEqual(wdec(str(eng / "findings" / "evidence" / "x.txt")), "pass")
 
 
+class TestFilenameNotHost(unittest.TestCase):
+    """A dotted filename in a shell command must NOT be read as an out-of-scope host.
+    Regression: `scope.json` / `homepage.html` / `*.py` were classified as hosts, so the gate
+    denied the agent reading its own files and saving tool output (`curl ... -o out.html`),
+    stalling autonomous runs."""
+
+    def test_extract_skips_file_extensions(self):
+        self.assertEqual(sg.extract_targets("cat runtime/scope.json runtime/authorization.json"), [])
+        self.assertEqual(sg.extract_targets("nmap -oN scan.txt; cat out.json report.md"), [])
+        self.assertEqual(sg.extract_targets("grep -rl x --include=*.py --include=*.sh ."), [])
+
+    def test_extract_keeps_real_hosts_alongside_files(self):
+        # a scheme'd target is still extracted even when the path looks file-ish
+        self.assertEqual(sg.extract_targets("curl https://evil.example-attacker.com/a.json -o x.json"),
+                         ["evil.example-attacker.com"])
+
+    def test_read_own_governance_files_passes(self):
+        self.assertEqual(dec("Bash", {"command": "cat runtime/scope.json runtime/authorization.json"}), "pass")
+
+    def test_save_localhost_output_to_html_passes(self):
+        # the live-run failure: localhost is ignorable, homepage.html must not be a "host"
+        self.assertEqual(
+            dec("Bash", {"command": "curl -s http://localhost:8080/ -o osint/logs/homepage.html"}), "pass")
+
+    def test_grep_include_globs_pass(self):
+        self.assertEqual(dec("Bash", {"command": "grep -rl scope-gate --include=*.py --include=*.json ."}), "pass")
+
+    def test_out_of_scope_host_still_denied_with_file_args(self):
+        # the fix must not let a real out-of-scope host slip through just because a file is nearby
+        self.assertEqual(dec("Bash", {"command": "nmap admin.acme.com -oN scan.txt"}), "deny")
+        self.assertEqual(dec("Bash", {"command": "curl https://evil-corp-attacker.com/x -o loot.json"}), "deny")
+
+
 class TestEvaluateContract(unittest.TestCase):
     def test_deny_has_reason(self):
         out = sg.evaluate("WebFetch", {"url": "https://admin.acme.com/"}, SCOPE, PROT, CWD)
