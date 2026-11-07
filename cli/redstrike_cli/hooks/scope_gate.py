@@ -183,6 +183,12 @@ def extract_targets(text: str) -> list[str]:
         # already collected by _URL above, so this only drops false positives.
         if tok.rsplit(".", 1)[-1] in _FILE_EXTS:
             continue
+        # A dotted token immediately followed by "(" is a code attribute/method call
+        # (json.load(, d.get(, subprocess.run(, os.path.join(), not a network host — a real
+        # hostname is never written with a trailing "(". Catches inline python/js in a Bash
+        # command that would otherwise be denied as an out-of-scope "host".
+        if m.end() < len(text) and text[m.end()] == "(":
+            continue
         found.append(tok)
     # de-dupe preserving order
     seen, uniq = set(), []

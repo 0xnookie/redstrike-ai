@@ -127,6 +127,26 @@ class TestFilenameNotHost(unittest.TestCase):
         self.assertEqual(dec("Bash", {"command": "curl https://evil-corp-attacker.com/x -o loot.json"}), "deny")
 
 
+class TestCodeIdentifierNotHost(unittest.TestCase):
+    """A dotted code attribute/method call (json.load, d.get, subprocess.run) must NOT be read
+    as a host. Regression: inline python/js in a Bash command (json.load(open('x.json'))) was
+    denied because `json.load` matched the bare-host regex."""
+
+    def test_extract_skips_method_calls(self):
+        self.assertEqual(sg.extract_targets("d=json.load(open('coverage_ledger.json'))"), [])
+        self.assertEqual(sg.extract_targets("cats=d.get('categories') or d.get('coverage')"), [])
+        self.assertEqual(sg.extract_targets("subprocess.run(['ls']); os.path.join(a,b)"), [])
+
+    def test_inline_python_reading_ledger_passes(self):
+        cmd = "python3 -c \"import json; print(json.load(open('coverage_ledger.json')).get('x'))\""
+        self.assertEqual(dec("Bash", {"command": cmd}), "pass")
+
+    def test_real_host_not_followed_by_paren_still_classified(self):
+        # the "(" rule must not swallow a genuine out-of-scope host
+        self.assertEqual(sg.extract_targets("curl admin.acme.com/panel"), ["admin.acme.com"])
+        self.assertEqual(dec("Bash", {"command": "nmap admin.acme.com"}), "deny")
+
+
 class TestEvaluateContract(unittest.TestCase):
     def test_deny_has_reason(self):
         out = sg.evaluate("WebFetch", {"url": "https://admin.acme.com/"}, SCOPE, PROT, CWD)
