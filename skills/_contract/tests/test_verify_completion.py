@@ -457,6 +457,22 @@ class TestCoverageHardGate(unittest.TestCase):
                 c["findings_count"] = 0
         return led
 
+    def _surface_ledger(self):
+        """A non-empty surface ledger with every routed surface marked `tested`, so the
+        report-time strict surface gate (_surface_hard_errors) passes. Mirrors `_ledger`
+        for coverage: the happy-path engagement must satisfy EVERY hard gate, and surface
+        coverage became a hard gate at report time after this test was first written."""
+        sf = vc._try_import_surface()
+        self.assertIsNotNone(sf, "scripts/surface.py must import for this test")
+        led = sf.plan_from_items("acme-2026", [
+            {"kind": "endpoint", "value": "/api/login", "discovered_by": "recon"},
+            {"kind": "param", "value": "id", "discovered_by": "recon"},
+        ])
+        for s in led["surfaces"]:
+            if s["status"] == "discovered":  # discovered-but-untested is the gap the gate catches
+                s["status"] = "tested"
+        return led
+
     def _write_report(self, eng):
         f = valid_finding()
         (eng / "report").mkdir(parents=True, exist_ok=True)
@@ -500,6 +516,9 @@ class TestCoverageHardGate(unittest.TestCase):
             self._write_report(eng)
             (eng / "coverage_ledger.json").write_text(
                 json.dumps(self._ledger(cov, all_terminal=True)), encoding="utf-8")
+            # the happy path must satisfy the surface hard gate too, not only coverage
+            (eng / "surface_ledger.json").write_text(
+                json.dumps(self._surface_ledger()), encoding="utf-8")
             buf = io.StringIO()
             with redirect_stdout(buf):
                 ok = vc.validate_engagement(eng, as_json=False)
