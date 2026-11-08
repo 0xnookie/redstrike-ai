@@ -659,5 +659,126 @@ class TestContextSchemas(unittest.TestCase):
         self.assertFalse(self.ok(drifted, "xss_context.schema.json"))
 
 
+# --------------------------------------------------------------------------- #
+# Fix #1: the independent-review gate — no report over self-/orchestrator-attested findings
+# --------------------------------------------------------------------------- #
+class TestIndependentReviewGate(unittest.TestCase):
+    """Redstrike's core guarantee is that a reportable finding is gated by an INDEPENDENT
+    `<class>-verify` reviewer. A finding that reaches reporting but was "verified" only by the
+    orchestrator itself ('orchestrator-self-verify') is self-attestation. Once a report exists this
+    must FAIL unless an explicit operator-accept is recorded — and must never be a SILENT pass."""
+
+    # -- unit: the roster + independence predicate --
+    def test_roster_contains_real_verifiers(self):
+        roster = vc._verify_roster()
+        self.assertIn("cors-verify", roster)
+        self.assertIn("xss-reflected-verify", roster)
+        self.assertNotIn("orchestrator-self-verify", roster)
+
+    def test_independence_predicate(self):
+        roster = vc._verify_roster()
+        self.assertTrue(vc._is_independent_reviewer("cors-verify", roster))
+        self.assertFalse(vc._is_independent_reviewer("orchestrator-self-verify", roster))
+        self.assertFalse(vc._is_independent_reviewer("", roster))
+        self.assertFalse(vc._is_independent_reviewer("alice (operator)", roster))
+        self.assertFalse(vc._is_independent_reviewer("made-up-verify", roster))  # -verify but not real
+        # no-roster fallback: structural signal only
+        self.assertTrue(vc._is_independent_reviewer("cors-verify", set()))
+        self.assertFalse(vc._is_independent_reviewer("orchestrator-self-verify", set()))
+
+    def _report_eng(self, d, *, reviewer, accept_reason=None):
+        """An otherwise-complete, report-present engagement whose single finding carries `reviewer`.
+        Satisfies the coverage + surface hard gates so ONLY the review gate is under test."""
+        eng = pathlib.Path(d)
+        f = valid_finding()
+        f["review"] = {"verdict": "accepted", "reviewer": reviewer}
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        if accept_reason is not None:
+            (eng / "reviews").mkdir(parents=True, exist_ok=True)
+            (eng / "reviews" / "self_verified_accepts.json").write_text(
+                json.dumps({f["id"]: accept_reason}), encoding="utf-8")
+        return eng
+
+    def test_self_verified_with_report_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d, reviewer="orchestrator-self-verify")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["pass"], buf.getvalue())
+            self.assertTrue(payload["review_errors"])
+            self.assertIn("independent", " ".join(payload["review_errors"]).lower())
+
+    def test_independent_reviewer_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d, reviewer="xss-reflected-verify")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["pass"], buf.getvalue())
+            self.assertFalse(payload["review_errors"])
+
+    def test_operator_accept_clears_the_hard_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d, reviewer="orchestrator-self-verify",
+                                   accept_reason="no username-enumeration *-verify class exists yet")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["pass"], buf.getvalue())
+            self.assertFalse(payload["review_errors"])
+            # the acceptance is surfaced as a warning (visible, not silent) + names the backfill
+            self.assertTrue(any("operator-accepted" in w for w in payload["warnings"]))
+
+    def test_blank_accept_reason_is_not_an_accept(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d, reviewer="orchestrator-self-verify", accept_reason="   ")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["pass"], buf.getvalue())
+            self.assertTrue(payload["review_errors"])
+
+    def test_no_report_self_verified_is_warning_not_failure(self):
+        """Mid-hunt (no consolidated report): a self-verified finding is a warning, not a hard fail."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            f["review"] = {"verdict": "accepted", "reviewer": "orchestrator-self-verify"}
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload["pass"], buf.getvalue())
+            self.assertFalse(payload["review_errors"])
+            self.assertTrue(any("not an independent" in w for w in payload["warnings"]))
+
+
 if __name__ == "__main__":
     unittest.main()
