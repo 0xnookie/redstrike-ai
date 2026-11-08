@@ -17,6 +17,11 @@ const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [], 
 
 const ACTIVE_KEY = "redstrike.activeEngagement";
 
+// How often to re-read the engagement manifest while the console is open, so an
+// engagement that finishes (its findings_consolidated.json lands) flips from
+// "running" to "completed" on its own instead of waiting for a manual reload.
+const MANIFEST_REFRESH_MS = 15_000;
+
 interface ConsoleCtx {
   mode: Mode;
   engagements: Engagement[];
@@ -150,6 +155,9 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [datasets, setDatasets] = useState<Record<string, Dataset>>({});
   const [activeId, setActiveIdState] = useState<string>(emptyData.activeEngagementId);
   const [mode, setMode] = useState<Mode>("empty");
+  // true once we've booted from a real server-served manifest (console.py) — the poller
+  // below only runs then, so dev empty-state and manual drag-and-drop loads are untouched.
+  const [served, setServed] = useState(false);
   // three mutually-exclusive right-side drawers (finding / host / endpoint): opening
   // any one closes the others so only a single detail panel is ever up.
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
@@ -304,6 +312,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     setDatasets({});
     setActiveIdState(emptyData.activeEngagementId);
     setMode("empty");
+    setServed(false); // stop the manifest poller after an explicit Clear data
   }, []);
 
   /* ---- re-read the engagement manifest (after a create/delete on the control plane) ---- */
@@ -314,6 +323,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     if (engs.length) {
       setEngagements(engs);
       setMode("live");
+      setServed(true);
       setActiveIdState((cur) => {
         const keep = engs.find((e) => e.id === cur)?.id ?? engs[0].id;
         safeLocalSet(ACTIVE_KEY, keep);
@@ -329,6 +339,41 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadEngagement]);
 
+  /* ---- lightweight manifest re-poll: refresh engagement HEADERS (status/summary) in place,
+         so a finishing engagement flips "running" -> "completed" without a manual reload.
+         Headers-only: datasets and the active selection are left untouched. Non-destructive —
+         a failed or empty fetch is a no-op (a transient blip must never blank the list) and
+         engagements are never removed here (control-plane delete owns that). ---- */
+  const refreshManifest = useCallback(async () => {
+    const manifest = await fetchJson("/engagements.json");
+    if (!manifest || !Array.isArray(manifest.engagements) || manifest.engagements.length === 0) return;
+    const next: Engagement[] = manifest.engagements.map(toEngagement);
+    const byId = new Map(next.map((e) => [e.id, e]));
+    setEngagements((prev) => {
+      const merged = prev.map((e) => byId.get(e.id) ?? e); // refresh known headers in place
+      for (const e of next) if (!prev.some((p) => p.id === e.id)) merged.push(e); // append new ones
+      return merged;
+    });
+  }, []);
+
+  /* ---- drive the re-poll: an interval while the tab is visible, plus a refresh the moment
+         the tab regains focus. Only runs once served by console.py (see `served`). ---- */
+  useEffect(() => {
+    if (!served) return;
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") void refreshManifest();
+    };
+    const id = setInterval(tick, MANIFEST_REFRESH_MS);
+    const onFocus = () => { if (document.visibilityState === "visible") void refreshManifest(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [served, refreshManifest]);
+
   /* ---- boot: load the manifest of all engagements, then the active one ---- */
   const booted = useRef(false);
   useEffect(() => {
@@ -340,6 +385,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         const engs = manifest.engagements.map(toEngagement);
         setEngagements(engs);
         setMode("live");
+        setServed(true);
         const remembered = safeLocalGet(ACTIVE_KEY);
         const initial = engs.find((e: Engagement) => e.id === remembered)?.id ?? engs[0].id;
         setActiveIdState(initial);
