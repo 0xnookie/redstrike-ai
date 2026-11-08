@@ -1,0 +1,121 @@
+# Redstrike source-audit — chain-pattern catalog (D2)
+#
+# The deterministic KNOWLEDGE half of the chain reasoner: named source-level chain
+# patterns, each with the preconditions it needs (taint candidates + structural facts)
+# and the ORDERED executor sequence that proves it live. The reasoner instantiates a
+# pattern when its `requires` are satisfiable from source_context.json, fills the slots
+# with concrete file:line, confirms the absences semgrep can't, and emits a
+# chain_candidate (schema: chain_candidates[] in _contract/source_context.schema.json).
+#
+# A chain_candidate is a LEAD, never a finding — source-audit stays a feeder. The
+# route_sequence hands the hunt an ordered plan; each executor proves its leg and the
+# next leg's precondition. This is PRE-proof (source hypothesis); attack-chain-discovery
+# is POST-proof (composes accepted findings). Don't double-report: a chain the hunt
+# proves graduates into attack-chain-discovery.
+#
+# `confidence` guidance: high = every leg is taint-reachable or a confirmed structural
+# fact; medium = one leg is a confirmed fact but the link is inferred; low = a leg rests
+# on an assumed precondition the reasoner couldn't confirm from source (say which).
+
+patterns:
+
+  # ============================ TECHNICAL (taint/dataflow) ============================
+  - id: lfi-log-poison-rce
+    title: LFI + attacker-writable log → RCE via log poisoning
+    kind: technical
+    requires:
+      - "candidate route=path-traversal-lfi (include/require/read on a request path)"
+      - "structural writable-path (a log/file write the attacker influences) that the inclusion sink can reach"
+    route_sequence: [path-traversal-lfi, command-injection]
+    impact: Remote code execution
+    confirm: reasoner checks the written file is within reach of the include sink; the path-traversal-lfi executor proves poison→include→exec live
+    confidence: medium
+
+  - id: upload-to-rce
+    title: Unrestricted upload reaches a web-executable path → RCE
+    kind: technical
+    requires:
+      - "structural writable-path = an upload move (move_uploaded_file / multer / $file.mv)"
+      - "the destination is under web root OR reachable by a path-traversal-lfi candidate"
+    route_sequence: [upload-rce]
+    impact: Remote code execution
+    confirm: reasoner checks the dest dir is web-served / includable and the extension/type filter is weak; upload-rce executor proves it
+    confidence: medium
+
+  - id: ssrf-to-cloud-metadata
+    title: SSRF with no destination allowlist → cloud metadata credential theft
+    kind: technical
+    requires:
+      - "candidate route=ssrf-inband OR ssrf-blind (request-controlled fetch URL)"
+      - "no host/scheme allowlist visible on the fetch path"
+    route_sequence: [ssrf-inband, ssrf-cloud]
+    impact: Cloud credential theft → account/infra compromise
+    confirm: ssrf-inband proves the egress; ssrf-cloud proves 169.254.169.254 reach + credential retrieval (redacted)
+    confidence: medium
+
+  - id: sqli-to-cred-reuse
+    title: SQLi reads a credential/secret table → credential reuse
+    kind: technical
+    requires:
+      - "candidate route=sqli-inband OR sqli-blind"
+      - "the query targets a users/credentials/token table (reasoner reads the SQL)"
+    route_sequence: [sqli-inband, secrets]
+    impact: Credential disclosure → authenticated access / lateral movement
+    confirm: sqli executor proves extraction (minimal, read-only); secrets validates the recovered material (redacted)
+    confidence: medium
+
+  - id: lfi-source-disclosure-to-deserial
+    title: LFI discloses a signing/serialization secret → forged-object deserialization
+    kind: technical
+    requires:
+      - "candidate route=path-traversal-lfi that can read source/config"
+      - "a candidate route=deserialization whose trust rests on a secret the LFI can disclose (cookie key, HMAC)"
+    route_sequence: [path-traversal-lfi, deserialization]
+    impact: Remote code execution via a forged serialized object
+    confirm: LFI executor proves the secret is readable; deserialization executor proves a benign gadget with the recovered secret
+    confidence: low
+
+  # ============================ LOGIC / AUTHZ (no taint signature) ====================
+  - id: unauth-state-change
+    title: State-changing route with no authentication guard → unauthenticated action
+    kind: logic
+    requires:
+      - "structural state-change-route (POST/PUT/DELETE/PATCH)"
+      - "NO auth-guard on or around its handler (reasoner confirms the absence → marks unauth-route)"
+    route_sequence: [auth-bypass, bola-bfla]
+    impact: Unauthenticated state change (data write/delete) — severity scales with the action
+    confirm: reasoner confirms no guard in the handler, its decorators, or a blanket before-filter; auth-bypass/bola-bfla executor proves the action succeeds unauthenticated
+    confidence: medium
+
+  - id: idor-missing-owner-check
+    title: Object loaded by request id with no ownership check → IDOR
+    kind: logic
+    requires:
+      - "structural id-from-param (object fetched by a request-supplied id)"
+      - "NO ownership/tenant check between the fetch and the response (reasoner confirms → marks missing-ownership-check)"
+    route_sequence: [idor]
+    impact: Cross-tenant object read/modify
+    confirm: reasoner confirms the handler never compares the object's owner to the caller; idor executor proves A reads/modifies B's object (two identities)
+    confidence: medium
+
+  - id: mass-assignment-privesc
+    title: Mass-assignment on a user/role model → privilege escalation
+    kind: logic
+    requires:
+      - "structural mass-assignment (whole request bound to a model)"
+      - "the model carries a role/permission/is_admin field not excluded from assignment"
+    route_sequence: [privesc, bola-bfla]
+    impact: Privilege escalation via an attacker-set role field
+    confirm: reasoner checks the model has a privileged field and no allowlist/guard excludes it; privesc executor proves the role flips
+    confidence: medium
+
+  - id: bfla-admin-route-no-role-check
+    title: Admin/privileged route reachable by a normal user → function-level authz bypass
+    kind: logic
+    requires:
+      - "structural route whose path is admin/privileged (/admin, /internal, management action)"
+      - "auth-guard present (authenticated) but NO role/permission check (reasoner confirms authn≠authz)"
+    route_sequence: [bola-bfla, privesc]
+    impact: A low-privilege user invokes a privileged function (BFLA)
+    confirm: reasoner distinguishes authentication from authorization on the handler; bola-bfla executor proves a normal identity drives the admin action
+    confidence: medium

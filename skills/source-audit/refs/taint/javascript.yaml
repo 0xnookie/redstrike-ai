@@ -1,0 +1,122 @@
+# Redstrike source-audit — JavaScript / TypeScript taint rules (reachability pass)
+# mode: taint. Server-side (Node/Express) source->sink flows. metadata.route ∈ schema enum.
+# Client-side DOM XSS source->sink is owned by js-analysis/xss-dom; this pack is the server half.
+# A taint match is a CANDIDATE routed to the executor that PROVES it live, never a finding.
+
+rules:
+  - id: js-taint-command-injection
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Attacker-controlled request input reaches a command / code-eval sink.
+      Route to command-injection.
+    metadata:
+      category: command-injection
+      route: command-injection
+      cwe: "CWE-78"
+      confidence: high
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+      - pattern: $REQ.headers
+      - pattern: $REQ.cookies
+    pattern-sinks:
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+      - pattern: $CP.exec(...)
+      - pattern: $CP.execSync(...)
+      - pattern: eval(...)
+      - pattern: new Function(...)
+    pattern-sanitizers:
+      - pattern: parseInt(...)
+      - pattern: Number(...)
+
+  - id: js-taint-sqli
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Attacker-controlled request input is concatenated into a SQL query (not a
+      placeholder). Route to sqli-inband.
+    metadata:
+      category: sqli-inband
+      route: sqli-inband
+      cwe: "CWE-89"
+      confidence: high
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+    pattern-sinks:
+      - pattern: $DB.query(...)
+      - pattern: $DB.execute(...)
+      - pattern: connection.query(...)
+      - pattern: sequelize.query(...)
+
+  - id: js-taint-path-traversal-lfi
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Attacker-controlled request input reaches a filesystem read/send. Route to path-traversal-lfi.
+    metadata:
+      category: path-traversal-lfi
+      route: path-traversal-lfi
+      cwe: "CWE-22"
+      confidence: high
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+    pattern-sinks:
+      - pattern: fs.readFile(...)
+      - pattern: fs.readFileSync(...)
+      - pattern: fs.createReadStream(...)
+      - pattern: $RES.sendFile(...)
+    pattern-sanitizers:
+      - pattern: path.basename(...)
+
+  - id: js-taint-ssrf
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Attacker-controlled request input drives a server-side fetch URL. Route to ssrf-inband.
+    metadata:
+      category: ssrf-inband
+      route: ssrf-inband
+      cwe: "CWE-918"
+      confidence: high
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+    pattern-sinks:
+      - pattern: axios.$M(...)
+      - pattern: fetch(...)
+      - pattern: http.get(...)
+      - pattern: https.get(...)
+      - pattern: request(...)
+      - pattern: got(...)
+
+  - id: js-taint-xss-reflected
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Attacker-controlled request input is written to the response without encoding.
+      Route to xss-reflected (executor confirms execution + CSP).
+    metadata:
+      category: xss-reflected
+      route: xss-reflected
+      cwe: "CWE-79"
+      confidence: medium
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+      - pattern: $REQ.headers
+    pattern-sinks:
+      - pattern: $RES.send(...)
+      - pattern: $RES.write(...)
+      - pattern: $RES.end(...)
