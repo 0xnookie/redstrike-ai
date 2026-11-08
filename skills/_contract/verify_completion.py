@@ -23,6 +23,13 @@ it uses — it discovers findings from `<eng>/findings.json` (single shared vaul
 or a finding/`review{}` schema violation (enum + additionalProperties, validated against finding.schema.json
 via `jsonschema` when present, else a stdlib subset validator), and soft-warns on CVSS/severity drift
 (via scripts/cvss.py), out-of-scope assets, and missing reviewer verdicts.
+
+It also enforces the INDEPENDENT-REVIEW gate (#1): once a report exists, every finding that reaches
+reporting (verdict accepted/blocked) must have been reviewed by a real independent `<class>-verify` agent.
+A finding "verified" only by the orchestrator/executor itself ('orchestrator-self-verify', a human, blank,
+or any non-roster name) HARD-fails unless an explicit operator-accept is recorded in
+`<eng>/reviews/self_verified_accepts.json` ({"RS-...": "why no reviewer covers this class"}) — so
+self-attestation is never a silent pass, and the missing reviewer class is named for backfill.
 """
 import argparse
 import glob as globmod
@@ -549,6 +556,143 @@ def _collect_verdict_ids(eng: Path) -> set:
     return ids
 
 
+# --- independent-review gate (#1 — no report over self-attested findings) ----------------------- #
+# Redstrike's core guarantee is that a reportable finding is gated by an INDEPENDENT `<class>-verify`
+# reviewer (a candidate ≠ a finding; the reviewer, in its own fresh context, proves it). A finding that
+# reaches reporting but was "reviewed" only by the orchestrator/executor itself (reviewer
+# 'orchestrator-self-verify', a human, blank, or any name that is not a real *-verify agent) is
+# self-attestation — the exact failure the architecture exists to prevent. These helpers make that
+# impossible to ship SILENTLY: once a report exists it is a HARD gate, cleared only by routing the
+# finding to its real reviewer or by an EXPLICIT, recorded operator-accept (mirrors the recall-audit
+# REAL-MISS accept flow). Either way the message names which reviewer class is missing, so a roster
+# hole gets backfilled rather than quietly repeated.
+_SELF_REVIEW_MARKERS = ("orchestrator", "self", "operator", "executor", "author", "human", "none", "n/a")
+
+
+def _verify_roster() -> set:
+    """The set of REAL independent reviewer agents (`<executor>-verify`). Sourced from the actual
+    agent definitions (`.claude/agents/*-verify.md`) UNIONed with the routing-map's executor agents
+    (+ '-verify'), so neither a missing agent file nor a routing-only class under-counts and wrongly
+    flags a legitimate reviewer. Lower-cased for case-insensitive matching."""
+    roster = set()
+    root = _repo_root()
+    adir = root / ".claude" / "agents"
+    if adir.is_dir():
+        for p in adir.glob("*-verify.md"):
+            roster.add(p.stem.lower())
+    rm = root / "skills" / "_contract" / "routing-map.json"
+    if rm.is_file():
+        try:
+            d = json.loads(rm.read_text(encoding="utf-8"))
+            for c in d.get("categories", []):
+                for a in (c.get("agents") or []):
+                    roster.add(f"{str(a).lower()}-verify")
+        except Exception:  # noqa: BLE001
+            pass
+    return roster
+
+
+def _is_independent_reviewer(name: str, roster: set) -> bool:
+    """True iff `name` is a real, independent `*-verify` reviewer — not the orchestrator/executor
+    self-reviewing. A self/orchestrator marker disqualifies it regardless of roster; otherwise it
+    must be a known roster member. With no resolvable roster (a stripped deployment) we fall back to
+    the structural signal: a '<x>-verify' name carrying no self marker."""
+    n = (name or "").strip().lower()
+    if not n or any(m in n for m in _SELF_REVIEW_MARKERS):
+        return False
+    if roster:
+        return n in roster
+    return n.endswith("-verify")
+
+
+def _review_of(f: dict, eng: Path) -> tuple:
+    """(verdict, reviewer) for a finding, preferring the inline `review{}` block and falling back to
+    `reviews/<id>.verdict.json` (root or per-skill). verdict defaults from `status` when neither
+    carries one (verified→accepted, rejected→rejected)."""
+    r = f.get("review") or {}
+    verdict, reviewer = r.get("verdict"), r.get("reviewer")
+    if not (verdict and reviewer):
+        fid = f.get("id")
+        if fid:
+            cands = [eng / "reviews" / f"{fid}.verdict.json"] + sorted(eng.glob(f"*/reviews/{fid}.verdict.json"))
+            for vp in cands:
+                if vp.is_file():
+                    try:
+                        vd = json.loads(vp.read_text(encoding="utf-8")) or {}
+                    except Exception:  # noqa: BLE001
+                        continue
+                    verdict = verdict or vd.get("verdict")
+                    reviewer = reviewer or vd.get("reviewer")
+                    if verdict and reviewer:
+                        break
+    if not verdict:
+        st = f.get("status")
+        verdict = "accepted" if st == "verified" else "rejected" if st == "rejected" else ""
+    return verdict, (reviewer or "")
+
+
+def _self_verified_accepts(eng: Path) -> dict:
+    """Operator acknowledgments that a reportable finding may ship self-/orchestrator-verified because
+    no independent `*-verify` reviewer class covers it. File: `<eng>/reviews/self_verified_accepts.json`,
+    either `{"RS-...": "reason"}` or `[{"id":..., "reason":..., "by":...}]`. Returns id→reason for every
+    entry with a non-empty reason (a blank reason is not an accept)."""
+    p = eng / "reviews" / "self_verified_accepts.json"
+    if not p.is_file():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    if isinstance(d, dict):
+        for k, v in d.items():
+            reason = v if isinstance(v, str) else (v.get("reason") if isinstance(v, dict) else "")
+            if isinstance(reason, str) and reason.strip():
+                out[str(k)] = reason.strip()
+    elif isinstance(d, list):
+        for e in d:
+            if isinstance(e, dict) and e.get("id") and str(e.get("reason", "")).strip():
+                out[str(e["id"])] = str(e["reason"]).strip()
+    return out
+
+
+def _independent_review_check(eng: Path, findings: list) -> tuple:
+    """(hard_errors, warnings) for the independent-review gate. Only findings that actually reach
+    reporting (effective verdict accepted/blocked) are in scope. A report present makes an
+    un-reviewed, un-accepted finding a HARD error; before a report it is a soft warning."""
+    roster = _verify_roster()
+    accepts = _self_verified_accepts(eng)
+    report = _report_present(eng)
+    flagged, accepted = [], []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        verdict, reviewer = _review_of(f, eng)
+        if verdict not in ("accepted", "blocked"):
+            continue  # not reportable → the gate doesn't apply
+        if _is_independent_reviewer(reviewer, roster):
+            continue
+        fid = f.get("id", "<no-id>")
+        cat = f.get("category") or {}
+        hint = cat.get("owasp") or cat.get("cwe") or cat.get("wstg") or "uncategorized"
+        who = reviewer or "(none)"
+        (accepted if fid in accepts else flagged).append((fid, hint, who))
+    hard, warns = [], []
+    for fid, hint, who in flagged:
+        msg = (f"{fid} [{hint}] reviewed by '{who}', not an independent *-verify agent — "
+               f"self/orchestrator-attested. Route it to the matching <class>-verify reviewer, or record "
+               f"an operator-accept in reviews/self_verified_accepts.json (\"{fid}\": \"why no reviewer covers this class\")")
+        if report:
+            hard.append("independent-review gate (report present → every reportable finding needs an "
+                        f"independent *-verify reviewer): {msg}")
+        else:
+            warns.append(msg + " [becomes a hard gate once a report exists]")
+    for fid, hint, who in accepted:
+        warns.append(f"self-verification operator-accepted: {fid} [{hint}] by '{who}' — "
+                     f"{accepts[fid]} (backfill a {hint} *-verify reviewer to remove this exception)")
+    return hard, warns
+
+
 def validate_engagement(eng: Path, as_json: bool) -> bool:
     cvss_mod = _try_import_cvss()
     scope_text = _scope_text(eng)
@@ -578,6 +722,12 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         top_warnings.append(f"findings source: {source} ({len(findings)} finding(s))")
 
     verdict_ids = _collect_verdict_ids(eng)
+
+    # Independent-review gate (#1): no report over self-/orchestrator-attested findings. HARD once a
+    # report exists; a soft warning while hunting. Cleared by a real *-verify reviewer or a recorded
+    # operator-accept (reviews/self_verified_accepts.json).
+    review_errors, review_warns = _independent_review_check(eng, findings)
+    top_warnings.extend(review_warns)
 
     results = []
     for f in findings:
@@ -618,12 +768,13 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
 
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
-    gate_ok = (not failed) and (not coverage_errors)
+    gate_ok = (not failed) and (not coverage_errors) and (not review_errors)
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
                           "findings_checked": len(results), "failed": len(failed),
                           "coverage_errors": coverage_errors,
+                          "review_errors": review_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -635,6 +786,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("\n✗ coverage gate FAILED (a report is present, so the ledger must be complete):")
             for ce in coverage_errors:
                 print(f"  - {ce}")
+        if review_errors:
+            print("\n✗ independent-review gate FAILED (a finding reached reporting without an independent reviewer):")
+            for re_ in review_errors:
+                print(f"  - {re_}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -647,12 +802,15 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         verdict = "PASS" if gate_ok else "FAIL"
         print(f"\n{verdict}: {len(results) - len(failed)}/{len(results)} finding(s) pass hard checks; "
               f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
-              f"{len(all_warnings)} warning(s).")
+              f"{len(review_errors)} independent-review error(s), {len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
             print("A report is present but routed categories are unaccounted for => run every pending category, "
                   "or record an explicit skip reason, before reporting.")
+        if review_errors:
+            print("A reportable finding was self-/orchestrator-verified => route it to its independent <class>-verify "
+                  "reviewer, or record an explicit operator-accept in reviews/self_verified_accepts.json before reporting.")
     return gate_ok
 
 

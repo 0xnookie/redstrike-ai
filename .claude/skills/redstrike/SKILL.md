@@ -116,7 +116,14 @@ See `skills/_contract/reconvergence.md`. This is breadth DISCOVERED DURING the h
 to the escalation ladder (depth) and the surface ledger (recon-time breadth).
 
 **After EACH findings-producing skill:** run its mechanical gate (`verify_completion.py`), then launch its
-`<skill>-verify` reviewer subagent. **Only `accepted` findings advance.** **If a finding reveals new surface
+`<skill>-verify` reviewer subagent. **Only `accepted` findings advance.** The verdict must come from that
+**independent `<class>-verify` agent — never your own self-attestation**: once a report exists,
+`verify_completion.py --engagement` HARD-FAILS any reportable finding whose `review.reviewer` is not a real
+`*-verify` agent (`orchestrator-self-verify`, a human, blank). If a finding's class genuinely has no reviewer
+in the roster, that is a roster gap — route it to the closest reviewer, or record an explicit, auditable
+operator-accept in `<eng>/reviews/self_verified_accepts.json` (`{"RS-…": "why no reviewer covers this class"}`)
+that names the reviewer to backfill. See `_contract/verify-base.md` → "Independent review is mandatory".
+**If a finding reveals new surface
 (internal host, new identity, API base-url, subdomain, new params), append it to the re-convergence inbox
 (§2e) so it gets routed — a finding is also a recon signal.**
 

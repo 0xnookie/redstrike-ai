@@ -53,6 +53,27 @@ biggest cause of rejected review blocks. The recurring offenders and their schem
 - the finding id lives in the file name `reviews/<id>.verdict.json` and on the finding itself —
   **not inside `review{}`** (no `id` key).
 
+### Independent review is mandatory — no self-attestation
+
+`reviewer` MUST name the **independent `<class>-verify` agent** that reviewed the finding in its own
+fresh context — never the orchestrator, the executor, or a human operator. This is the property the whole
+feeder→executor→verifier split exists to protect: a candidate is not a finding until something **other than
+the thing that produced it** confirms it. A finding "verified" by the orchestrator itself (reviewer
+`orchestrator-self-verify`, a person's name, blank, or any name that is not a real `*-verify` agent) is
+self-attestation, and the engagement gate (`verify_completion.py --engagement`) enforces this:
+
+- **Once a report exists it is a HARD gate** — every reportable finding (verdict `accepted`/`blocked`) whose
+  `reviewer` is not a roster `*-verify` agent FAILS the gate (exit 2). Before a report it is a warning.
+- **The only way to ship a self-verified finding** is an explicit, recorded operator-accept in
+  `<eng>/reviews/self_verified_accepts.json` — `{"RS-YYYY-NNN": "why no independent reviewer covers this
+  class"}` (or a list of `{id, reason, by}`). This mirrors the [`recall-audit`](recall-audit.md) REAL-MISS
+  accept: a self-verification is never a **silent** pass. The accept is surfaced as a visible warning that
+  names the missing reviewer class, so the roster hole gets **backfilled** rather than quietly repeated.
+
+If a finding's class has no matching reviewer in the roster, that is a gap to fix (add the `<class>-verify`
+agent, or route the finding to the closest existing reviewer), not a license to self-verify — the accept file
+is a temporary, auditable exception, not the normal path.
+
 ### Two axes: `review.verdict` (the decision) vs finding `status` (the lifecycle)
 
 These are **not** two names for the same thing — they are different axes, and conflating them is a recurring
