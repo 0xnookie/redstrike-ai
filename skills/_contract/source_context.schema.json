@@ -58,6 +58,66 @@
       "description": "pinned libs → cve-intelligence / supply-chain",
       "items": { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "manifest": { "type": "string" }, "name": { "type": "string" }, "version": { "type": "string" } } }
     },
+    "structural": {
+      "type": "array",
+      "description": "D2 — structural facts the chain reasoner composes over: route handlers, auth guards (present/absent), object-id reads, mass-assignment, writable/web-exec paths. An authz absence (missing-ownership-check / unauth-route) is asserted by the reasoner after confirming the handler has no check — semgrep flags the candidate, the reasoner confirms the negative. A fact is context, not a finding.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "file"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^sf-[0-9]{3,}$" },
+          "kind": { "enum": ["route", "state-change-route", "auth-guard", "unauth-route", "id-from-param", "missing-ownership-check", "mass-assignment", "writable-path", "web-exec-path"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "method": { "type": "string", "description": "HTTP method when kind is a route, e.g. POST" },
+          "route_path": { "type": "string", "description": "the URL path the route binds, when known" },
+          "handler": { "type": "string", "description": "handler/function name" },
+          "source": { "enum": ["semgrep", "manual"], "description": "semgrep = extractor-found; manual = reasoner-asserted (e.g. a confirmed absence)" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "chain_candidates": {
+      "type": "array",
+      "description": "D2 — CANDIDATE attack chains composed at the source level from taint-reachable sinks + structural facts, per a pattern in refs/chains/. Routed as an ORDERED executor sequence that proves the chain live. Still a LEAD, never a finding: source-audit is a feeder. Differs from attack-chain-discovery, which composes ALREADY-ACCEPTED findings post-proof — these are pre-proof source hypotheses.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "route_sequence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^scc-[0-9]{3,}$" },
+          "title": { "type": "string" },
+          "pattern": { "type": "string", "description": "the catalog pattern id from refs/chains/, e.g. lfi-log-poison-rce / unauth-state-change" },
+          "kind": { "enum": ["technical", "logic"], "description": "technical = taint/dataflow chain; logic = authz/business-logic chain (no tainted-data signature)" },
+          "steps": {
+            "type": "array",
+            "minItems": 2,
+            "description": "ordered chain steps; each references a candidate id (sa-NNN) or structural fact id (sf-NNN)",
+            "items": {
+              "type": "object",
+              "required": ["ref", "role"],
+              "additionalProperties": false,
+              "properties": {
+                "ref": { "type": "string", "description": "candidate id (sa-NNN) or structural fact id (sf-NNN) this step rests on" },
+                "role": { "enum": ["entry", "precondition", "pivot", "escalation", "exfil"] },
+                "note": { "type": "string", "description": "what this step contributes / the precondition it satisfies" }
+              }
+            }
+          },
+          "route_sequence": {
+            "type": "array",
+            "minItems": 1,
+            "description": "ordered executors that PROVE the chain, each confirming the next's precondition",
+            "items": { "enum": ["xss-reflected", "xss-stored", "xss-dom", "deserialization", "command-injection", "ssti", "sqli-inband", "sqli-blind", "path-traversal-lfi", "upload-rce", "prototype-pollution", "xxe-inband", "xxe-blind", "ssrf-inband", "ssrf-blind", "ssrf-cloud", "idor", "privesc", "bola-bfla", "business-logic", "auth-bypass", "fuzzing", "exploit-dev", "secrets", "cve-intelligence", "supply-chain"] }
+          },
+          "preconditions": { "type": "array", "items": { "type": "string" }, "description": "code conditions the chain assumes; mark which the reasoner confirmed vs assumed" },
+          "impact": { "type": "string" },
+          "confidence": { "enum": ["high", "medium", "low"], "description": "lead quality: high = every step taint-reachable/confirmed; low = an inferred/assumed link" },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
     "routing": {
       "type": "array",
       "description": "executor hints the candidate map warrants",

@@ -1,0 +1,208 @@
+# Redstrike source-audit — structural extractor (D2 chain reasoner feed)
+#
+# NOT taint. Plain structural facts the chain reasoner composes over: route handlers
+# (read vs state-changing), auth guards, object-id reads, mass-assignment, writable paths.
+# Each rule tags metadata.fact ∈ source_context.schema.json structural[].kind.
+#
+# These are the POSITIVE facts (a guard IS here, a route IS state-changing). The dangerous
+# NEGATIVES — unauth-route, missing-ownership-check — are computed by the REASONER: it takes
+# the route/guard facts and marks a state-change-route with no auth-guard in or around its
+# handler as `unauth-route` (source: manual). semgrep can't reliably prove an absence; the
+# reasoner confirms it by reading the handler. See refs/chains/README.md.
+#
+# Validate: semgrep --validate --config skills/source-audit/refs/chains/structural.yaml
+
+rules:
+  # ---- Routes: state-changing (POST/PUT/DELETE/PATCH) ----------------------
+  - id: struct-express-state-change-route
+    languages: [javascript, typescript]
+    severity: INFO
+    message: Express state-changing route handler
+    metadata: { fact: state-change-route, framework: express }
+    patterns:
+      - pattern-either:
+          - pattern: $APP.post($PATH, ...)
+          - pattern: $APP.put($PATH, ...)
+          - pattern: $APP.delete($PATH, ...)
+          - pattern: $APP.patch($PATH, ...)
+
+  - id: struct-express-read-route
+    languages: [javascript, typescript]
+    severity: INFO
+    message: Express read route handler
+    metadata: { fact: route, framework: express }
+    patterns:
+      - pattern: $APP.get($PATH, ...)
+
+  - id: struct-flask-state-change-route
+    languages: [python]
+    severity: INFO
+    message: Flask state-changing route handler
+    metadata: { fact: state-change-route, framework: flask }
+    patterns:
+      - patterns:
+          - pattern: |
+              @$APP.route($PATH, ..., methods=$METHODS, ...)
+              def $H(...): ...
+          - metavariable-pattern:
+              metavariable: $METHODS
+              patterns:
+                - pattern-either:
+                    - pattern: "[..., \"POST\", ...]"
+                    - pattern: "[..., \"PUT\", ...]"
+                    - pattern: "[..., \"DELETE\", ...]"
+                    - pattern: "[..., \"PATCH\", ...]"
+
+  - id: struct-spring-state-change-route
+    languages: [java]
+    severity: INFO
+    message: Spring state-changing mapping
+    metadata: { fact: state-change-route, framework: spring }
+    patterns:
+      - pattern-either:
+          - pattern: "@PostMapping(...)"
+          - pattern: "@PutMapping(...)"
+          - pattern: "@DeleteMapping(...)"
+          - pattern: "@PatchMapping(...)"
+
+  - id: struct-spring-read-route
+    languages: [java]
+    severity: INFO
+    message: Spring read mapping
+    metadata: { fact: route, framework: spring }
+    patterns:
+      - pattern: "@GetMapping(...)"
+
+  # ---- Auth guards (presence) ----------------------------------------------
+  - id: struct-flask-auth-guard
+    languages: [python]
+    severity: INFO
+    message: Flask auth guard decorator
+    metadata: { fact: auth-guard, framework: flask }
+    patterns:
+      - pattern-either:
+          - pattern: "@login_required"
+          - pattern: "@jwt_required(...)"
+          - pattern: "@jwt_required"
+          - pattern: "@roles_required(...)"
+          - pattern: "@require_auth(...)"
+          - pattern: "@permission_required(...)"
+
+  - id: struct-spring-auth-guard
+    languages: [java]
+    severity: INFO
+    message: Spring method-security guard
+    metadata: { fact: auth-guard, framework: spring }
+    patterns:
+      - pattern-either:
+          - pattern: "@PreAuthorize(...)"
+          - pattern: "@Secured(...)"
+          - pattern: "@RolesAllowed(...)"
+
+  - id: struct-express-auth-guard
+    languages: [javascript, typescript]
+    severity: INFO
+    message: Express auth middleware on a route
+    metadata: { fact: auth-guard, framework: express }
+    patterns:
+      - pattern-either:
+          - pattern: passport.authenticate(...)
+          - pattern: $APP.$M($PATH, requireAuth, ...)
+          - pattern: $APP.$M($PATH, isAuthenticated, ...)
+          - pattern: $APP.$M($PATH, ensureLoggedIn, ...)
+
+  # ---- Object loaded by an id taken from the request -----------------------
+  - id: struct-express-id-from-param
+    languages: [javascript, typescript]
+    severity: INFO
+    message: Object loaded by a request-supplied id (IDOR candidate if no owner check)
+    metadata: { fact: id-from-param, framework: express }
+    patterns:
+      - pattern-either:
+          - pattern: $M.findById($REQ.params.$ID)
+          - pattern: $M.findById($REQ.query.$ID)
+          - pattern: $M.findByPk($REQ.params.$ID)
+          - pattern: "$M.findOne({ ..., id: $REQ.params.$ID, ... })"
+
+  - id: struct-python-id-from-param
+    languages: [python]
+    severity: INFO
+    message: Object loaded by a request-supplied id (IDOR candidate if no owner check)
+    metadata: { fact: id-from-param, framework: flask-django }
+    patterns:
+      - pattern-either:
+          - pattern: $M.query.get(request.$SRC.get(...))
+          - pattern: $M.query.get(request.$SRC[...])
+          - pattern: $M.objects.get(id=request.$SRC.get(...))
+          - pattern: $M.objects.get(pk=request.$SRC.get(...))
+
+  - id: struct-php-id-from-param
+    languages: [php]
+    severity: INFO
+    message: Object loaded by a request-supplied id (IDOR candidate if no owner check)
+    metadata: { fact: id-from-param, framework: php }
+    patterns:
+      - pattern-either:
+          - pattern: $M->find($_GET[...])
+          - pattern: $M->find($_POST[...])
+          - pattern: $M->find($_REQUEST[...])
+
+  # ---- Mass assignment (whole request bound to a model) --------------------
+  - id: struct-express-mass-assignment
+    languages: [javascript, typescript]
+    severity: INFO
+    message: Whole request body bound to a model (role fields may be mass-assignable -> privesc)
+    metadata: { fact: mass-assignment, framework: express }
+    patterns:
+      - pattern-either:
+          - pattern: new $M($REQ.body)
+          - pattern: $M.create($REQ.body)
+          - pattern: $M.update($REQ.body, ...)
+          - pattern: Object.assign($X, $REQ.body)
+
+  - id: struct-python-mass-assignment
+    languages: [python]
+    severity: INFO
+    message: Whole request mapping expanded into a model (role fields may be mass-assignable)
+    metadata: { fact: mass-assignment, framework: flask-django }
+    patterns:
+      - pattern-either:
+          - pattern: $M(**request.form)
+          - pattern: $M(**request.json)
+          - pattern: $M(**request.values)
+
+  - id: struct-php-mass-assignment
+    languages: [php]
+    severity: INFO
+    message: Whole request array mass-assigned (role fields may be settable -> privesc)
+    metadata: { fact: mass-assignment, framework: php }
+    patterns:
+      - pattern-either:
+          - pattern: $M->fill($_POST)
+          - pattern: $M->fill($_REQUEST)
+          - pattern: extract($_POST)
+          - pattern: extract($_REQUEST)
+
+  # ---- Writable / web-exec paths (upload move, log append) -----------------
+  - id: struct-php-writable-path
+    languages: [php]
+    severity: INFO
+    message: File write / upload move (writable path -> LFI log-poison / upload-RCE precondition)
+    metadata: { fact: writable-path, framework: php }
+    patterns:
+      - pattern-either:
+          - pattern: move_uploaded_file(...)
+          - pattern: file_put_contents(...)
+          - pattern: fwrite(...)
+
+  - id: struct-node-writable-path
+    languages: [javascript, typescript]
+    severity: INFO
+    message: File write / upload save (writable path -> upload-RCE / log-poison precondition)
+    metadata: { fact: writable-path, framework: node }
+    patterns:
+      - pattern-either:
+          - pattern: fs.writeFile(...)
+          - pattern: fs.writeFileSync(...)
+          - pattern: $FILE.mv(...)
+          - pattern: multer(...)

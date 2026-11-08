@@ -13,6 +13,14 @@
 
 ## Map + emit
 - [ ] Each candidate mapped file:line → vuln class → executor route; deduped
+
+## Chain + logic (D2)
+- [ ] Structural facts extracted (`semgrep --config refs/chains/structural.yaml`) → `structural[]` (routes/guards/id-reads/mass-assign/writable paths)
+- [ ] Authz absences confirmed by reading the handler (unauth-route / missing-ownership-check marked `source: manual`) — not assumed
+- [ ] Chain candidates composed per `refs/chains/patterns.yaml` (technical + logic) → `chain_candidates[]`, each with an ordered `route_sequence` and confirmed-vs-assumed `preconditions`
+- [ ] No padded chains — a chain whose legs don't tie together from source was dropped
+
+## Emit
 - [ ] routing[] set (executor hints)
 - [ ] source_context.json validates against _contract/source_context.schema.json
 - [ ] summary.md
