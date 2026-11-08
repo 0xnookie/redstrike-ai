@@ -4,7 +4,8 @@
 ## Ingest + scan
 - [ ] Source ingested (authorized repo / fetched / js-analysis beautified) + languages + LOC detected
 - [ ] Per-language dangerous-pattern grep run (sink set per refs)
-- [ ] semgrep rulesets run (language + security)
+- [ ] Taint-reachability pass run (`semgrep --config refs/taint/`) → each candidate carries `taint.reachable` (reachable=high · grep-only sink=low)
+- [ ] Supplementary semgrep net run (`--config auto`, language + security)
 
 ## Surface
 - [ ] Secret candidates found + VALUES redacted to fingerprints (→ secrets)

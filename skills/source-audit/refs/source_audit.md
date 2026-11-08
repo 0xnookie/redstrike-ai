@@ -3,6 +3,19 @@
 White-box static review. Each hit is a **candidate** routed to the executor that proves it against the running
 target. Read-only — never execute the source. Redact secret values; hand deps to `cve-intelligence`.
 
+## Taint-reachability pass (run FIRST — reachability beats presence)
+The grep passes below find sinks *wherever they appear*. The taint packs in `refs/taint/` only fire when attacker
+**input reaches a sink unsanitized** — the difference between a scanner and a reachability-aware feeder. Run them
+first and carry the result on each candidate (`taint.reachable`), then use grep to catch sinks the taint packs
+don't model yet (Go/Ruby/Rust/C, and framework-specific sources).
+```bash
+semgrep --config skills/source-audit/refs/taint/ --json -o logs/semgrep-taint.json .   # PHP/Python/JS-TS/Java taint
+```
+- taint **reachable** (source→sink, unsanitized) → candidate `confidence: high`, `taint.reachable: true`
+- sink grep found but **no** taint flow → `confidence: low`, present-but-unproven (still a lead — say so)
+- flow broken by a **sanitizer** (`taint.sanitized: true`) → drop, or keep `low` with a note
+See `refs/taint/README.md` for the rule contract and how to add a language.
+
 ## Cross-language first pass
 ```bash
 semgrep --config auto --json -o logs/semgrep.json .     # security + language rulesets

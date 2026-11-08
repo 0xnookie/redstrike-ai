@@ -1,0 +1,171 @@
+# Redstrike source-audit — Python taint rules (reachability pass)
+# mode: taint. See refs/taint/README.md for the contract. metadata.route ∈ schema enum.
+# A taint match is a CANDIDATE routed to the executor that PROVES it live, never a finding.
+
+rules:
+  - id: python-taint-command-injection
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input reaches an OS-command / code-eval sink.
+      Route to command-injection.
+    metadata:
+      category: command-injection
+      route: command-injection
+      cwe: "CWE-78"
+      confidence: high
+    pattern-sources:
+      - pattern: flask.request
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.json
+      - pattern: request.data
+      - pattern: request.GET
+      - pattern: request.POST
+      - pattern: request.cookies
+      - pattern: request.headers
+    pattern-sinks:
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - patterns:
+          - pattern: subprocess.$F(..., shell=True, ...)
+          - metavariable-pattern:
+              metavariable: $F
+              patterns:
+                - pattern-either:
+                    - pattern: call
+                    - pattern: run
+                    - pattern: Popen
+                    - pattern: check_output
+                    - pattern: check_call
+      - pattern: eval(...)
+      - pattern: exec(...)
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)
+      - pattern: int(...)
+
+  - id: python-taint-deserialization
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: Attacker-controlled input reaches an unsafe deserializer. Route to deserialization.
+    metadata:
+      category: deserialization
+      route: deserialization
+      cwe: "CWE-502"
+      confidence: high
+    pattern-sources:
+      - pattern: flask.request
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.json
+      - pattern: request.data
+      - pattern: request.cookies
+      - pattern: request.headers
+    pattern-sinks:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: cPickle.loads(...)
+      - pattern: yaml.load(...)
+      - pattern: jsonpickle.decode(...)
+
+  - id: python-taint-ssti
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: Attacker-controlled input reaches a template-string render. Route to ssti.
+    metadata:
+      category: ssti
+      route: ssti
+      cwe: "CWE-94"
+      confidence: high
+    pattern-sources:
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.json
+      - pattern: request.GET
+      - pattern: request.POST
+    pattern-sinks:
+      - pattern: render_template_string(...)
+      - pattern: $ENV.from_string(...)
+      - pattern: Template(...).render(...)
+
+  - id: python-taint-sqli
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input is interpolated into a SQL string (not a bound
+      parameter). Route to sqli-inband.
+    metadata:
+      category: sqli-inband
+      route: sqli-inband
+      cwe: "CWE-89"
+      confidence: high
+    pattern-sources:
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.json
+      - pattern: request.GET
+      - pattern: request.POST
+    pattern-sinks:
+      # the query STRING arg only — bound params (2nd arg) are safe by construction.
+      # `...` matches zero trailing args, so this covers execute($Q) too.
+      - patterns:
+          - pattern: $CUR.execute($Q, ...)
+          - focus-metavariable: $Q
+      - pattern: $CUR.executescript(...)
+    pattern-sanitizers:
+      - pattern: int(...)
+
+  - id: python-taint-path-traversal-lfi
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: Attacker-controlled input reaches a file-open/send sink. Route to path-traversal-lfi.
+    metadata:
+      category: path-traversal-lfi
+      route: path-traversal-lfi
+      cwe: "CWE-22"
+      confidence: high
+    pattern-sources:
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.GET
+      - pattern: request.POST
+    pattern-sinks:
+      - pattern: open(...)
+      - pattern: send_file(...)
+    pattern-sanitizers:
+      - pattern: os.path.basename(...)
+      - pattern: werkzeug.utils.secure_filename(...)
+      - pattern: secure_filename(...)
+
+  - id: python-taint-ssrf
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: Attacker-controlled input drives a server-side fetch URL. Route to ssrf-inband.
+    metadata:
+      category: ssrf-inband
+      route: ssrf-inband
+      cwe: "CWE-918"
+      confidence: high
+    pattern-sources:
+      - pattern: request.args
+      - pattern: request.form
+      - pattern: request.values
+      - pattern: request.json
+      - pattern: request.GET
+      - pattern: request.POST
+    pattern-sinks:
+      - pattern: requests.$M(...)
+      - pattern: urllib.request.urlopen(...)
+      - pattern: urllib.urlopen(...)
+      - pattern: httpx.$M(...)

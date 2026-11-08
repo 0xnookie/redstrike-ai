@@ -1,0 +1,102 @@
+# Redstrike source-audit — Java taint rules (reachability pass)
+# mode: taint. Servlet/Spring source->sink flows. metadata.route ∈ schema enum.
+# A taint match is a CANDIDATE routed to the executor that PROVES it live, never a finding.
+
+rules:
+  - id: java-taint-command-injection
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: Attacker-controlled request input reaches a process-exec sink. Route to command-injection.
+    metadata:
+      category: command-injection
+      route: command-injection
+      cwe: "CWE-78"
+      confidence: high
+    pattern-sources:
+      - pattern: (HttpServletRequest $R).getParameter(...)
+      - pattern: (HttpServletRequest $R).getHeader(...)
+      - pattern: (HttpServletRequest $R).getQueryString()
+      - pattern: (HttpServletRequest $R).getCookies()
+      - pattern: (HttpServletRequest $R).getInputStream()
+    pattern-sinks:
+      - pattern: Runtime.getRuntime().exec(...)
+      - pattern: new ProcessBuilder(...)
+
+  - id: java-taint-deserialization
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: Attacker-controlled input reaches a Java deserializer. Route to deserialization.
+    metadata:
+      category: deserialization
+      route: deserialization
+      cwe: "CWE-502"
+      confidence: high
+    pattern-sources:
+      - pattern: (HttpServletRequest $R).getParameter(...)
+      - pattern: (HttpServletRequest $R).getHeader(...)
+      - pattern: (HttpServletRequest $R).getInputStream()
+      - pattern: (HttpServletRequest $R).getCookies()
+    pattern-sinks:
+      - pattern: (ObjectInputStream $O).readObject()
+      - pattern: (ObjectInputStream $O).readUnshared()
+      - pattern: (XMLDecoder $X).readObject()
+
+  - id: java-taint-sqli
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input is concatenated into a SQL statement (not a
+      PreparedStatement placeholder). Route to sqli-inband.
+    metadata:
+      category: sqli-inband
+      route: sqli-inband
+      cwe: "CWE-89"
+      confidence: high
+    pattern-sources:
+      - pattern: (HttpServletRequest $R).getParameter(...)
+      - pattern: (HttpServletRequest $R).getHeader(...)
+      - pattern: (HttpServletRequest $R).getQueryString()
+    pattern-sinks:
+      - pattern: (Statement $S).executeQuery(...)
+      - pattern: (Statement $S).execute(...)
+      - pattern: (Statement $S).executeUpdate(...)
+
+  - id: java-taint-path-traversal-lfi
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: Attacker-controlled input reaches a filesystem read. Route to path-traversal-lfi.
+    metadata:
+      category: path-traversal-lfi
+      route: path-traversal-lfi
+      cwe: "CWE-22"
+      confidence: high
+    pattern-sources:
+      - pattern: (HttpServletRequest $R).getParameter(...)
+      - pattern: (HttpServletRequest $R).getHeader(...)
+    pattern-sinks:
+      - pattern: new File(...)
+      - pattern: new FileInputStream(...)
+      - pattern: Files.readAllBytes(...)
+      - pattern: new FileReader(...)
+
+  - id: java-taint-ssrf
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: Attacker-controlled input drives a server-side fetch URL. Route to ssrf-inband.
+    metadata:
+      category: ssrf-inband
+      route: ssrf-inband
+      cwe: "CWE-918"
+      confidence: high
+    pattern-sources:
+      - pattern: (HttpServletRequest $R).getParameter(...)
+      - pattern: (HttpServletRequest $R).getHeader(...)
+    pattern-sinks:
+      - pattern: new URL(...).openConnection()
+      - pattern: new URL(...).openStream()
+      - pattern: $CLIENT.execute(...)

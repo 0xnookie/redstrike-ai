@@ -1,0 +1,188 @@
+# Redstrike source-audit — PHP taint rules (reachability pass)
+#
+# mode: taint. Each rule proves attacker input (source) REACHES a dangerous sink
+# WITHOUT passing a sanitizer — i.e. the sink is actually reachable, not merely present.
+# A match => candidate.taint.reachable = true (high confidence). No match on a sink that
+# grep DID find => the sink is present but not reachable from these sources (downgrade).
+#
+# metadata.route MUST be a value in source_context.schema.json candidates[].route enum,
+# so the feeder can route the candidate to the executor that PROVES it live.
+# A taint match is still a CANDIDATE, never a finding — the routed executor confirms it.
+#
+# Run:  semgrep --config skills/source-audit/refs/taint/ --json -o logs/semgrep-taint.json <src>
+# Validate: semgrep --validate --config skills/source-audit/refs/taint/php.yaml
+
+rules:
+  # ---- OS command execution -------------------------------------------------
+  - id: php-taint-command-injection
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input reaches an OS-command sink without shell escaping.
+      Route to command-injection; the executor proves RCE benignly (OOB/timing).
+    metadata:
+      category: command-injection
+      route: command-injection
+      cwe: "CWE-78"
+      confidence: high
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+      - pattern: $_SERVER
+      - pattern: $_FILES
+      - pattern: file_get_contents("php://input")
+    pattern-sinks:
+      - pattern: system(...)
+      - pattern: exec(...)
+      - pattern: shell_exec(...)
+      - pattern: passthru(...)
+      - pattern: popen(...)
+      - pattern: proc_open(...)
+      - pattern: pcntl_exec(...)
+    pattern-sanitizers:
+      - pattern: escapeshellarg(...)
+      - pattern: escapeshellcmd(...)
+      - pattern: intval(...)
+
+  # ---- File inclusion / path traversal -------------------------------------
+  - id: php-taint-path-traversal-lfi
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input reaches a file-inclusion/read sink without path
+      confinement. Route to path-traversal-lfi (LFI/RFI -> possible RCE).
+    metadata:
+      category: path-traversal-lfi
+      route: path-traversal-lfi
+      cwe: "CWE-98"
+      confidence: high
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+      - pattern: $_SERVER
+      - pattern: file_get_contents("php://input")
+    pattern-sinks:
+      - pattern: include(...)
+      - pattern: include_once(...)
+      - pattern: require(...)
+      - pattern: require_once(...)
+      - pattern: fopen(...)
+      - pattern: readfile(...)
+      - pattern: file(...)
+      - pattern: file_get_contents(...)
+    pattern-sanitizers:
+      - pattern: basename(...)
+      - pattern: realpath(...)
+      - pattern: intval(...)
+
+  # ---- String-built SQL -----------------------------------------------------
+  - id: php-taint-sqli
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input is concatenated into a SQL query string without
+      parameterization/escaping. Route to sqli-inband (then sqli-blind if blind).
+    metadata:
+      category: sqli-inband
+      route: sqli-inband
+      cwe: "CWE-89"
+      confidence: high
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sinks:
+      - pattern: mysqli_query(...)
+      - pattern: mysql_query(...)
+      - pattern: pg_query(...)
+      - pattern: $DB->query(...)
+      - pattern: $DB->exec(...)
+    pattern-sanitizers:
+      - pattern: mysqli_real_escape_string(...)
+      - pattern: intval(...)
+      - pattern: $DB->quote(...)
+
+  # ---- Native deserialization ----------------------------------------------
+  - id: php-taint-deserialization
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input reaches unserialize(). Route to deserialization
+      (POP-chain / object-injection -> possible RCE, proven benignly by the executor).
+    metadata:
+      category: deserialization
+      route: deserialization
+      cwe: "CWE-502"
+      confidence: high
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+      - pattern: file_get_contents("php://input")
+    pattern-sinks:
+      - pattern: unserialize(...)
+
+  # ---- Reflected XSS --------------------------------------------------------
+  - id: php-taint-xss-reflected
+    mode: taint
+    languages: [php]
+    severity: WARNING
+    message: >-
+      Attacker-controlled input is emitted into the response without HTML encoding.
+      Route to xss-reflected (the executor confirms execution + CSP context).
+    metadata:
+      category: xss-reflected
+      route: xss-reflected
+      cwe: "CWE-79"
+      confidence: medium
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+      - pattern: $_SERVER
+    pattern-sinks:
+      - pattern: echo ...;
+      - pattern: print(...)
+      - pattern: printf(...)
+      - pattern: vprintf(...)
+    pattern-sanitizers:
+      - pattern: htmlspecialchars(...)
+      - pattern: htmlentities(...)
+      - pattern: strip_tags(...)
+      - pattern: intval(...)
+
+  # ---- Server-side request forgery -----------------------------------------
+  - id: php-taint-ssrf
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Attacker-controlled input drives a server-side fetch URL. Route to ssrf-inband
+      (ssrf-blind if no in-band reflection; the executor confirms the egress).
+    metadata:
+      category: ssrf-inband
+      route: ssrf-inband
+      cwe: "CWE-918"
+      confidence: high
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sinks:
+      - pattern: curl_init(...)
+      - patterns:
+          - pattern: curl_setopt($CH, CURLOPT_URL, $URL)
+          - focus-metavariable: $URL
+      - pattern: get_headers(...)

@@ -31,7 +31,20 @@
           "category": { "type": "string", "description": "vuln class the sink implies" },
           "route": { "enum": ["xss-reflected", "xss-stored", "xss-dom", "deserialization", "command-injection", "ssti", "sqli-inband", "sqli-blind", "path-traversal-lfi", "prototype-pollution", "xxe-inband", "xxe-blind", "ssrf-inband", "ssrf-blind", "idor", "privesc", "fuzzing", "exploit-dev", "secrets", "cve-intelligence", "supply-chain"] },
           "confidence": { "enum": ["high", "medium", "low"] },
-          "snippet": { "type": "string", "description": "redacted" }
+          "snippet": { "type": "string", "description": "redacted" },
+          "taint": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "reachability from the semgrep mode:taint pass. Present only when a taint rule evaluated this sink: reachable=true means attacker input provably reaches the sink unsanitized (high confidence) — a sink that grep found but taint did NOT reach is present-but-unproven (downgrade). A candidate is still a LEAD the routed executor proves live.",
+            "properties": {
+              "reachable": { "type": "boolean", "description": "attacker source flows to the sink without a sanitizer" },
+              "source": { "type": "string", "description": "matched taint source, e.g. $_GET / request.args / req.query" },
+              "sink": { "type": "string", "description": "matched dangerous sink" },
+              "sanitized": { "type": "boolean", "description": "true if a sanitizer broke the flow (candidate dropped or downgraded)" },
+              "engine": { "enum": ["semgrep-taint", "manual"] },
+              "rule_id": { "type": "string", "description": "the taint rule that matched, e.g. php-taint-command-injection" }
+            }
+          }
         }
       }
     },
