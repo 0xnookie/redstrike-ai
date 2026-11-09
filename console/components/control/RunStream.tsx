@@ -48,11 +48,17 @@ export function RunStream() {
         <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-sm font-semibold">
           {open ? <ChevronDown size={14} className="text-muted" /> : <ChevronRight size={14} className="text-muted" />}
           <Terminal size={15} className="text-brand" /> Raw engine log
-          {running && (
+          {running ? (
+            // pid-driven: stays on between loop invocations (a `result` is not run-over)
             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
               <Radio size={12} className="animate-pulse" /> streaming
             </span>
-          )}
+          ) : events.length > 0 ? (
+            // the run's process has exited — the authoritative "ended" signal
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted">
+              <CircleCheck size={12} /> run ended
+            </span>
+          ) : null}
           {!open && events.length > 0 && <span className="text-[11px] font-normal text-muted">· {events.length} events</span>}
         </button>
         {open && events.length > 0 && (

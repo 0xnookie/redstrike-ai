@@ -451,7 +451,7 @@ def make_control_handler(target: Path, token: str):
                     data = console._read_json(eng / "coverage_ledger.json") or {"categories": []}
                     return self._json(HTTPStatus.OK, data)
                 if verb == "stream":
-                    return self._stream_jsonl(eng / "runtime" / "autorun.jsonl")
+                    return self._stream_jsonl(eng / "runtime" / "autorun.jsonl", eid=eid)
             return self._json(HTTPStatus.NOT_FOUND, {"error": "unknown api route"})
 
         def _api_post(self, path: str):
@@ -604,13 +604,26 @@ def make_control_handler(target: Path, token: str):
             return self._json(HTTPStatus.OK, auth_snapshot())
 
         # -- SSE tail --------------------------------------------------------
-        def _stream_jsonl(self, path: Path, *, max_seconds: int = 1800):
+        def _stream_jsonl(self, path: Path, *, eid=None, max_seconds: int = 1800):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self.end_headers()
             deadline = time.time() + max_seconds
+
+            def _run_live() -> bool:
+                # The autonomous run is a LOOP: one wrapper process spawns many engine
+                # invocations, so its pid stays in _RUNS for the WHOLE run (not just one
+                # invocation). Liveness therefore tracks the whole run — True between
+                # invocations, False only when the run is truly over. Unknown id → keep the
+                # legacy fixed-duration tail.
+                if not eid:
+                    return True
+                with _RUNS_LOCK:
+                    proc = _RUNS.get(eid)
+                return bool(proc and proc.poll() is None)
+
             f = None
             try:
                 self.wfile.write(b": connected\n\n")
@@ -634,13 +647,24 @@ def make_control_handler(target: Path, token: str):
                     if s:
                         self.wfile.write(b"data: " + s.encode("utf-8") + b"\n\n")
                 self.wfile.flush()
+                gone_since = None  # when we first hit EOF with the run no longer live
                 while time.time() < deadline:
                     line = f.readline()
                     if line:
                         self.wfile.write(b"data: " + line.rstrip("\n").encode("utf-8") + b"\n\n")
                         self.wfile.flush()
-                    else:
-                        time.sleep(0.5)
+                        gone_since = None
+                        continue
+                    # At EOF. If the run process has exited (the whole loop is done, NOT just
+                    # between invocations), give the writer a short grace to flush its final
+                    # lines, then close — so a finished run ends the stream cleanly instead of
+                    # holding an idle socket until the deadline. A still-live run keeps tailing.
+                    if not _run_live():
+                        if gone_since is None:
+                            gone_since = time.time()
+                        elif time.time() - gone_since > 2.0:
+                            break
+                    time.sleep(0.5)
             except (BrokenPipeError, ConnectionResetError):
                 pass  # client went away
             finally:
