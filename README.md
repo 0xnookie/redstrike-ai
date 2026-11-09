@@ -232,7 +232,14 @@ redstrike console                            # open the web console over ALL eng
 
 **How it's enforced** — a generated `runtime/settings.json` wires a **PreToolUse scope-gate hook** that
 denies any tool call reaching an out-of-scope asset and blocks writes to the launcher-owned governance
-files; `scope.yaml` is the signed record, `runtime/scope.json` its machine projection. Autonomous mode
+files; `scope.yaml` is the signed record, `runtime/scope.json` its machine projection. A second
+**rate/backoff gate** runs after it: a per-host sliding-window cap turns `scope.yaml`'s `rate_limit_rps`
+into real backpressure (deny-to-pace, framed so the agent waits rather than evades), and a PostToolUse
+observer reads each response's status so a run of `429/403/503`/challenge responses trips a per-host
+**circuit breaker** with exponential backoff + jitter — so "being throttled" makes the engagement slow
+down instead of drilling payloads through a WAF (`--max-rps` clamps below scope for bug-bounty pacing).
+The scope gate fails **closed** (it is the boundary); the rate gate fails **open** (pacing must never
+wedge a legitimate request). Autonomous mode
 runs `dontAsk` + an allowlist (deny-by-default), budget/turn-capped, MCP-isolated; shell the operator
 didn't pre-allow is **deferred for approval** (`redstrike approve` → `--resume`) rather than run. The hook
 is a safety net over the OS sandbox (WSL2/Linux), not a replacement. Full docs: [`cli/README.md`](cli/README.md).
