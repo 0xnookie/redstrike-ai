@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Globe, Folder, FileText, ChevronRight, Search, Download, Copy, Check,
   Bug, Link2, Braces, AlertTriangle, ListTree, ChevronsDownUp, ChevronsUpDown,
-  ScrollText,
+  ScrollText, Radio,
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
-import { cx, fmtDate, isReportable, verdictOf } from "@/lib/format";
+import { cx, isReportable, verdictOf } from "@/lib/format";
 import { SEVERITY, VERDICT, sevMeta } from "@/lib/theme";
-import type { Finding } from "@/lib/types";
+import type { Finding, HttpExchange } from "@/lib/types";
 import {
   buildSiteMap, subtreeRoutes, sortedChildren, nodeUrl, routeSeverityRank,
   type SiteNode, type SiteRoute,
@@ -28,7 +28,7 @@ const TYPE_COLOR: Record<string, string> = {
 const typeColor = (t?: string) => (t ? TYPE_COLOR[t.toLowerCase()] ?? "#94a3b8" : "#94a3b8");
 
 const SOURCE_LABEL: Record<string, string> = {
-  content: "crawl", host: "host-disc", api: "api", finding: "finding",
+  content: "crawl", host: "host-disc", api: "api", finding: "finding", history: "proxy",
 };
 
 const STATIC_RE = /\.(css|js|mjs|cjs|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|eot|map)$/i;
@@ -43,10 +43,10 @@ const COLS: { k: SortKey; label: string; num?: boolean }[] = [
 ];
 
 export default function SiteMapPage() {
-  const { activeEngagement: eng, activeId, content, hostRaw, findings, openHost, openFinding } = useConsole();
+  const { activeEngagement: eng, activeId, content, hostRaw, history, findings, openHost, openFinding } = useConsole();
 
   const byId = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
-  const map = useMemo(() => buildSiteMap(content, hostRaw, findings), [content, hostRaw, findings]);
+  const map = useMemo(() => buildSiteMap(content, hostRaw, findings, history), [content, hostRaw, findings, history]);
 
   // filters
   const [show, setShow] = useState<"all" | "issues">("all");
@@ -231,7 +231,7 @@ export default function SiteMapPage() {
         crumb="redstrike / site map"
         title="Site Map"
         live={eng.status === "running"}
-        sub={`${map.hostCount} host${map.hostCount === 1 ? "" : "s"} · ${map.routeCount} URLs · ${withFindings} with findings · ${map.paramsDiscovered.length} params discovered`}
+        sub={`${map.hostCount} host${map.hostCount === 1 ? "" : "s"} · ${map.routeCount} URLs · ${withFindings} with findings${map.exchangeCount ? ` · ${map.exchangeCount} captured` : ""}`}
         actions={
           <>
             <button onClick={exportCsv} className="btn-ghost"><Download size={14} /> Export CSV</button>
@@ -244,7 +244,11 @@ export default function SiteMapPage() {
         <Kpi label="Hosts" value={map.hostCount} icon={<Globe size={16} />} note="in the site map" />
         <Kpi label="URLs" value={map.routeCount} icon={<Link2 size={16} />} note="discovered" />
         <Kpi label="With findings" value={withFindings} color={withFindings ? SEVERITY.high.color : undefined} icon={<Bug size={16} />} note="URLs linked to a finding" />
-        <Kpi label="Parameters" value={map.paramsDiscovered.length} icon={<Braces size={16} />} note="mined by recon" />
+        {map.exchangeCount ? (
+          <Kpi label="Captured" value={map.exchangeCount} icon={<Radio size={16} />} note={`proxy history${map.proxySource ? ` · ${map.proxySource}` : ""}`} />
+        ) : (
+          <Kpi label="Parameters" value={map.paramsDiscovered.length} icon={<Braces size={16} />} note="mined by recon" />
+        )}
       </div>
 
       {map.crawlMethod && (
@@ -369,9 +373,13 @@ export default function SiteMapPage() {
 
           {/* route detail */}
           <Panel tall>
-            <PanelHeader title="Request" sub={route ? `${route.method} ${route.path}` : ""} />
-            <div className="scroll-thin max-h-[380px] overflow-y-auto px-[22px] pb-5">
-              {route ? <RouteDetail rt={route} byId={byId} onHost={openHost} onFinding={(f) => openFinding(f)} sinks={map.notableSinks} /> : (
+            <PanelHeader
+              title="Request"
+              sub={route ? `${route.method} ${route.path}` : ""}
+              actions={route?.exchanges?.length ? <span className="inline-flex items-center gap-1 font-mono text-[11px] text-emerald-500"><Radio size={11} /> {route.exchanges.length} captured</span> : undefined}
+            />
+            <div className="scroll-thin max-h-[440px] overflow-y-auto px-[22px] pb-5">
+              {route ? <RouteDetail key={route.id} rt={route} byId={byId} onHost={openHost} onFinding={(f) => openFinding(f)} sinks={map.notableSinks} /> : (
                 <div className="py-10 text-center text-sm text-muted">Select a URL to inspect what recon discovered.</div>
               )}
             </div>
@@ -537,6 +545,108 @@ function CopyBtn({ text, label }: { text: string; label: string }) {
   );
 }
 
+/* ── captured request/response viewer (real proxy history) ──────────────── */
+const STATUS_TEXT: Record<number, string> = {
+  200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 301: "Moved Permanently", 302: "Found",
+  304: "Not Modified", 307: "Temporary Redirect", 308: "Permanent Redirect", 400: "Bad Request",
+  401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 409: "Conflict",
+  422: "Unprocessable Entity", 429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
+  503: "Service Unavailable",
+};
+
+/* Highlight ‹redacted› markers the feeder wrote so a viewer can't mistake a stripped
+   secret for real content (and so nothing sensitive is ever shown). */
+function Redacted({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(‹[^›]*›)/).filter(Boolean).map((p, i) =>
+        /^‹.*›$/.test(p)
+          ? <span key={i} className="rounded bg-amber-500/15 px-1 text-amber-500/90" title="redacted on export">{p}</span>
+          : <span key={i}>{p}</span>,
+      )}
+    </>
+  );
+}
+
+function RawHttp({ kind, ex }: { kind: "req" | "res"; ex: HttpExchange }) {
+  const m = kind === "req" ? ex.req : ex.res;
+  if (!m && kind === "res") return <div className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-muted">No response captured for this exchange.</div>;
+  if (!m && kind === "req") return <div className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-muted">No request body captured for this exchange.</div>;
+  const start = kind === "req"
+    ? `${ex.method ?? "GET"} ${ex.path} HTTP/1.1`
+    : `HTTP/1.1 ${ex.status ?? ""} ${ex.status != null ? (STATUS_TEXT[ex.status] ?? "") : ""}`.trim();
+  const headers = m?.headers ?? [];
+  // synthesize a Host header on requests that don't carry one (so the line reads like a real request)
+  const hostH: [string, string][] = kind === "req" && !headers.some(([h]) => h.toLowerCase() === "host") ? [["Host", ex.host]] : [];
+  const allH = [...hostH, ...headers];
+  const body = m?.body ?? "";
+  const text = [start, ...allH.map(([k, v]) => `${k}: ${v}`), "", body].join("\n").trimEnd();
+  return (
+    <div className="overflow-hidden rounded-lg border border-line bg-card2">
+      <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-wide text-muted">{kind === "req" ? "raw request" : "raw response"}</span>
+        <CopyBtn text={text} label="Copy" />
+      </div>
+      <pre className="scroll-thin max-h-60 overflow-auto px-3 py-2 font-mono text-[11.5px] leading-relaxed">
+        <div className="font-medium" style={kind === "res" ? { color: codeColor(ex.status) } : { color: "rgb(var(--fg-strong))" }}>{start}</div>
+        {allH.map(([k, v], i) => (
+          <div key={i}><span className="text-sky-400/80">{k}</span><span className="text-muted">: </span><Redacted text={v} /></div>
+        ))}
+        {body && (
+          <>
+            <div className="h-2" />
+            {body.split("\n").map((l, i) => <div key={i} className="whitespace-pre-wrap break-all text-fg"><Redacted text={l} /></div>)}
+          </>
+        )}
+      </pre>
+    </div>
+  );
+}
+
+function CapturedExchange({ exchanges }: { exchanges: HttpExchange[] }) {
+  const [idx, setIdx] = useState(0);
+  const [tab, setTab] = useState<"req" | "res">("req");
+  const ex = exchanges[Math.min(idx, exchanges.length - 1)];
+  return (
+    <DetailBlock icon={<Radio size={13} className="text-emerald-500" />} title="Captured exchange" count={exchanges.length > 1 ? exchanges.length : undefined}>
+      {exchanges.length > 1 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {exchanges.map((e, i) => (
+            <button
+              key={e.id ?? i}
+              onClick={() => setIdx(i)}
+              aria-pressed={i === idx}
+              className={cx("rounded-full border px-2 py-0.5 font-mono text-[10px] transition",
+                i === idx ? "border-brand/50 bg-brand/10 text-brand" : "border-line text-muted hover:text-fg")}
+            >
+              {e.method ?? "GET"} {e.status ?? "—"}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mb-2 inline-flex rounded-full border border-line bg-card2 p-0.5">
+        {(["req", "res"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={cx("rounded-full px-2.5 py-1 text-xs font-medium transition", tab === k ? "bg-brand text-brand-fg shadow-sm" : "text-muted hover:text-fg")}
+          >
+            {k === "req" ? "Request" : "Response"}
+          </button>
+        ))}
+      </div>
+      <RawHttp kind={tab} ex={ex} />
+      {(ex.mime || ex.length != null || ex.ms != null) && (
+        <div className="mt-1.5 flex flex-wrap gap-2 font-mono text-[10px] text-faint">
+          {ex.mime && <span>{ex.mime}</span>}
+          {ex.length != null && <span>{ex.length} B</span>}
+          {ex.ms != null && <span>{ex.ms} ms</span>}
+        </div>
+      )}
+    </DetailBlock>
+  );
+}
+
 function RouteDetail({
   rt, byId, onHost, onFinding, sinks,
 }: {
@@ -574,6 +684,9 @@ function RouteDetail({
         <CopyBtn text={curl} label="cURL" />
         <button onClick={() => onHost(rt.host)} className="btn-ghost"><Globe size={13} /> Inspect host</button>
       </div>
+
+      {/* captured request/response (from the proxy history, when present) */}
+      {rt.exchanges && rt.exchanges.length > 0 && <CapturedExchange exchanges={rt.exchanges} />}
 
       {/* recon notes */}
       {(rt.note || rt.js || rt.evidence) && (

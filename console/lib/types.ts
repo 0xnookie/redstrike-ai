@@ -289,6 +289,37 @@ export interface ContentMap {
   notable_sinks?: Record<string, string[]>; // vuln-class -> sink identifiers
 }
 
+// proxy-context's http_history.json — the connected interception proxy's captured traffic
+// (Caido / Burp / mitmproxy / ZAP), exported into the engagement with secrets redacted. One
+// `exchanges[]` record per request/response. Feeds the Site Map: host+path+method are the merge
+// keys, status/mime/params drive its facets, and req/res carry the raw message for the viewer.
+export interface HttpMessage {
+  headers?: [string, string][]; // [name, value] pairs, secrets redacted to ‹redacted›
+  body?: string;
+}
+export interface HttpExchange {
+  id: string;
+  host: string;                 // hostname (port optional)
+  method?: string;              // verb (defaults to GET)
+  path: string;                 // pathname (+ query)
+  status?: number;
+  mime?: string;                // response content-type
+  length?: number;
+  ms?: number;
+  ts?: string;                  // ISO-8601
+  params?: string[];
+  req?: HttpMessage;
+  res?: HttpMessage;
+  note?: string;
+  finding?: string;             // linked finding id, when the exchange is a confirmation
+}
+export interface HttpHistory {
+  engagement?: string;
+  generated_at?: string;
+  source?: string;              // caido | burp | mitmproxy | zap | manual
+  exchanges?: HttpExchange[];
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -303,4 +334,5 @@ export interface ConsoleData {
   coverage?: CoverageLedger;
   cveIntel?: CveIntel;
   content?: ContentMap;
+  history?: HttpHistory;
 }

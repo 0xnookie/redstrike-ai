@@ -7,11 +7,11 @@
 // can show the worst issue on it. Pure + deterministic so it can be unit-tested and so the
 // Site Map page stays a thin view over it.
 
-import type { ContentMap, Finding } from "./types";
+import type { ContentMap, Finding, HttpHistory, HttpExchange } from "./types";
 import { SEVERITY } from "./theme";
 import { isReportable } from "./format";
 
-export type RouteSource = "content" | "host" | "api" | "finding";
+export type RouteSource = "content" | "host" | "api" | "finding" | "history";
 
 /** One discovered URL under a host, merged across every artifact that surfaced it. */
 export interface SiteRoute {
@@ -30,6 +30,7 @@ export interface SiteRoute {
   confirmed?: boolean;
   sources: RouteSource[];  // which artifacts named this URL
   findingIds: string[];    // non-composite findings whose asset matches this URL
+  exchanges?: HttpExchange[]; // real captured request/response(s) from the proxy, newest first
 }
 
 export type NodeKind = "host" | "dir" | "file" | "q";
@@ -54,6 +55,23 @@ export interface SiteMap {
   crawlMethod?: string;
   hostCount: number;
   routeCount: number;
+  exchangeCount: number;    // captured proxy request/response pairs folded in
+  proxySource?: string;     // caido | burp | mitmproxy | … (when http_history was present)
+}
+
+/** A short type label from a response content-type (for the Site Map's type facet). */
+export function typeFromMime(mime?: string): string | undefined {
+  if (!mime) return undefined;
+  const m = mime.toLowerCase();
+  if (m.includes("html")) return "html";
+  if (m.includes("json")) return "json";
+  if (m.includes("javascript") || m.includes("ecmascript")) return "script";
+  if (m.includes("css")) return "css";
+  if (m.includes("xml")) return "xml";
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("font/") || m.includes("font")) return "font";
+  if (m.startsWith("text/")) return "text";
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -119,6 +137,7 @@ interface Raw {
   introspection?: boolean;
   confirmed?: boolean;
   source: RouteSource;
+  exchange?: HttpExchange;
 }
 
 /** Pick the host the content.json routes belong to (they carry only paths). */
@@ -137,9 +156,22 @@ function primaryHost(content: ContentMap | undefined, host: any, findings: Findi
   return "";
 }
 
-function collect(content: ContentMap | undefined, host: any, findings: Finding[]): Raw[] {
+function collect(content: ContentMap | undefined, host: any, findings: Finding[], history?: HttpHistory): Raw[] {
   const out: Raw[] = [];
   const primary = primaryHost(content, host, findings);
+
+  // proxy-context http_history — real captured request/response per URL
+  for (const ex of history?.exchanges ?? []) {
+    if (!ex || typeof ex.path !== "string") continue;
+    const hostFor = hostnameNoPort(ex.host || "") || primary;
+    if (!hostFor) continue;
+    out.push({
+      host: hostFor, path: normPath(ex.path),
+      method: ex.method, status: typeof ex.status === "number" ? ex.status : undefined,
+      type: typeFromMime(ex.mime), params: Array.isArray(ex.params) ? ex.params : undefined,
+      note: ex.note, source: "history", exchange: ex,
+    });
+  }
 
   // content-discovery routes (paths under the primary crawl host)
   for (const r of content?.routes ?? []) {
@@ -208,6 +240,7 @@ function mergeRoutes(raws: Raw[]): SiteRoute[] {
         status: r.status, type: r.type, params: uniq(r.params ?? []),
         note: r.note, js: r.js, evidence: r.evidence, introspection: r.introspection,
         confirmed: r.confirmed, sources: [r.source], findingIds: [],
+        exchanges: r.exchange ? [r.exchange] : undefined,
       });
     } else {
       existing.methods = uniq([...existing.methods, ...verbs]);
@@ -221,7 +254,12 @@ function mergeRoutes(raws: Raw[]): SiteRoute[] {
       if (r.introspection) existing.introspection = true;
       if (r.confirmed) existing.confirmed = true;
       if (!existing.sources.includes(r.source)) existing.sources.push(r.source);
+      if (r.exchange) (existing.exchanges ??= []).push(r.exchange);
     }
+  }
+  // newest exchange first, so the viewer defaults to the most recent capture
+  for (const rt of byKey.values()) {
+    if (rt.exchanges) rt.exchanges.sort((a, b) => (b.ts ? +new Date(b.ts) : 0) - (a.ts ? +new Date(a.ts) : 0));
   }
   return Array.from(byKey.values());
 }
@@ -295,9 +333,16 @@ function insert(nodes: Map<string, SiteNode>, roots: SiteNode[], rt: SiteRoute):
 
 /* --------------------------------------------------------------- public API */
 
-export function buildSiteMap(content: ContentMap | undefined, host: any, findings: Finding[]): SiteMap {
-  const routes = mergeRoutes(collect(content, host, findings));
+export function buildSiteMap(content: ContentMap | undefined, host: any, findings: Finding[], history?: HttpHistory): SiteMap {
+  const routes = mergeRoutes(collect(content, host, findings, history));
   linkFindings(routes, findings);
+  // a captured exchange can name the finding it confirmed — link those too (if the id is real)
+  const findingIds = new Set(findings.map((f) => f.id));
+  for (const rt of routes) {
+    for (const ex of rt.exchanges ?? []) {
+      if (ex.finding && findingIds.has(ex.finding) && !rt.findingIds.includes(ex.finding)) rt.findingIds.push(ex.finding);
+    }
+  }
 
   const nodes = new Map<string, SiteNode>();
   const roots: SiteNode[] = [];
@@ -317,6 +362,8 @@ export function buildSiteMap(content: ContentMap | undefined, host: any, finding
     crawlMethod: content?.crawl_method,
     hostCount: roots.length,
     routeCount: routes.length,
+    exchangeCount: history?.exchanges?.length ?? 0,
+    proxySource: history?.exchanges?.length ? history?.source : undefined,
   };
 }
 

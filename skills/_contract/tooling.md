@@ -60,4 +60,6 @@ pipx install arjun paramspider git-dumper   # + the rest — see scripts/tools.m
 ```
 
 The anti-automation ladder (`anti-automation-ladder.md`) stays orthogonal: it decides **how** to fetch when
-blocked; this file decides **which** tool does the job.
+blocked; this file decides **which** tool does the job. The proxy spine (`proxy.md`) is orthogonal too: when an
+interception proxy (the `intercept` category — Caido / Burp / `mitmproxy` / ZAP) is connected it becomes the
+HTTP **transport** for the whole toolchain, and `proxy-context` exports its History into the engagement.
