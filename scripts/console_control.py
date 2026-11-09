@@ -50,6 +50,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -66,6 +67,20 @@ import http.server  # noqa: E402
 # in-flight runs: engagement id -> Popen (process-group leader)
 _RUNS: dict[str, subprocess.Popen] = {}
 _RUNS_LOCK = threading.Lock()
+
+
+def _rmtree_robust(path: Path) -> None:
+    """shutil.rmtree, tolerant of Windows read-only files. On Windows rmtree raises
+    PermissionError (WinError 5) trying to unlink a read-only file — and engagement dirs
+    routinely contain them (tool outputs, .git objects, files the engine marked read-only).
+    An onerror handler clears the read-only bit and retries, so delete works cross-platform."""
+    def _onerror(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+        except OSError:
+            pass
+        func(p)  # retry the unlink/rmdir; if it still fails it re-raises to the caller
+    shutil.rmtree(path, onerror=_onerror)
 
 
 # --- LLM provider auth (set from the console, inherited by launched runs) ------------------
@@ -564,9 +579,16 @@ def make_control_handler(target: Path, token: str):
             if resolved == root or resolved.parent != root or not resolved.is_dir():
                 return self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "refusing to delete this path"})
             try:
-                shutil.rmtree(resolved)
+                _rmtree_robust(resolved)
             except OSError as e:
-                return self._json(HTTPStatus.OK, {"ok": False, "error": str(e)})
+                # Still failing after clearing read-only bits usually means a file is OPEN
+                # (Windows WinError 32): a console tab tailing this engagement's run log, or a
+                # run that didn't fully exit. Say so instead of a bare errno.
+                msg = str(e)
+                if getattr(e, "winerror", None) == 32:
+                    msg = ("a file in this engagement is open — close any console tab viewing it "
+                           "(or stop its run) and try again · " + msg)
+                return self._json(HTTPStatus.OK, {"ok": False, "error": msg})
             with _RUNS_LOCK:
                 _RUNS.pop(eid, None)
             return self._json(HTTPStatus.OK, {"ok": True, "deleted": eid})
