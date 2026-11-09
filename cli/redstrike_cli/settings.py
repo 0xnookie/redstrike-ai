@@ -53,6 +53,20 @@ def build_hook_command(
     return " ".join(shlex.quote(str(x)) for x in parts)
 
 
+def build_rate_hook_command(
+    python_exe: str, rate_script: Path, scope_json: Path, state_json: Path,
+    *, observe: bool = False, max_rps: float | None = None,
+) -> str:
+    """Command for the rate/backoff gate (rate_gate.py). `observe=True` is the PostToolUse
+    mode that folds the response status into the breaker; default is the PreToolUse pacing gate."""
+    parts = [python_exe, str(rate_script), "--scope", str(scope_json), "--state", str(state_json)]
+    if observe:
+        parts.append("--observe")
+    if max_rps is not None:
+        parts += ["--max-rps", str(max_rps)]
+    return " ".join(shlex.quote(str(x)) for x in parts)
+
+
 def render_settings(
     *,
     python_exe: str,
@@ -63,8 +77,16 @@ def render_settings(
     extra_deny: list[str] | None = None,
     gate_policy: Path | None = None,
     approvals: Path | None = None,
+    rate_script: Path | None = None,
+    state_json: Path | None = None,
+    max_rps: float | None = None,
 ) -> dict:
     allow = autonomous_allowlist(extra_allow) if mode == "autonomous" else list(_ALLOW)
+    # The rate/backoff gate lives next to the scope gate and keeps its state next to scope.json.
+    if rate_script is None:
+        rate_script = hook_script.parent / "rate_gate.py"
+    if state_json is None:
+        state_json = scope_json.parent / "rate_state.json"
     hook_extra: list[str] = []
     if mode == "autonomous":
         hook_extra = ["--defer"]
@@ -89,6 +111,9 @@ def render_settings(
             "deny": deny,
         },
         "hooks": {
+            # Scope gate FIRST (it fails closed and is the real boundary); the rate/backoff
+            # gate runs after it as pacing backpressure (fails open). A PostToolUse observer
+            # feeds the breaker the response status so "being blocked" becomes "back off".
             "PreToolUse": [
                 {
                     "matcher": _HOOK_MATCHER,
@@ -96,13 +121,33 @@ def render_settings(
                         {
                             "type": "command",
                             "command": build_hook_command(python_exe, hook_script, scope_json, hook_extra),
+                        },
+                        {
+                            "type": "command",
+                            "command": build_rate_hook_command(
+                                python_exe, rate_script, scope_json, state_json, max_rps=max_rps
+                            ),
+                        },
+                    ],
+                }
+            ],
+            "PostToolUse": [
+                {
+                    "matcher": _HOOK_MATCHER,
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": build_rate_hook_command(
+                                python_exe, rate_script, scope_json, state_json, observe=True
+                            ),
                         }
                     ],
                 }
-            ]
+            ],
         },
         "env": {
             "REDSTRIKE_SCOPE_FILE": str(scope_json),
+            "REDSTRIKE_RATE_STATE": str(state_json),
             "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
             "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "3",
             "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "8",

@@ -64,6 +64,35 @@ class TestSettings(unittest.TestCase):
         )
         self.assertNotIn("Bash", s["permissions"]["allow"])  # offensive stays interactive
 
+    def test_rate_gate_wired(self):
+        s = settings.render_settings(
+            python_exe="/usr/bin/python3",
+            hook_script=pathlib.Path("/repo/cli/redstrike_cli/hooks/scope_gate.py"),
+            scope_json=pathlib.Path("/eng/runtime/scope.json"),
+        )
+        pre = s["hooks"]["PreToolUse"][0]["hooks"]
+        # scope gate first (fails closed), rate gate second (fails open)
+        self.assertIn("scope_gate.py", pre[0]["command"])
+        self.assertIn("rate_gate.py", pre[1]["command"])
+        self.assertIn("--state", pre[1]["command"])
+        self.assertNotIn("--observe", pre[1]["command"])
+        # PostToolUse runs the rate gate in observe mode to feed the breaker
+        post = s["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        self.assertIn("rate_gate.py", post)
+        self.assertIn("--observe", post)
+        self.assertEqual(
+            s["env"]["REDSTRIKE_RATE_STATE"], str(pathlib.Path("/eng/runtime/rate_state.json"))
+        )
+
+    def test_max_rps_clamp_rendered(self):
+        s = settings.render_settings(
+            python_exe="/usr/bin/python3",
+            hook_script=pathlib.Path("/repo/cli/redstrike_cli/hooks/scope_gate.py"),
+            scope_json=pathlib.Path("/eng/runtime/scope.json"),
+            max_rps=3,
+        )
+        self.assertIn("--max-rps", s["hooks"]["PreToolUse"][0]["hooks"][1]["command"])
+
 
 class TestRoe(unittest.TestCase):
     def test_roe_contains_key_directives(self):
