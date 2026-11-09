@@ -19,6 +19,7 @@ serves them under per-engagement routes the console fetches on open:
 
   findings_consolidated.json  (reporting)               -> /e/<id>/findings_consolidated.json
   host_discovery.json         (host-discovery)          -> /e/<id>/host_discovery.json
+  content.json                (content-discovery)       -> /e/<id>/content.json
   chains.json                 (attack-chain-discovery)  -> /e/<id>/attack_chains.json
   scope.yaml / scope.json     (engagement root)         -> /e/<id>/scope.json
 
@@ -51,6 +52,7 @@ WANTED = {
     "attack_chains.json": ["attack_chains.json", "chains.json"],
     "coverage_ledger.json": ["coverage_ledger.json"],
     "cve_intel.json": ["cve_intel.json"],
+    "content.json": ["content.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -487,7 +489,7 @@ def main() -> int:
             cmd.append("--build")
         devnull = open(os.devnull, "wb")
         subprocess.Popen(cmd, stdout=devnull, stderr=devnull, start_new_session=True)
-        print(f"  console (background) → {url}")
+        print(f"  console (background) -> {url}")
         if args.open:
             _open_browser(url, wait_port=args.port)
         return 0

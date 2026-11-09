@@ -18,6 +18,6 @@
 
 ## Emit
 - [ ] crawl.txt · endpoints.txt · params.txt
-- [ ] content.json
+- [ ] content.json (per-route `routes[]`: path + observed status/type/methods/params/note — see SKILL.md shape)
 - [ ] summary.md
 - [ ] /REVIEW SKILL passes

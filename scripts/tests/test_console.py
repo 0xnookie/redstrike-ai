@@ -104,11 +104,13 @@ class TestFilesFor(unittest.TestCase):
             eng = pathlib.Path(d)
             (eng / "scope.yaml").write_text("x", encoding="utf-8")
             mk(eng / "host-discovery" / "host_discovery.json", {"hosts": []})
+            mk(eng / "content-discovery" / "content.json", {"routes": []})
             mk(eng / "coverage_ledger.json", {"categories": []})
             mk(eng / "cve-intelligence" / "cve_intel.json", {"entries": []})
             mk(eng / "attack-chain-discovery" / "chains.json", {"chains": []})  # alias
             files = c.files_for(eng)
             self.assertTrue(files["host_discovery.json"].name == "host_discovery.json")
+            self.assertEqual(files["content.json"].name, "content.json")
             self.assertIn("coverage_ledger.json", files)
             self.assertIn("cve_intel.json", files)
             # chains.json resolves to the canonical attack_chains.json slot

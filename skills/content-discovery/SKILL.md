@@ -46,6 +46,31 @@ Produce the content map + a target-specific wordlist. DONE = `checklist.md` `- [
 ## Outputs
 `crawl.txt` · `endpoints.txt` · `params.txt` · `custom_wordlist.txt` · `content.json` · `summary.md` · `logs/`
 
+### `content.json` shape (the consolidated content map)
+`content.json` is the structured map the surface/site-map views + downstream feeders read, so emit a
+**per-route record**, not a flat URL list. Stay tolerant — `path` is the only required field; emit every
+other field you ACTUALLY observed and omit (never guess) the rest. Shape:
+```jsonc
+{
+  "engagement": "<id>", "target": "<host | host:port>", "generated_at": "<ISO-8601>",
+  "crawl_method": "<how the map was built — tools used + any manual notes>",
+  "routes": [
+    { "path": "/checkout",          // REQUIRED — pathname (+ query when it's meaningful)
+      "status": 200,                 // HTTP status ACTUALLY observed (omit if never requested)
+      "type": "html",               // html|form|json|graphql|graphql-ide|websocket|xml|script|css|…
+      "methods": ["GET", "POST"],  // verbs seen (defaults to GET)
+      "params": ["coupon", "qty"], // parameters this route accepts
+      "note": "coupon applied here", // short recon note
+      "js": "applyCoupon [logic]" }  // JS-origin hint, when the route came from js-analysis
+  ],
+  "params_discovered": ["id", "q", "…"],              // the mined parameter union
+  "notable_sinks": { "<vuln-class>": ["sink(id)", "…"] } // interpreter/authz sinks worth routing
+}
+```
+**Record `status` + `type` per route whenever it was actually fetched** — those two drive the surface
+map's status-code and type facets; a route with neither still maps, but loses that fidelity. A legacy flat
+list is parsed tolerantly, but prefer the `routes[]` record above.
+
 ## Phases
 - **Phase 1 (generic):** crawl + historical + custom-wordlist build.
 - **Phase 2 (target-specific):** brute-force + parameter discovery + consolidation.
