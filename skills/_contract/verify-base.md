@@ -11,7 +11,7 @@ its own blind spots — independence is the whole point). It consumes `findings.
 
 ## The 7 base checks (run per finding)
 
-1. **Evidence sufficiency** — every finding cites a reproducible artifact in the vault (request/response, tool output, screenshot, DOM capture, PoC). No artifact ⇒ `verdict: rejected`. This single rule kills most hallucinations.
+1. **Evidence sufficiency** — every finding cites a reproducible artifact in the vault (request/response, tool output, screenshot, DOM capture, PoC). No artifact ⇒ `verdict: rejected`. This single rule kills most hallucinations. Prefer the **raw** request/response (headers + the decisive body bytes) saved to the vault over a prose summary of it: a hand-written "the title X was present" note is weaker evidence and forces the reviewer to re-fetch — the executor should capture the real artifact.
 2. **Reproducibility** — the reproduction steps are concrete and re-runnable; a working PoC exists for Medium+. When feasible, **re-execute** the PoC and confirm the claimed effect.
 3. **False-positive gauntlet** — domain-specific sanity checks (defined per skill in the inheriting `verify.md`) **plus the shared `counterevidence.md`**: a version/CVE match, "looks injectable", reflected metacharacters, a benign 500, or circular evidence are NOT proof. Is the effect real, or an inert reflection / benign error / honeypot / already-neutralized-by-a-filter case?
 4. **Severity / CVSS integrity** — recompute the vector from the evidence per `severity-calibration.md`; do not trust the executor's number. Flag inflation, and guard against deflation (lower confidence, not severity, for unconfirmed reachability).

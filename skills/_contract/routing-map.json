@@ -91,6 +91,7 @@
     "tech:ldap": "an LDAP/directory backend",
     "tech:wordpress": "WordPress fingerprinted",
     "tech:nextjs": "Next.js fingerprinted",
+    "tech:shopware": "Shopware fingerprinted",
     "token:opaque-nonjwt": "opaque signed/encrypted non-JWT tokens or cookies",
     "infra:cache-cdn": "a cache or CDN sits in front of the app",
     "infra:proxy-chain": "a front-end/back-end proxy chain (smuggling surface)",
@@ -143,6 +144,7 @@
     "tech:ldap": ["host-discovery", "cve-intelligence", "source-audit"],
     "tech:wordpress": ["host-discovery", "cve-intelligence"],
     "tech:nextjs": ["host-discovery", "js-analysis", "cve-intelligence"],
+    "tech:shopware": ["host-discovery", "cve-intelligence"],
     "token:opaque-nonjwt": ["content-discovery", "js-analysis"],
     "infra:cache-cdn": ["host-discovery"],
     "infra:proxy-chain": ["host-discovery"],
@@ -731,6 +733,23 @@
       ],
       "skip_reason": "Next.js not fingerprinted",
       "notes": "specializes cve-intelligence for the Next.js stack"
+    },
+    {
+      "id": "framework-shopware",
+      "name": "Framework: Shopware",
+      "owasp": "A06",
+      "phase": "web",
+      "pattern": "family",
+      "feeder": "framework-base",
+      "agents": [
+        "shopware"
+      ],
+      "baseline": false,
+      "triggers": [
+        "tech:shopware"
+      ],
+      "skip_reason": "Shopware not fingerprinted",
+      "notes": "specializes cve-intelligence for the Shopware stack"
     },
     {
       "id": "llm",
