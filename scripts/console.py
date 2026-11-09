@@ -20,6 +20,7 @@ serves them under per-engagement routes the console fetches on open:
   findings_consolidated.json  (reporting)               -> /e/<id>/findings_consolidated.json
   host_discovery.json         (host-discovery)          -> /e/<id>/host_discovery.json
   content.json                (content-discovery)       -> /e/<id>/content.json
+  http_history.json           (proxy-context)           -> /e/<id>/http_history.json
   chains.json                 (attack-chain-discovery)  -> /e/<id>/attack_chains.json
   scope.yaml / scope.json     (engagement root)         -> /e/<id>/scope.json
 
@@ -53,6 +54,7 @@ WANTED = {
     "coverage_ledger.json": ["coverage_ledger.json"],
     "cve_intel.json": ["cve_intel.json"],
     "content.json": ["content.json"],
+    "http_history.json": ["http_history.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -436,6 +438,28 @@ def make_handler(target: Path):
         def do_HEAD(self):
             if not self._serve_dynamic(body_only=True):
                 super().do_HEAD()
+
+        def _offline(self):
+            # This is the READ-ONLY viewer: it implements no write verbs. A POST/PUT/DELETE/PATCH
+            # means the console tried to reach the control plane (/api/*). The stdlib base handler
+            # would answer an unimplemented method with a bare 501, which the console surfaces as a
+            # confusing "HTTP 501". Answer with a plain (non-JSON) 404 instead — lib/control.ts maps
+            # that to kind:"offline", so the UI shows how to start scripts/console_control.py.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = 0
+            if n > 0:
+                try:
+                    self.rfile.read(n)  # drain the request body so keep-alive stays sane
+                except OSError:
+                    pass
+            self.send_error(404, "control plane not running (read-only viewer)")
+
+        do_POST = _offline
+        do_PUT = _offline
+        do_DELETE = _offline
+        do_PATCH = _offline
 
         def end_headers(self):
             self.send_header("Cache-Control", "no-store")

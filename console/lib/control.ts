@@ -352,7 +352,11 @@ export function parseRunLine(line: string): RunEvent[] {
       key: nextKey(),
       kind: "result",
       tone: good ? "ok" : "warn",
-      text: `run ${o.subtype || "ended"} · ${o.num_turns ?? 0} turns`,
+      // An autonomous run LOOPS (invoke → return → resume), so this `result` ends one ENGINE
+      // INVOCATION, not necessarily the whole run — label it as such so a mid-run result isn't
+      // misread as the run finishing. Whether the RUN is still live is shown by the pid-driven
+      // "streaming"/"ended" indicator, not by this line.
+      text: `invocation ${o.subtype || "ended"} · ${o.num_turns ?? 0} turns`,
       detail: detail || undefined,
       deferred,
       costUsd: typeof o.total_cost_usd === "number" ? o.total_cost_usd : undefined,

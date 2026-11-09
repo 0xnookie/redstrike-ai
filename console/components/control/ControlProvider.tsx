@@ -165,9 +165,12 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
                 return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next;
               });
               if (evs.some((e) => e.kind === "result")) {
-                // this invocation finished — close the tail and settle status + approvals
-                ac.abort();
-                if (streamAbort.current === ac) streamAbort.current = null;
+                // One engine INVOCATION finished. An autonomous run LOOPS — the engine resumes
+                // with another invocation (and another `result` later), so a result is NOT
+                // run-over. Re-poll status (keeps `running`/pid authoritative) + approvals (catch
+                // deferrals), but KEEP TAILING so the next invocation streams in instead of
+                // freezing the log at "run success". The backend closes the tail itself when the
+                // run process actually exits (whole loop done), so this never holds an idle socket.
                 void refresh();
                 void refreshApprovals(id);
               }

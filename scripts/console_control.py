@@ -50,6 +50,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -66,6 +67,20 @@ import http.server  # noqa: E402
 # in-flight runs: engagement id -> Popen (process-group leader)
 _RUNS: dict[str, subprocess.Popen] = {}
 _RUNS_LOCK = threading.Lock()
+
+
+def _rmtree_robust(path: Path) -> None:
+    """shutil.rmtree, tolerant of Windows read-only files. On Windows rmtree raises
+    PermissionError (WinError 5) trying to unlink a read-only file — and engagement dirs
+    routinely contain them (tool outputs, .git objects, files the engine marked read-only).
+    An onerror handler clears the read-only bit and retries, so delete works cross-platform."""
+    def _onerror(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+        except OSError:
+            pass
+        func(p)  # retry the unlink/rmdir; if it still fails it re-raises to the caller
+    shutil.rmtree(path, onerror=_onerror)
 
 
 # --- LLM provider auth (set from the console, inherited by launched runs) ------------------
@@ -451,7 +466,7 @@ def make_control_handler(target: Path, token: str):
                     data = console._read_json(eng / "coverage_ledger.json") or {"categories": []}
                     return self._json(HTTPStatus.OK, data)
                 if verb == "stream":
-                    return self._stream_jsonl(eng / "runtime" / "autorun.jsonl")
+                    return self._stream_jsonl(eng / "runtime" / "autorun.jsonl", eid=eid)
             return self._json(HTTPStatus.NOT_FOUND, {"error": "unknown api route"})
 
         def _api_post(self, path: str):
@@ -564,9 +579,16 @@ def make_control_handler(target: Path, token: str):
             if resolved == root or resolved.parent != root or not resolved.is_dir():
                 return self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "refusing to delete this path"})
             try:
-                shutil.rmtree(resolved)
+                _rmtree_robust(resolved)
             except OSError as e:
-                return self._json(HTTPStatus.OK, {"ok": False, "error": str(e)})
+                # Still failing after clearing read-only bits usually means a file is OPEN
+                # (Windows WinError 32): a console tab tailing this engagement's run log, or a
+                # run that didn't fully exit. Say so instead of a bare errno.
+                msg = str(e)
+                if getattr(e, "winerror", None) == 32:
+                    msg = ("a file in this engagement is open — close any console tab viewing it "
+                           "(or stop its run) and try again · " + msg)
+                return self._json(HTTPStatus.OK, {"ok": False, "error": msg})
             with _RUNS_LOCK:
                 _RUNS.pop(eid, None)
             return self._json(HTTPStatus.OK, {"ok": True, "deleted": eid})
@@ -604,13 +626,26 @@ def make_control_handler(target: Path, token: str):
             return self._json(HTTPStatus.OK, auth_snapshot())
 
         # -- SSE tail --------------------------------------------------------
-        def _stream_jsonl(self, path: Path, *, max_seconds: int = 1800):
+        def _stream_jsonl(self, path: Path, *, eid=None, max_seconds: int = 1800):
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self.end_headers()
             deadline = time.time() + max_seconds
+
+            def _run_live() -> bool:
+                # The autonomous run is a LOOP: one wrapper process spawns many engine
+                # invocations, so its pid stays in _RUNS for the WHOLE run (not just one
+                # invocation). Liveness therefore tracks the whole run — True between
+                # invocations, False only when the run is truly over. Unknown id → keep the
+                # legacy fixed-duration tail.
+                if not eid:
+                    return True
+                with _RUNS_LOCK:
+                    proc = _RUNS.get(eid)
+                return bool(proc and proc.poll() is None)
+
             f = None
             try:
                 self.wfile.write(b": connected\n\n")
@@ -634,13 +669,24 @@ def make_control_handler(target: Path, token: str):
                     if s:
                         self.wfile.write(b"data: " + s.encode("utf-8") + b"\n\n")
                 self.wfile.flush()
+                gone_since = None  # when we first hit EOF with the run no longer live
                 while time.time() < deadline:
                     line = f.readline()
                     if line:
                         self.wfile.write(b"data: " + line.rstrip("\n").encode("utf-8") + b"\n\n")
                         self.wfile.flush()
-                    else:
-                        time.sleep(0.5)
+                        gone_since = None
+                        continue
+                    # At EOF. If the run process has exited (the whole loop is done, NOT just
+                    # between invocations), give the writer a short grace to flush its final
+                    # lines, then close — so a finished run ends the stream cleanly instead of
+                    # holding an idle socket until the deadline. A still-live run keeps tailing.
+                    if not _run_live():
+                        if gone_since is None:
+                            gone_since = time.time()
+                        elif time.time() - gone_since > 2.0:
+                            break
+                    time.sleep(0.5)
             except (BrokenPipeError, ConnectionResetError):
                 pass  # client went away
             finally:
