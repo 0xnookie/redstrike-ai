@@ -146,6 +146,26 @@ body {
 }
 .dark .tile-ico { border-color: rgb(255 255 255 / 0.12); }
 
+/* small buttons — ghost (text + icon) and icon-only, used by the Site Map chrome */
+.btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: 9999px;
+  border: 1px solid rgb(var(--line));
+  background-color: rgb(var(--card2));
+  color: rgb(var(--muted));
+  font-size: 12px; font-weight: 500; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.btn-ghost:hover { color: rgb(var(--fg)); border-color: rgb(var(--fg) / 0.3); }
+.icon-btn {
+  display: grid; place-items: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid rgb(var(--line));
+  color: rgb(var(--muted));
+  transition: color .15s, border-color .15s;
+}
+.icon-btn:hover { color: rgb(var(--fg)); border-color: rgb(var(--fg) / 0.3); }
+
 /* premium surfaces — hairline top highlight + layered shadow (theme-aware) */
 .surface {
   box-shadow:

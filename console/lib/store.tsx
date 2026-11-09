@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus, ApiEndpoint, JsFile } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus, ApiEndpoint, JsFile, ContentMap } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
   deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
@@ -12,7 +12,7 @@ import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 type Mode = "empty" | "live";
 
 // Each engagement's own findings/chains/services/assets, loaded on demand.
-interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; coverage?: CoverageLedger; cveIntel?: CveIntel; }
+interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; coverage?: CoverageLedger; cveIntel?: CveIntel; content?: ContentMap; hostRaw?: any; }
 const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [], apiEndpoints: [], jsFiles: [] };
 
 const ACTIVE_KEY = "redstrike.activeEngagement";
@@ -39,6 +39,8 @@ interface ConsoleCtx {
   tests: TestRun[];
   coverage: CoverageLedger | undefined;
   cveIntel: CveIntel | undefined;
+  content: ContentMap | undefined;
+  hostRaw: any;
   cveFeed: CveFeed | undefined;
   cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
@@ -86,7 +88,7 @@ function apiEndpointsOf(host: any): ApiEndpoint[] {
 }
 
 /** Assemble a dataset from an engagement's parsed canonical files. */
-function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any): Dataset {
+function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any, contentFile?: any): Dataset {
   let findings: Finding[] = [];
   let chains: AttackChain[] = [];
   if (Array.isArray(cons)) {
@@ -113,7 +115,18 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, in
   }
   const apiEndpoints = apiEndpointsOf(host);
   const jsFiles: JsFile[] = js && Array.isArray(js.files) ? (js.files as JsFile[]) : [];
-  return { findings, chains, services, assets, apiEndpoints, jsFiles, coverage, cveIntel };
+  const content = isContentMap(contentFile) ? (contentFile as ContentMap) : undefined;
+  // keep the raw host_discovery object (hostRaw) too: the Site Map builder reads
+  // web_routes_seen + api_endpoints (type/confirmed) + live_hosts, which the derived
+  // services/assets above intentionally drop.
+  return { findings, chains, services, assets, apiEndpoints, jsFiles, coverage, cveIntel, content, hostRaw: host };
+}
+
+/** Does a parsed object look like content-discovery's content.json? */
+function isContentMap(o: any): boolean {
+  return !!o && typeof o === "object" && !Array.isArray(o) &&
+    (Array.isArray(o.routes) || Array.isArray(o.params_discovered) ||
+      (o.notable_sinks && typeof o.notable_sinks === "object" && !Array.isArray(o.notable_sinks)));
 }
 
 /** Build an Engagement header from a manifest entry (its parsed scope + summary). */
@@ -184,6 +197,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const services = active.services;
   const coverage = active.coverage;
   const cveIntel = active.cveIntel;
+  const content = active.content;
+  const hostRaw = active.hostRaw;
   const apiEndpoints = active.apiEndpoints;
   const jsFiles = active.jsFiles;
   const assets = useMemo(() => {
@@ -201,19 +216,20 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     if (loadedRef.current.has(id)) return;
     loadedRef.current.add(id);
     const base = `/e/${id}`;
-    const [cons, host, chainsFile, cover, intel, js] = await Promise.all([
+    const [cons, host, chainsFile, cover, intel, js, content] = await Promise.all([
       fetchJson(`${base}/findings_consolidated.json`),
       fetchJson(`${base}/host_discovery.json`),
       fetchJson(`${base}/attack_chains.json`),
       fetchJson(`${base}/coverage_ledger.json`),
       fetchJson(`${base}/cve_intel.json`),
       fetchJson(`${base}/js_analysis.json`),
+      fetchJson(`${base}/content.json`),
     ]);
-    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined && intel === undefined && js === undefined) {
+    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined && intel === undefined && js === undefined && content === undefined) {
       loadedRef.current.delete(id); // nothing served (e.g. scaffold-only) — allow a retry later
       return;
     }
-    const ds = datasetFromFiles(cons, host, chainsFile, cover, intel, js);
+    const ds = datasetFromFiles(cons, host, chainsFile, cover, intel, js, content);
     setDatasets((d) => ({ ...d, [id]: ds }));
   }, []);
 
@@ -255,9 +271,13 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         patchActive({ jsFiles: o.files as JsFile[] });
         return "js_analysis";
       }
+      if (isContentMap(o)) {
+        patchActive({ content: o as unknown as ContentMap });
+        return "content_map";
+      }
       if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
         const services = buildServices(o);
-        patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)), apiEndpoints: apiEndpointsOf(o) });
+        patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)), apiEndpoints: apiEndpointsOf(o), hostRaw: o });
         return "host_discovery";
       }
       if (Array.isArray(o.chains)) { patchActive({ chains: o.chains as AttackChain[] }); return "chains"; }
@@ -406,6 +426,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const value: ConsoleCtx = {
     mode, engagements, activeEngagement, activeId, setActiveId,
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, tests, coverage, cveIntel,
+    content, hostRaw,
     cveFeed, cveLive, loadFiles, clearData, reloadEngagements,
     selectedFinding, openFinding, closeFinding,
     selectedHost, openHost, closeHost,

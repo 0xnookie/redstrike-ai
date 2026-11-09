@@ -264,6 +264,31 @@ export interface CveIntel {
   entries?: CveIntelEntry[];
 }
 
+// content-discovery's content.json — the crawl/content map that feeds the Site Map
+// view. One `routes` entry per discovered URL (path + what recon learned about it),
+// plus the mined parameter list and the notable interpreter sinks. The shape is loose
+// by design (recon emits what it found); every field but `path` is optional and the
+// Site Map builder tolerates partial/legacy records.
+export interface ContentRoute {
+  path: string;
+  status?: number;          // HTTP status observed, when the route was actually requested
+  type?: string;            // html · form · json · graphql · graphql-ide · websocket · …
+  methods?: string[];       // verbs seen (defaults to GET when absent)
+  params?: string[];        // parameters this route accepts
+  note?: string;            // recon note ("lists pastes flagged private")
+  js?: string;              // JS origin hint ("importPaste [SSRF-shaped]")
+  introspection?: boolean;  // GraphQL introspection reachable
+}
+export interface ContentMap {
+  engagement?: string;
+  target?: string;          // "host" or "host:port" the crawl was pointed at
+  generated_at?: string;
+  crawl_method?: string;    // how the map was built (tooling / manual note)
+  routes?: ContentRoute[];
+  params_discovered?: string[];
+  notable_sinks?: Record<string, string[]>; // vuln-class -> sink identifiers
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -277,4 +302,5 @@ export interface ConsoleData {
   cveFeed?: CveFeed;
   coverage?: CoverageLedger;
   cveIntel?: CveIntel;
+  content?: ContentMap;
 }
