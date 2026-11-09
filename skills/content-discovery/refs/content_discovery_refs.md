@@ -87,6 +87,22 @@ ffuf -w BackupFiles.txt:FUZZ -u https://HOST/FUZZ -mc 200 -ac   # dedicated back
 Confirming the exposure is here; validating any secret found inside defers to the secrets agent.
 
 ---
+## Extended arsenal — dev-tool & admin-panel paths (always add to the wordlist)
+
+Exposed developer/admin tooling is among the highest-impact dir-brute hits and is often wired at the
+**web-server level** (alias/proxy), so it is absent from application routes and generic lists — add these to
+EVERY custom wordlist, especially on a `*-dev`/`dockware`/docker target:
+```
+/adminer  /adminer.php  /phpmyadmin  /pma  /dbadmin  /mailcatcher  /mailhog  /mailpit  /messages
+/logs  /pimpmylog  /_profiler  /_profiler/phpinfo  /_wdt  /_ignition  /telescope  /horizon  /debug
+/phpinfo.php  /info.php  /server-status  /server-info  /.env  /app_dev.php  /web/app_dev.php
+```
+Once the stack is fingerprinted, add its console (`/admin`, `/wp-admin`, `/administrator`, `/user/login`).
+A hit routes to `exposed-surface` (+ `secrets` for any leaked value). White-box, confirm the full
+alias/proxy map via `source-audit` (Apache `Alias`/`ProxyPass`/`<Location>`, nginx `location`) — it reveals
+tools no brute-force will guess.
+
+---
 ## Extended arsenal — virtual-host & vhost fuzzing
 
 ```

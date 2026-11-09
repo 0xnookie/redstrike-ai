@@ -34,7 +34,8 @@ Produce the in-scope live-host + service inventory. DONE = `checklist.md` `- [x]
     skips with a real reason). DNS-level TRIAGE only — the executor does the HTTP-fingerprint + claimability.
 4. Probe live hosts (status/title/tech) · `httpx -td -sc -title` · `hosts.json`
 5. Port/service scan (scoped, rate-limited; fast sweep → service detail) · `naabu`/`masscan`/`rustscan` → `nmap -sV` · `hosts.json`
-6. Consolidate host map · synth · `host_discovery.json`
+5b. **Local/container discovery** (target is localhost or a local container) — `docker ps` + `docker inspect` for bind-mounts (→ source location, enabling the white-box `source-audit`) and container-internal services (DB/cache/mail/search a host port scan can't see) · `docker` · `host_discovery.json`
+6. Consolidate host map + **emit the tech signal** (`tech:wordpress`/`tech:nextjs`/`tech:shopware`, …) from the host tech fingerprint so the matching framework agent routes; flag a dev-image marker (`X-Debug-Token`/dockware/`*-dev`) for `exposed-surface` · synth · `host_discovery.json`
 7. Emit summary · synth · `summary.md`
 8. /REVIEW SKILL · `review.md`
 

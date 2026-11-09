@@ -26,7 +26,8 @@ Produce the routed source candidate map (dangerous sinks + secret/dep candidates
 - **Structural facts** — routes (read vs state-changing), auth-guards, object-id reads, mass-assignment, writable/exec paths → `structural[]` (the chain reasoner's raw material; a fact is context, not a finding)
 - **Chain candidates** — composed attack chains (technical taint chains + logic/authz chains) routed as an executor SEQUENCE → `chain_candidates[]`; this is the "chain vulns or logics for real impact" output — a LEAD the hunt proves leg-by-leg, never a finding here
 - **Secret candidates** — hardcoded keys/tokens (value redacted) → `secrets`
-- **Dependencies** — manifest libs + versions → `cve-intelligence` / `supply-chain`
+- **Dependencies** — manifest libs + versions; **prefer the LOCKFILE** (`composer.lock`/`package-lock.json`/`yarn.lock`/`Gemfile.lock`/`poetry.lock`) for EXACT pins (a banner/`Server` version is distro-backport-unreliable — the lockfile is ground truth) → `cve-intelligence` / `supply-chain`
+- **Web-server & deploy config** — parse `Alias`/`ProxyPass`/`<Location>` (Apache) and `location`/`proxy_pass` (nginx), plus `.env`/framework config (`APP_ENV`, debug/profiler flags): exposed dev tools + debug mode are **route-level EXPOSURES absent from application code** (→ `exposed-surface`; secret values → `secrets`). A `dockware/*` or `*-dev` image ships them by default — enumerate them here, since no black-box brute-force reliably finds a server alias.
 - **Routing** — executor hints so the right agents fan out
 
 ## Steps  (action · tool · output)
