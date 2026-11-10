@@ -76,3 +76,15 @@ stealth/rate cap it outranks brute-force. **Before** leaning on a wordlist, pull
   real surface than a long scan, and stays WAF-safe. Ask for / import their sitemap rather than re-deriving it.
 
 A host is **not** "mapped" until the proxy sitemap has been mined — see `content-discovery` §coverage.
+
+## 8. Sanity: did the proxy actually REACH it? (don't trust proxy output blindly)
+A proxy can answer *for* an upstream it could not reach — Burp returns its own **"Burp Suite" landing/error
+page** (often HTTP 200) when it can't connect (DNS failure, internal-only host, refused), and a transparent
+proxy may serve a captive/error page. Taken at face value this **corrupts discovery**: an unreachable host
+reads back as "200 + content". So **validate the transport before trusting a response**:
+- A 2xx whose body is the *proxy's own* page (title "Burp Suite", a generic proxy error, a captive portal)
+  is **not** the target — treat the host as **unreachable**, not live.
+- When a result looks surprising (every host "200", a tech fingerprint that doesn't fit), **cross-check one
+  host DIRECT** (no proxy). Direct-fails + proxy-"200" = the proxy is answering, not the host.
+- The proxy is the spine for reachable, in-scope hosts; it is **not** a way to reach a host your own client
+  can't — if direct and proxy both fail, the host is internal/blocked (record it as such, don't fabricate).

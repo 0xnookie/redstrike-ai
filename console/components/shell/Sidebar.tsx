@@ -7,6 +7,8 @@ import {
   Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
+import { useConsole } from "@/lib/store";
+import { reportable } from "@/lib/stats";
 import { EngagementSwitcher } from "./EngagementSwitcher";
 
 interface NavItem { href: string; label: string; icon: LucideIcon; }
@@ -45,8 +47,26 @@ export function Logo() {
   );
 }
 
+// live nav counts derived from the loaded engagement data (mirrors dashboard.html's updateNav).
+// Per-engagement counts reflect the ACTIVE engagement; engagements is the full list. 0 => no badge.
+function useNavBadges(): Record<string, number> {
+  const { engagements, findings, chains, assets, content, notebook, cveIntel } = useConsole();
+  const activeLeads = (notebook?.leads ?? []).filter((l) => l.status === "open" || l.status === "testing").length;
+  const cves = (cveIntel?.cves ?? cveIntel?.entries ?? []).length;
+  return {
+    "/engagements": engagements.length,
+    "/findings": reportable(findings).length,
+    "/chains": chains.length,
+    "/assets": assets.length,
+    "/sitemap": content?.routes?.length ?? 0,
+    "/notebook": activeLeads,
+    "/cve-intel": cves,
+  };
+}
+
 export function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const badges = useNavBadges();
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
@@ -64,6 +84,7 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
               {g.items.map((it) => {
                 const active = isActive(it.href);
                 const Icon = it.icon;
+                const count = badges[it.href] ?? 0;
                 return (
                   <li key={it.href}>
                     <Link
@@ -75,7 +96,17 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
                       )}
                     >
                       <Icon size={17} className={active ? "text-brand" : ""} />
-                      {it.label}
+                      <span className="flex-1 truncate">{it.label}</span>
+                      {count > 0 && (
+                        <span
+                          className={cx(
+                            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-mono leading-none tabular-nums",
+                            active ? "bg-brand/15 text-brand" : "bg-card2 text-faint"
+                          )}
+                        >
+                          {count}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );
