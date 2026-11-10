@@ -19,10 +19,11 @@ const MM_ST: Record<string, { label: string; c: string; sub: string }> = {
   auth: { label: "Login wall", c: "#f59e0b", sub: "401 · 403" },
   error: { label: "Error", c: "#f97316", sub: "4xx · 5xx" },
   takeover: { label: "Takeover risk", c: "#ef4444", sub: "dangling CNAME" },
-  dead: { label: "No response", c: "#5f5f5f", sub: "no HTTP answer" },
-  skip: { label: "Not probed", c: "#8f8f8f", sub: "out of scope" },
+  enum: { label: "Enumerated", c: "#64748b", sub: "found, not probed" },
+  dead: { label: "No response", c: "#5f5f5f", sub: "probed, no answer" },
+  skip: { label: "Out of scope", c: "#8f8f8f", sub: "not tested" },
 };
-const MM_ST_ORDER = ["live", "redirect", "auth", "error", "takeover", "dead", "skip"];
+const MM_ST_ORDER = ["live", "redirect", "auth", "error", "takeover", "enum", "dead", "skip"];
 const MM_NET: Record<string, { label: string; sub: string }> = {
   colo: { label: "Hosting / colo", sub: "public IPv4" },
   cloud: { label: "Cloud", sub: "cloud IP" },

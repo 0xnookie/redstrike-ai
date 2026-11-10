@@ -44,10 +44,12 @@ function netOf(ip: string): string {
   return "vendor"; // a CNAME / hostname target
 }
 
-/** Map an HTTP status (+ scope) to a status bucket — mirrors the dashboard's classifier. */
-function statusBucket(http: number | null, scope: string, out: boolean): string {
+/** Map an HTTP status (+ scope + whether we probed it) to a status bucket — mirrors the
+ *  dashboard's classifier, plus an `enum` bucket for hosts enumerated (e.g. from CT) but
+ *  never probed, so they read honestly instead of as "No response". */
+function statusBucket(http: number | null, scope: string, out: boolean, probed: boolean): string {
   if (scope === "takeover") return "takeover";
-  if (http == null) return out ? "skip" : "dead";
+  if (http == null) return out ? "skip" : probed ? "dead" : "enum";
   if (http < 300) return "live";
   if (http < 400) return "redirect";
   if (http === 401 || http === 403) return "auth";
@@ -108,11 +110,12 @@ export function buildSubdomainData(
     const dom = apexFor(host, scopeApexes);
     const rel = host === dom ? "@" : host.endsWith("." + dom) ? host.slice(0, -(dom.length + 1)) : host;
     const out = scope === "out";
+    const probed = /host-discovery|probe/i.test(src);
     const rec: MMRecord = {
       host, rel, dom,
       net: netOf(resolved),
       http,
-      st: statusBucket(http, scope, out),
+      st: statusBucket(http, scope, out, probed),
       out,
       src: src || "recon",
       ip: resolved,
@@ -139,7 +142,7 @@ export function buildSubdomainData(
   for (const a of assets) {
     if (a.kind !== "subdomain" && a.kind !== "ip" && a.kind !== "domain") continue;
     const note = a.note || (a.tech && a.tech.length ? a.tech.join(" · ") : a.title || a.server);
-    add(a.value, typeof a.status === "number" ? a.status : null, a.scope === "out" ? "out" : "in", a.server || "host-discovery", "", note);
+    add(a.value, typeof a.status === "number" ? a.status : null, a.scope === "out" ? "out" : "in", "host-discovery", "", note);
   }
 
   const counts = new Map<string, number>();
