@@ -47,6 +47,17 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`authz_context.json` validate
 - **Phase 1 (generic):** identity load + object-reference enumeration.
 - **Phase 2 (target-specific):** role matrix + mass-assign discovery + consolidation.
 
+## Identity requirements — scope them UP FRONT (a test account's *level* caps what's testable)
+BAC/IDOR needs ≥2 identities — but also the **right level**. The sensitive surface is often gated behind a
+**verified identity** (eID / ID-Austria / KYC / an entitlement a basic self-serve account lacks), and a
+**server-side-scoped** API (it resolves objects from the *session*, not from a client-supplied id) has **no
+id-swap surface to IDOR at all** — the only real test is cross-account with a *second* account of the needed
+level. So before promising an IDOR/BAC hunt, state what identities it actually needs: how many, which
+roles/tenants, and **what verification level** — and flag when a surface is **untestable** without
+operator-provisioned verified identities (a researcher usually can't self-provision eID, and email
+verification blocks self-registering a throwaway). Record this in `authz_context.json` (e.g. an
+`identity_requirements` note) so the gap is explicit, not discovered mid-hunt.
+
 ## Safety
 Enumeration/crawl only (no cross-account access yet — that's the variants, with care). Use TEST
 accounts; scope-gate; audit-log. Don't access another account's data during mapping.
