@@ -214,9 +214,18 @@ def aggregate_recon(eng: Path) -> tuple[dict, list]:
     if isinstance(o, dict):
         sources["osint"] = str(oj)
         for s in o.get("subdomains", []) or []:
-            host = s if isinstance(s, str) else (s.get("host") if isinstance(s, dict) else None)
-            if host:
-                subs.append({"host": host, "source": "osint", "scope": "other"})
+            if isinstance(s, str):
+                subs.append({"host": s, "source": "osint", "scope": "other"})
+            elif isinstance(s, dict) and s.get("host"):
+                row = {"host": s["host"], "source": s.get("source", "osint"),
+                       "scope": s.get("scope", "other")}
+                if s.get("http_status") is not None:
+                    row["http_status"] = s["http_status"]
+                if s.get("resolves_to"):
+                    row["resolves_to"] = s["resolves_to"]
+                if s.get("note"):
+                    row["note"] = s["note"]
+                subs.append(row)
         for d in o.get("dns", []) or []:
             if isinstance(d, dict):
                 dns.append(d)
@@ -282,6 +291,22 @@ def aggregate_recon(eng: Path) -> tuple[dict, list]:
                               "host": "", "path": cand.get("route", ""),
                               "hypothesis": cand.get("snippet", "source-audit taint candidate (static, unproven)."),
                               "discovered_by": "source-audit"})
+
+    # dedupe subdomains by host — the richer record wins, so a probed host-discovery
+    # row keeps its status/tech over a bare CT/osint enumeration of the same name.
+    def _rich(r: dict) -> int:
+        return ((r.get("http_status") is not None)
+                + bool(r.get("resolves_to")) + bool(r.get("note"))
+                + (r.get("scope") not in (None, "", "other"))
+                + (r.get("source") == "host-discovery"))  # a probed row beats a bare CT twin
+    dedup: dict = {}
+    for r in subs:
+        host = str(r.get("host") or "").strip().lower()
+        if not host:
+            continue
+        if host not in dedup or _rich(r) > _rich(dedup[host]):
+            dedup[host] = r
+    subs = list(dedup.values())
 
     recon = {"subdomains": subs, "dns": dns, "network": net, "content": content,
              "defenses": defenses, "osint": osint, "sources": sources}
