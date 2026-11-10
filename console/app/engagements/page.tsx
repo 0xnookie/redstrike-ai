@@ -213,7 +213,7 @@ function EngagementDetail({
     <Panel tall className="lg:col-span-3">
       <PanelHeader
         title={e.name}
-        sub={`${e.id} · ${e.authorized_by}`}
+        sub={e.id}
         actions={
           <>
             <Pill label={st.label} color={st.color} dot />
@@ -233,6 +233,11 @@ function EngagementDetail({
           <span>target {e.target}</span>
           <span>window {fmtDate(e.window.start)} → {fmtDate(e.window.end)}</span>
         </div>
+        {e.authorized_by && (
+          <div className="mt-1 truncate font-mono text-[11px] text-faint" title={e.authorized_by}>
+            authorized {e.authorized_by}
+          </div>
+        )}
 
         {/* live run steering */}
         <div className="mt-5">
