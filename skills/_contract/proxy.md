@@ -60,3 +60,19 @@ Secrets are redacted on export; the raw proxy project stays local (never committ
 ## 6. Scope + audit convergence
 Generate the proxy's scope from `scope.yaml` so the transport layer and the scope gate **agree** (one scope,
 two enforcement points). Every exchange is appended to the immutable engagement audit log §`roe-gate.md`.
+
+## 7. Mine it as discovery (sitemap-first, before you brute-force)
+The connected proxy's **Sitemap/History is a primary discovery source, not just an evidence store** — and
+the cheapest one: it costs **zero extra requests** (it is traffic that already happened), so under a
+stealth/rate cap it outranks brute-force. **Before** leaning on a wordlist, pull what the proxy already saw:
+- A wordlist only finds paths you *thought to guess*; the sitemap holds the paths the app **actually
+  loaded** — sub-apps, SPA mounts, API bases, embedded third-party widgets — that no generic list contains.
+  (Field lesson: a whole second app on an in-scope host was invisible to a 140-word list and sat in plain
+  view in the proxy sitemap.)
+- `proxy-context` must **ingest the Sitemap/History first** and seed `content.json routes[]` + the
+  `content-discovery` wordlist from it; brute-force then *extends* that real surface instead of guessing it
+  cold. Treat every distinct path prefix in the sitemap as a **mount to recurse into** (§`content-discovery`).
+- Keep the human browsing in the loop: a few minutes of operator browse-through the proxy enumerates more
+  real surface than a long scan, and stays WAF-safe. Ask for / import their sitemap rather than re-deriving it.
+
+A host is **not** "mapped" until the proxy sitemap has been mined — see `content-discovery` §coverage.
