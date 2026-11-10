@@ -10,18 +10,21 @@ import { COVERAGE, SEVERITY } from "@/lib/theme";
 import { Kpi, Pill, Dot, ViewHead, Panel, PanelHeader, PanelBody, Segmented } from "@/components/ui/primitives";
 import { Progress } from "@/components/ui/charts";
 import { AssetMap } from "@/components/AssetMap";
+import { SubdomainMap } from "@/components/SubdomainMap";
+import { buildSubdomainData } from "@/lib/subdomainMap";
 
 const KIND_LABEL: Record<AssetKind, string> = {
   domain: "Domain", subdomain: "Subdomain", ip: "IP", cidr: "CIDR", service: "Service", endpoint: "Endpoint",
 };
 
 export default function AssetsPage() {
-  const { activeEngagement: eng, assets, services, findings, setFindingsQuery, openHost, openEndpoint } = useConsole();
+  const { activeEngagement: eng, assets, services, findings, notebook, setFindingsQuery, openHost, openEndpoint } = useConsole();
   const router = useRouter();
   const openHostFindings = (host: string) => { setFindingsQuery(host); router.push("/findings"); };
   // endpoint rows open the endpoint drawer; everything else opens the host drawer
   const openAsset = (a: Asset) => (a.kind === "endpoint" ? openEndpoint(a.value) : openHost(a.value));
 
+  const [assetMode, setAssetMode] = useState<"inventory" | "map">("inventory");
   const [kind, setKind] = useState<AssetKind | "all">("all");
   const [assetQuery, setAssetQuery] = useState("");
   const [svcQuery, setSvcQuery] = useState("");
@@ -99,6 +102,13 @@ export default function AssetsPage() {
   const scopeList = (arr: string[], color: string) =>
     arr.length ? arr.map((d) => <Pill key={d} label={d} color={color} dot />) : <span className="text-xs text-muted">—</span>;
 
+  // subdomain-map data (notebook recon_intel + host-discovery assets), built once
+  const mapData = useMemo(() => buildSubdomainData(notebook, assets, services, findings, eng), [notebook, assets, services, findings, eng]);
+  const mapAnswering = mapData.records.filter((r) => r.http != null).length;
+  const mapAuthWall = mapData.records.filter((r) => r.st === "auth").length;
+  const mapTakeover = mapData.records.filter((r) => r.st === "takeover").length;
+  const mapAnswerPct = mapData.records.length ? Math.round((mapAnswering / mapData.records.length) * 100) : 0;
+
   return (
     <>
       <ViewHead
@@ -106,8 +116,37 @@ export default function AssetsPage() {
         title="Assets"
         live={eng.status === "running"}
         sub={`${eng.name} · auth window ${fmtDate(eng.window.start)} → ${fmtDate(eng.window.end)} · ${inScope.length} in scope`}
+        actions={
+          <Segmented
+            value={assetMode}
+            onChange={setAssetMode}
+            options={[
+              { value: "inventory", label: "Inventory" },
+              { value: "map", label: "Subdomain map" },
+            ]}
+          />
+        }
       />
 
+      {assetMode === "map" ? (
+        <>
+          {/* subdomain-map KPIs */}
+          <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+            <Kpi label="Subdomains" value={mapData.records.length} icon={<Globe size={16} />} note={`under ${mapData.rootDomain}`} />
+            <Kpi label="Answering HTTP" value={mapAnswering} icon={<Radio size={16} />} note={`${mapAnswerPct}% of hosts`} />
+            <Kpi label="Login wall" value={mapAuthWall} icon={<ShieldCheck size={16} />} note="401 / 403 gated" />
+            <Kpi label="Takeover risk" value={mapTakeover} color={mapTakeover ? SEVERITY.critical.color : undefined} icon={<ShieldAlert size={16} />} note={mapTakeover ? "dangling records" : "none found"} />
+          </div>
+          <div className="mt-5">
+            {mapData.records.length ? (
+              <SubdomainMap records={mapData.records} domains={mapData.domains} rootDomain={mapData.rootDomain} onSelectHost={openHost} />
+            ) : (
+              <Panel><div className="py-16 text-center text-sm text-muted">No subdomains discovered yet — run host-discovery or populate the notebook&apos;s recon intel.</div></Panel>
+            )}
+          </div>
+        </>
+      ) : (
+      <>
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
         <Kpi label="Assets" value={assets.length} icon={<Network size={16} />} note={`${inScope.length} in scope`} />
@@ -274,6 +313,8 @@ export default function AssetsPage() {
           </PanelBody>
         </Panel>
       </div>
+      </>
+      )}
     </>
   );
 }
