@@ -15,6 +15,7 @@ there is **no bundled demo data**.
 | `/findings` | **Findings** | Filterable/sortable table + full detail drawer (CVSS, mappings, reproduction, evidence, remediation, reviewer verdict) |
 | `/chains` | **Attack chains** | Kill-chain flow graph composed from accepted findings |
 | `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, force-directed coverage map, asset table, and **open ports & services** from host discovery |
+| `/notebook` | **Notebook** | What an engagement gathers that isn't a finding yet: investigative leads (open→testing→promoted/dead), recon intel (subdomains/DNS/network/defenses/OSINT), the evidence locker, RoE and test accounts; export to Markdown |
 | `/activity` | **Activity** | Execution timeline derived from each finding's reviewer record (findings → reviews) |
 | `/control` | **Control plane** | *(opt-in)* Launch & steer an engagement: scaffold/pick, run autonomously, watch the live event stream, approve deferrals. Needs `scripts/console_control.py` |
 | `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier; per-skill produced/accepted counts derived from the loaded findings |
@@ -32,6 +33,7 @@ files under `/e/<id>/…` — the console lazy-loads the one you select. Per eng
 - **`host_discovery.json`** (host-discovery) — `{ live_hosts: [...], api_endpoints: [...] }` → the Assets map + **Ports & services** table.
 - **`chains.json`** (attack-chain-discovery) — `{ chains: [{ steps: [...] }] }` → the **Attack chains** graph (served as `/attack_chains.json`).
 - **`scope.yaml`** (engagement root) — scope / rules / window → the **Scope** panel (the launcher converts it to `scope.json`).
+- **`notebook.json`** (notebook / `scripts/notebook.py`) — `{ leads: [...], recon_intel: {...}, evidence: [...], roe: {...}, test_accounts: [...] }` → the **Notebook** view. "What isn't a finding yet": leads cross-link findings (`promoted_to` → `finding.id`) and the surface ledger; recon_intel aggregates the recon feeders. Cross-references the ledgers rather than duplicating them.
 
 Agents stats and the activity timeline have no dedicated file — the console **derives** them from each
 finding's `review.reviewer` + `review.reviewed_at`.

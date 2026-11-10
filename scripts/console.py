@@ -21,6 +21,7 @@ serves them under per-engagement routes the console fetches on open:
   host_discovery.json         (host-discovery)          -> /e/<id>/host_discovery.json
   content.json                (content-discovery)       -> /e/<id>/content.json
   http_history.json           (proxy-context)           -> /e/<id>/http_history.json
+  notebook.json               (notebook)                -> /e/<id>/notebook.json
   chains.json                 (attack-chain-discovery)  -> /e/<id>/attack_chains.json
   scope.yaml / scope.json     (engagement root)         -> /e/<id>/scope.json
 
@@ -55,6 +56,7 @@ WANTED = {
     "cve_intel.json": ["cve_intel.json"],
     "content.json": ["content.json"],
     "http_history.json": ["http_history.json"],
+    "notebook.json": ["notebook.json"],
     "scope.json": ["scope.json"],
 }
 

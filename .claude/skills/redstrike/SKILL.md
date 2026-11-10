@@ -46,6 +46,15 @@ gap. **The gate is strict:** once a report exists, `verify_completion.py` hard-f
 MISSING, empty-but-present, or still has untested routed surface — so emitting it is not optional. See
 `skills/_contract/surface-ledger.md`.
 
+**After recon, also build the engagement notebook — every engagement:** `python scripts/notebook.py --plan
+--engagement <dir>` aggregates the recon intel (subdomains, DNS, network, content) + seeds leads (source-audit
+candidates, dangling DNS, the re-convergence inbox), and write the **RoE + test accounts** into it at scope
+time. Where the ledgers answer *"did we cover this?"*, the notebook answers *"what did we learn and what are we
+chasing?"* — leads (open→testing→`promoted`/`dead`-with-verdict), evidence, RoE, accounts. As the hunt runs,
+mark each lead (`notebook.py --mark L-<n> --status promoted --finding RS-… | --status dead --verdict …`). It is
+the one artifact that makes a **zero-finding engagement legible** (the recon + the killed leads still show in
+the console). Gate is **soft** — encouraged, never fails. See `skills/_contract/notebook.md`.
+
 **Host-discovery MUST persist `<engagement>/host-discovery/host_discovery.json`** (the structured
 `{live_hosts, api_endpoints}` map) — even for a single in-scope host. It is what populates the console's
 Assets/Ports views; a recon pass that only saves pages + `signals.json` leaves them empty, and the

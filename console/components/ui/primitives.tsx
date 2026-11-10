@@ -31,7 +31,7 @@ export function PanelHeader({
       <div className="flex min-w-0 items-center gap-2.5">
         {icon}
         <span className="truncate text-[15px] font-medium text-fg-strong">{title}</span>
-        {sub && <span className="shrink-0 font-mono text-xs text-faint">{sub}</span>}
+        {sub && <span className="min-w-0 shrink truncate font-mono text-xs text-faint">{sub}</span>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
     </div>

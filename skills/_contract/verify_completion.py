@@ -389,6 +389,40 @@ def _surface_warnings(eng: Path) -> list:
     return []
 
 
+def _try_import_notebook():
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "notebook.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_notebook", p)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rs_notebook"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def _notebook_warnings(eng: Path) -> list:
+    """SOFT, always (never a hard gate). The engagement notebook (leads + recon intel + evidence + RoE +
+    test accounts) makes a zero-finding hunt legible — it is encouraged, not mandatory, so this only ever
+    warns, even once a report exists. Validates the notebook when present; nudges to emit it when absent."""
+    nb_path = eng / "notebook.json"
+    if not nb_path.is_file():
+        return ["no notebook.json — recon intel + leads aren't captured, so a zero-finding hunt looks "
+                "empty in the console (run scripts/notebook.py --plan --engagement <dir>). Soft — never fails."]
+    mod = _try_import_notebook()
+    if not mod:
+        return []
+    try:
+        nb = mod.load(eng)
+        ok, msgs = mod.validate(nb, mod._finding_ids(eng))
+        return [] if ok else [f"notebook.json: {m}" for m in msgs]
+    except Exception:
+        return []
+
+
 def _try_import_reconverge():
     try:
         import importlib.util
@@ -713,6 +747,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
                             "Run host-discovery / emit <eng>/host-discovery/host_discovery.json.")
+    # Notebook (leads + recon intel + evidence + RoE + accounts): SOFT always — makes a zero-finding hunt
+    # legible; encouraged, never a hard gate (keeps engagements predating the notebook passing).
+    top_warnings.extend(_notebook_warnings(eng))
 
     findings, source = _discover_engagement_findings(eng)
     if findings is None:
