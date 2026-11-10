@@ -42,7 +42,9 @@ stays in the Tier-1 skill.)
    recall: re-run the sink with a different payload set (and, where available, a different model) and
    de-dupe at report — different seeds surface different bugs.
 6. **Triage / de-dupe** — drop duplicates (program known issues + internal); keep `accepted` + in-scope +
-   non-duplicate only.
+   non-duplicate only. Maintain the engagement **notebook** for your class (`_contract/notebook.md`):
+   `notebook.py --plan` after recon, then mark each lead `--status promoted --finding RS-…` or `--status dead
+   --verdict …` so the hunt's full trail (incl. a zero-finding run) stays legible.
 7. **Package** — `reporting` + per-finding submission drafts in `submissions/`, each meeting
    `bug-bounty/refs/report_quality.md`. Submitting is outward-facing → DRAFTS a human sends.
 

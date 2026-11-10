@@ -320,6 +320,72 @@ export interface HttpHistory {
   exchanges?: HttpExchange[];
 }
 
+// notebook.json (scripts/notebook.py / skills/_contract/notebook.schema.json) — "what an
+// engagement gathers that isn't a finding yet": investigative leads (open→testing→promoted/dead),
+// aggregated recon intel, the evidence locker, RoE, and test accounts. Cross-links the ledgers +
+// findings (a promoted lead carries the RS- finding id) rather than duplicating them. Loose by design
+// — every field but the few noted is optional; the view tolerates partial/missing sections.
+export type LeadStatus = "open" | "testing" | "promoted" | "dead";
+export interface NotebookLead {
+  id: string;
+  status: LeadStatus;
+  priority?: number;            // 1 (highest) .. 3
+  title: string;
+  host?: string;
+  path?: string;
+  owner?: string;
+  hypothesis?: string;
+  observations?: string[];
+  next_steps?: string[];
+  verdict?: string;             // present on `dead` (why it was closed)
+  surface_ref?: string;         // -> surface_ledger.surfaces[].id
+  promoted_to?: string;         // -> finding.id (RS-YYYY-NNN), present on `promoted`
+  related?: string[];           // related finding ids
+  discovered_by?: string;
+  updated_at?: string;
+}
+export type ScopeTag = "in" | "out" | "takeover" | "other";
+export interface NotebookSub { host: string; source?: string; resolves_to?: string; http_status?: number; scope?: ScopeTag; note?: string; }
+export interface NotebookDns { type: string; name: string; value: string; note?: string; severity?: string; }
+export interface NotebookNet { range: string; owner?: string; hosts?: string; ports?: string[]; note?: string; }
+export interface NotebookContentRow { path: string; status?: number; type?: string; methods?: string[]; params?: string[]; note?: string; }
+export interface NotebookDefense { control: string; where?: string; observed?: string; effect?: string; kind?: "block" | "gap" | "detect"; }
+export interface NotebookOsint { source: string; fact: string; use?: string; }
+export interface NotebookReconIntel {
+  subdomains?: NotebookSub[];
+  dns?: NotebookDns[];
+  network?: NotebookNet[];
+  content?: NotebookContentRow[];
+  defenses?: NotebookDefense[];
+  osint?: NotebookOsint[];
+  sources?: Record<string, string>; // aggregated-from artifact paths
+}
+export interface NotebookEvidence { id?: string; name: string; kind?: string; size?: number; finding_id?: string; by?: string; captured_at?: string; sha256?: string; }
+export interface NotebookRoeRule { allowed: boolean; text: string; }
+export interface NotebookRoe {
+  approach?: string;
+  authorization?: string;
+  window?: { from?: string; to?: string };
+  in_scope?: string[];
+  out_of_scope?: string[];
+  rate_limit?: number | string;
+  rules?: NotebookRoeRule[];
+  contacts?: { label: string; value: string }[];
+  egress?: string[];
+}
+export type AccountStatus = "active" | "expired" | "pending" | "retired";
+export interface NotebookAccount { id: string; tenant?: string; role?: string; identity?: string; auth?: string; used_on?: string; status?: AccountStatus; used_for?: string; }
+export interface Notebook {
+  engagement?: string;
+  target?: string;
+  generated_at?: string;
+  leads?: NotebookLead[];
+  recon_intel?: NotebookReconIntel;
+  evidence?: NotebookEvidence[];
+  roe?: NotebookRoe;
+  test_accounts?: NotebookAccount[];
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -335,4 +401,5 @@ export interface ConsoleData {
   cveIntel?: CveIntel;
   content?: ContentMap;
   history?: HttpHistory;
+  notebook?: Notebook;
 }

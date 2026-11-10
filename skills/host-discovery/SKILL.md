@@ -9,7 +9,7 @@
 - **TOOLS:** `subfinder`/`amass`/`fierce`/`dnsenum`, `dnsx`, `httpx`, `naabu`/`masscan`/`rustscan`/`nmap` (scoped), `httpx -td`. Tool-first — `_contract/tooling.md`.
 - **GOAL:** Produce the live-host inventory — in-scope subdomains, which are live (http/https), open ports/services, and host-level tech — so content-discovery + js-analysis know where to look. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `subdomains.txt`, `hosts.json`, `host_discovery.json`, `dangling_dns.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `scope.yaml` (in-scope domains/cidrs) + `<engagement>/osint/osint.json` (passive subs). `refs/` = `host_discovery_refs.md`. Chains FROM `osint`; chains TO `content-discovery`, `js-analysis`.
+- **DATA / RAG:** inputs = `scope.yaml` (in-scope domains/cidrs) + `<engagement>/osint/osint.json` (passive subs). `refs/` = `host_discovery_refs.md`. Chains FROM `osint`; chains TO `content-discovery`, `js-analysis`, and the **notebook** (host/network `recon_intel`; `dangling_dns.json` → subdomain-takeover **leads** — aggregated by `scripts/notebook.py --plan`).
 - **DECOMPOSITION:** n/a (recon feeder).
 
 ## Goal
