@@ -12,6 +12,7 @@ import { useEffect, useRef } from "react";
 import { Plus, Minus, Maximize2, ChevronsUpDown, ChevronsDownUp } from "lucide-react";
 import type { MMRecord } from "@/lib/subdomainMap";
 import { SEVERITY } from "@/lib/theme";
+import { Select } from "@/components/ui/primitives";
 
 const MM_ST: Record<string, { label: string; c: string; sub: string }> = {
   live: { label: "Live", c: "#22c55e", sub: "2xx" },
@@ -714,11 +715,7 @@ export function SubdomainMap({ records, domains, rootDomain, onSelectHost }: Sub
       {/* control bar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {domains.length > 1 && (
-          <select
-            data-mm="domain"
-            aria-label="Root domain"
-            className="mm-dom h-9 rounded-full border border-line bg-card2 px-3 text-sm text-fg outline-none focus:border-fg/40"
-          />
+          <Select data-mm="domain" aria-label="Root domain" wrapperClassName="mm-dom" />
         )}
         <div data-mm="group" role="group" aria-label="Group subdomains by" className="inline-flex rounded-full border border-line bg-card2 p-0.5">
           {[
