@@ -42,6 +42,15 @@
   color-scheme: dark;
 }
 
+/* Native dropdown list → the design tokens (dashboard parity: dark options in dark mode).
+   color-scheme (set per theme above) themes the control chrome; this pins the <option>
+   list so every <select> in the console matches in both themes instead of a browser default. */
+select option,
+select optgroup {
+  background: rgb(var(--card));
+  color: rgb(var(--fg));
+}
+
 * {
   border-color: rgb(var(--line));
 }
