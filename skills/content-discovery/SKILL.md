@@ -22,6 +22,21 @@ Produce the content map + a target-specific wordlist. DONE = `checklist.md` `- [
 - Brute-forced directories/files (with the custom + a standard list)
 - Discovered parameters (from crawl + active mining)
 
+## Discover smart, not loud (do this BEFORE mega-list brute-force)
+Brute-force is the *last*, noisiest rung — and it only finds paths you guessed. Three higher-yield,
+lower-noise sources come first (they matter double under a stealth/rate cap):
+1. **Proxy sitemap/history** (`_contract/proxy.md` §7) — real traffic reveals mounts/sub-apps/API bases a
+   wordlist can't guess, at **zero extra requests**. Ingest it first; seed `routes[]` + the wordlist from it.
+2. **Build/deploy artifacts** that enumerate the app in a handful of requests — check for each explicitly:
+   `asset-manifest.json` / `manifest.json` (SPA build → every chunk + page), `**/*.js.map` source maps
+   (→ full source + routes, via `js-analysis`), **directory listings / index pages**, `robots.txt`,
+   `sitemap.xml`, `/.well-known/` (incl. `openid-configuration`), and framework JSON error shapes (fingerprint
+   the backend). One `asset-manifest.json` can map an entire embedded app that no wordlist contains.
+3. **Recurse into every discovered mount.** A newly-found path prefix (a sub-app, an SPA mount, an embedded
+   third-party **widget/chatbot**, an API base) is a **new discovery root** — crawl it, pull *its*
+   manifests/source-maps, and wordlist it. Do not stop at the top level; the interesting app is often one the
+   host embeds, not the one it is.
+
 ## Steps  (action · tool · output)
 1. Ingest live hosts + osint terms · `jq host_discovery.json` + `terms.txt` · (seed)
 2. Crawl each live host (passive + JS-aware) · `katana -jc`/`hakrawler` · `crawl.txt`
@@ -79,3 +94,12 @@ list is parsed tolerantly, but prefer the `routes[]` record above.
 Active crawling + brute-forcing — **rate-limit** (respect `scope.yaml` `rate_limit_rps`); in-scope hosts
 only; no aggressive threading that could disrupt; honor `no_dos`. Prefer the custom wordlist (fewer, smarter
 requests) over mega-lists on prod. Audit-log.
+
+## Coverage — a host is not "mapped" (and never "exhausted") until:
+A premature "host mapped / nothing left / hardened" is the costly failure here — it ends the hunt on the
+*linked* surface and misses embedded apps. Do **not** emit that verdict until, for each live host:
+(1) the **proxy sitemap** was mined (`proxy.md` §7); (2) **build artifacts** were checked — `asset-manifest`,
+source maps, directory listings, `robots`/`sitemap`/`.well-known` (above); (3) real content-discovery tools
+actually **ran** (not a hand-typed list, and not from a shell where they only *appeared* missing —
+`tooling.md` §Preflight); and (4) **every discovered mount was recursed into**. Honest negatives are fine
+*after* that bar; a negative before it is a coverage gap, not a result.
