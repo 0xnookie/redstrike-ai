@@ -182,6 +182,37 @@ export interface JsFile {
   bytes?: number | null;
 }
 
+// JS Recon — the js-analysis skill's FINDINGS, parsed from each out/<site>/findings/*.jsonl
+// into /e/<id>/js_recon.json by scripts/console.py (see js_recon_report). Every row shape is
+// loose by design (recon emits what it found); the view tolerates partial/legacy records and
+// the extra enrichment fields the skill may add (kind/guard/category/origin_check/provider_meta).
+// Secrets arrive already redacted at the source (match_redacted) — the console never sees raw.
+export type JsEndpointState = "live" | "historical" | "unauthed" | string;
+export interface JsEndpoint { url: string; method?: string; source_file?: string; line?: number; state?: JsEndpointState; kind?: string; guard?: string; }
+export interface JsParam { name: string; context?: string; source_file?: string; line?: number; likely_vuln?: boolean; kind?: string; }
+export interface JsApi { path: string; group?: string; version?: string; method?: string; source_file?: string; }
+export interface JsSecret { type: string; match_redacted?: string; entropy?: number; source_file?: string; line?: number; severity?: string; provider_meta?: string; }
+export interface JsGadget { sink: string; snippet?: string; source_file?: string; line?: number; category?: string; origin_check?: string; }
+export interface JsLibrary { name: string; version?: string; cves?: string[]; source_file?: string; }
+export interface JsReconSite {
+  site: string;
+  endpoints?: JsEndpoint[];
+  params?: JsParam[];
+  apis?: JsApi[];
+  secrets?: JsSecret[];
+  gadgets?: JsGadget[];
+  libraries?: JsLibrary[];
+  counts?: Record<string, number>;      // total valid rows per stream (may exceed the rows shown)
+  truncated?: Record<string, boolean>;  // stream -> true when counts > rows returned
+  summary_md?: string;                  // analysis/site-summary.md, verbatim
+  has_report?: boolean;                 // report.md exists for this site
+}
+export interface JsRecon {
+  sites: JsReconSite[];
+  totals?: Record<string, number>;
+  site_count?: number;
+}
+
 // A discrete pentest run — feeds the Testing Activity heatmap + the Recent Tests list.
 export type TestStatus = "running" | "completed" | "failed" | "queued";
 export interface TestRun {

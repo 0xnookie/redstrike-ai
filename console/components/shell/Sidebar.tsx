@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Target, Bug, Workflow, Network, Activity, Share2,
-  Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, PlugZap, type LucideIcon,
+  Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, PlugZap, FileCode2, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { useConsole } from "@/lib/store";
@@ -23,6 +23,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { href: "/chains", label: "Attack chains", icon: Workflow },
       { href: "/assets", label: "Assets & scope", icon: Network },
       { href: "/sitemap", label: "Site map", icon: ListTree },
+      { href: "/js-recon", label: "JS Recon", icon: FileCode2 },
       { href: "/notebook", label: "Notebook", icon: NotebookPen },
       { href: "/cve-intel", label: "CVE intel", icon: ShieldAlert },
       { href: "/orchestration", label: "Orchestration", icon: Share2 },
@@ -52,7 +53,7 @@ export function Logo() {
 // live nav counts derived from the loaded engagement data (mirrors dashboard.html's updateNav).
 // Per-engagement counts reflect the ACTIVE engagement; engagements is the full list. 0 => no badge.
 function useNavBadges(): Record<string, number> {
-  const { engagements, findings, chains, assets, content, notebook, cveIntel } = useConsole();
+  const { engagements, findings, chains, assets, content, notebook, cveIntel, jsRecon } = useConsole();
   const { auth, conn } = useControl();
   const activeLeads = (notebook?.leads ?? []).filter((l) => l.status === "open" || l.status === "testing").length;
   const cves = (cveIntel?.cves ?? cveIntel?.entries ?? []).length;
@@ -63,6 +64,7 @@ function useNavBadges(): Record<string, number> {
     "/chains": chains.length,
     "/assets": assets.length,
     "/sitemap": content?.routes?.length ?? 0,
+    "/js-recon": jsRecon?.totals?.endpoints ?? 0,
     "/notebook": activeLeads,
     "/cve-intel": cves,
     "/connections": connected,
