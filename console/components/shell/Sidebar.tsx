@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Target, Bug, Workflow, Network, Activity, Share2,
-  Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, type LucideIcon,
+  Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, PlugZap, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { useConsole } from "@/lib/store";
+import { useControl } from "@/components/control/ControlProvider";
 import { reportable } from "@/lib/stats";
 import { EngagementSwitcher } from "./EngagementSwitcher";
 
@@ -33,6 +34,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: "/coverage", label: "Coverage", icon: ListChecks },
       { href: "/agents", label: "Agents", icon: Bot },
+      { href: "/connections", label: "Connections", icon: PlugZap },
       { href: "/report", label: "Report", icon: FileText },
       { href: "/settings", label: "Settings", icon: Settings2 },
     ],
@@ -51,8 +53,10 @@ export function Logo() {
 // Per-engagement counts reflect the ACTIVE engagement; engagements is the full list. 0 => no badge.
 function useNavBadges(): Record<string, number> {
   const { engagements, findings, chains, assets, content, notebook, cveIntel } = useConsole();
+  const { auth, conn } = useControl();
   const activeLeads = (notebook?.leads ?? []).filter((l) => l.status === "open" || l.status === "testing").length;
   const cves = (cveIntel?.cves ?? cveIntel?.entries ?? []).length;
+  const connected = conn === "ready" ? Object.values(auth?.providers ?? {}).filter((p) => p.connected).length : 0;
   return {
     "/engagements": engagements.length,
     "/findings": reportable(findings).length,
@@ -61,6 +65,7 @@ function useNavBadges(): Record<string, number> {
     "/sitemap": content?.routes?.length ?? 0,
     "/notebook": activeLeads,
     "/cve-intel": cves,
+    "/connections": connected,
   };
 }
 

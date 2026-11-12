@@ -19,8 +19,9 @@ there is **no bundled demo data**.
 | `/activity` | **Activity** | Execution timeline derived from each finding's reviewer record (findings → reviews) |
 | `/control` | **Control plane** | *(opt-in)* Launch & steer an engagement: scaffold/pick, run autonomously, watch the live event stream, approve deferrals. Needs `scripts/console_control.py` |
 | `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier; per-skill produced/accepted counts derived from the loaded findings |
+| `/connections` | **Agent Connections** | *(opt-in)* Connect the control plane, then bring your own coding-agent runtime (Claude Code · Codex · Gemini · Grok) via subscription login or an API key; live per-provider status, model selection, and disconnect. Needs `scripts/console_control.py` |
 | `/report` | **Report** | Client-ready assembly: executive summary, risk-ordered findings, demonstration-limited section, attack chains; export JSON / print to PDF |
-| `/settings` | **Settings** | Theme, data source, about |
+| `/settings` | **Settings** | Theme, data source, about (runtimes moved to **Connections**) |
 
 ## Data model
 
