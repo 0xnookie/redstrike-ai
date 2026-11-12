@@ -15,6 +15,7 @@ there is **no bundled demo data**.
 | `/findings` | **Findings** | Filterable/sortable table + full detail drawer (CVSS, mappings, reproduction, evidence, remediation, reviewer verdict) |
 | `/chains` | **Attack chains** | Kill-chain flow graph composed from accepted findings |
 | `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, force-directed coverage map, asset table, and **open ports & services** from host discovery |
+| `/js-recon` | **JS Recon** | The client-side JavaScript intelligence the js-analysis skill mined — endpoints, params, APIs, secrets (redacted), DOM sinks/gadgets and libraries (per site), plus the site summary. Reads the parsed `findings/*.jsonl` |
 | `/notebook` | **Notebook** | What an engagement gathers that isn't a finding yet: investigative leads (open→testing→promoted/dead), recon intel (subdomains/DNS/network/defenses/OSINT), the evidence locker, RoE and test accounts; export to Markdown |
 | `/activity` | **Activity** | Execution timeline derived from each finding's reviewer record (findings → reviews) |
 | `/control` | **Control plane** | *(opt-in)* Launch & steer an engagement: scaffold/pick, run autonomously, watch the live event stream, approve deferrals. Needs `scripts/console_control.py` |

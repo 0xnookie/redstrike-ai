@@ -14,10 +14,17 @@
   - [ ] C.1 `ast/symbols.json` present (globals, exports, definition file+line)
   - [ ] C.2 per-file note for every inline block (`analysis/inline/`), when inline scripts exist
 - [ ] D — `ast/symbols.json` + every `findings/*.jsonl` are VALID (each line parses as JSON)
-      — endpoints, params, apis, secrets, gadgets, libraries; an empty-but-valid file is a pass
+      — endpoints, params, apis, secrets, gadgets, libraries; an empty-but-valid file is a pass.
+      Additive tags are tolerated (they fold new intel into the SAME streams): endpoints
+      `kind`/`guard` (SPA router tables folded in), params `kind` (every carrier: query/body/form/
+      header/cookie/storage/data-*), apis GraphQL ops (group `graphql`), secrets enrichment
+      (`provider_meta`/`severity`, still redacted), gadgets `category`/`origin_check` (postMessage folded in)
 - [ ] E — `analysis/site-summary.md` + `report.md` + `curl_commands.sh` non-zero; curl file runnable
       — curl covers every `endpoints.jsonl` row with state `live`|`unauthed`
-- [ ] F — /REVIEW SKILL → review ALL above; any unchecked ⇒ re-run that step
+- [ ] F — OPTIONAL exports, WHEN PRESENT, are well-formed: `exports/openapi.json` +
+      `exports/postman_collection.json` parse as JSON, `exports/findings.sarif` is valid SARIF 2.1.0
+      (absent ⇒ not a failure)
+- [ ] G — /REVIEW SKILL → review ALL above; any unchecked ⇒ re-run that step
 
 Pass = layout exact · all artifacts non-zero · all JSON/JSONL valid · parity holds.
 
@@ -37,7 +44,8 @@ Pass = layout exact · all artifacts non-zero · all JSON/JSONL valid · parity 
     { "id": "D.1", "path": "out/*/findings/*.jsonl",         "type": "glob", "min_matches": 1, "required": false },
     { "id": "E.1", "path": "out/*/analysis/site-summary.md", "type": "glob", "min_matches": 1 },
     { "id": "E.2", "path": "out/*/report.md",                "type": "glob", "min_matches": 1 },
-    { "id": "E.3", "path": "out/*/curl_commands.sh",         "type": "glob", "min_matches": 1 }
+    { "id": "E.3", "path": "out/*/curl_commands.sh",         "type": "glob", "min_matches": 1 },
+    { "id": "F.1", "path": "out/*/exports/*",                "type": "glob", "min_matches": 1, "required": false }
   ]
 }
 ```

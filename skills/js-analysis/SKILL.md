@@ -24,13 +24,17 @@ exist, non-zero, expected format).
   - live
   - historical
   - unauthed (reachable without a session)
+  - client-side routes (SPA router tables — React / Vue / Angular; guarded vs unguarded)
 - Params
-  - all
+  - all, across every carrier: query string, request body, form fields, `data-*` attributes,
+    request headers, cookies, and storage keys (local/session)
   - statistically-likely-vulnerable
-- APIs (grouped by functionality, incl. old/deprecated versions)
-- Secrets (keys, tokens, creds)
-- Vuln functions (dangerous sinks / gadgets)
+- APIs (grouped by functionality, incl. old/deprecated versions; GraphQL operations + root fields)
+- Secrets (keys, tokens, creds) — redacted, with offline enrichment (provider / account / key-type,
+  JWT decode + expiry, demo/placeholder tagging); never validated against the issuer
+- Vuln functions (dangerous sinks / gadgets, incl. `postMessage` handlers + origin-check strength)
 - Tech choices (framework, build, libraries + versions)
+- OPTIONAL interchange exports derived from the findings (OpenAPI 3 · Postman · SARIF)
 
 ## Steps  (action · tool · output)
 1. Enumerate JS sources (inline + files, lazy, historical, sourcemaps) · `katana -jc` / `gau` / `waymore` / `subjs` · `logs/js_sources.txt`
@@ -40,16 +44,17 @@ exist, non-zero, expected format).
 5. Deobfuscate / beautify minified — reuse the EXACT raw filename stem · `webcrack` → `js-beautify` · `beautified/inline/`, `beautified/external/`
 6. Parse to AST — one AST per external file · `@babel/parser` (or `acorn`) · `ast/external/{name}.ast.json`
 7. Build symbol table — every global, export, and the file+line where each is defined · `@babel/traverse` / `acorn-walk` · `ast/symbols.json`
-8. Extract endpoints (read AST + beautified); tag state live/historical/unauthed · `jsluice urls` / `xnLinkFinder` · `findings/endpoints.jsonl`
-9. Extract params + routes (admin, feature flags, interesting comments) · `jsluice` / `xnLinkFinder` + `grep` · `findings/params.jsonl`
-10. Extract APIs, group by functionality, flag old versions · `grep` + `jq` · `findings/apis.jsonl`
-11. Extract secrets (known-regex vs high-entropy) · `trufflehog` + `gitleaks` + `jsluice secrets` · `findings/secrets.jsonl`
-12. Map gadgets & dangerous sinks (DOM sinks) · `semgrep` (`refs/dangerous_sinks.yaml`) + `grep` · `findings/gadgets.jsonl`
+8. Extract endpoints (read AST + beautified); tag state live/historical/unauthed; include SPA router tables (framework routers) tagged `kind` (page|xhr|route) + `guard` (guarded/unguarded) · `jsluice urls` / `xnLinkFinder` + AST · `findings/endpoints.jsonl`
+9. Extract params across EVERY carrier — query, request body, form fields, `data-*` attributes, request headers, cookies, storage keys — + routes (admin, feature flags, interesting comments); tag each row's `kind` · `jsluice` / `xnLinkFinder` + AST + `grep`; `arjun`/`x8` to actively confirm · `findings/params.jsonl`
+10. Extract APIs, group by functionality, flag old versions; capture GraphQL operations + root fields (group `graphql`) · `grep` + `jq` + AST · `findings/apis.jsonl`
+11. Extract secrets (known-regex vs high-entropy), then ENRICH offline — provider/account/key-type, JWT decode + expiry, demo/placeholder tagging (never validate against the issuer) · `trufflehog` + `gitleaks` + `jsluice secrets` · `findings/secrets.jsonl`
+12. Map gadgets & dangerous sinks — DOM sinks AND `postMessage` handlers (origin-check strength, message types, routed sinks); tag `category` (dom|postmessage) + `origin_check` · `semgrep` (`refs/dangerous_sinks.yaml`) + AST + `grep` · `findings/gadgets.jsonl`
 13. Library + framework/tech analysis (outdated + CVEs) · `retire.js` / `nuclei -t http/technologies` / `httpx -td` · `findings/libraries.jsonl`
 14. Per-file notes — purpose, notable sinks, endpoints/params contributed, secrets; one per file · agent-authored from beautified + ast · `analysis/inline/{name}.md`, `analysis/external/{name}.md`
 15. Site summary — auth flow, full API surface, framework/build/library stack, risk highlights · synth across all notes + findings · `analysis/site-summary.md`
 16. Emit report + curl, derived from `findings/` (curl for every `endpoints.jsonl` row with state `live`|`unauthed`) · synth + `printf` · `report.md`, `curl_commands.sh`
-17. /REVIEW SKILL · `review.md`
+17. OPTIONAL — emit interchange exports derived from `findings/`: OpenAPI 3 (endpoints + apis), Postman v2.1, SARIF 2.1.0 (secrets + gadgets) · agent-authored + `jq` · `exports/{openapi.json,postman_collection.json,findings.sarif}`
+18. /REVIEW SKILL · `review.md`
 
 ## Tools
 - **Enumerate:** `katana` (`-jc -jsl`), `gau`, `waymore`, `subjs`/`getJS`, `hakrawler` (alt)
@@ -58,9 +63,11 @@ exist, non-zero, expected format).
 - **Sourcemaps:** `sourcemapper`, `unwebpack-sourcemap`
 - **Deobfuscate:** `webcrack` (webpack unbundle), `js-beautify`, `prettier`
 - **AST + symbols:** `@babel/parser` + `@babel/traverse` (alt: `acorn` + `acorn-walk`, `ast-grep`, `tree-sitter-cli`) — one AST per external file; symbol table = globals/exports + definition file+line
-- **Endpoints/params:** `jsluice`, `xnLinkFinder`, `LinkFinder`; `arjun`/`x8` to actively confirm params
-- **Secrets:** `trufflehog` (filesystem), `gitleaks` (dir), `jsluice secrets`, `secretfinder`/`mantra`
+- **Endpoints/params:** `jsluice`, `xnLinkFinder`, `LinkFinder`; `arjun`/`x8` to actively confirm params. SPA router tables (framework routers → `kind`/`guard`) + the param carriers (body / header / cookie / storage / `data-*`) come from the AST + `semgrep`/`ripgrep`
+- **Sinks/gadgets:** `semgrep` (`refs/dangerous_sinks.yaml`) + AST — DOM sinks AND `postMessage` handlers (origin-check strength, message types, routed sinks)
+- **Secrets:** `trufflehog` (filesystem), `gitleaks` (dir), `jsluice secrets`, `secretfinder`/`mantra`. ENRICH offline only — decode the credential's own structure (provider/account/key-type, JWT claims + expiry) and tag demo/placeholder values; never send it to the issuer
 - **Libs/tech:** `retire.js`, `nuclei` (`http/exposures`, `http/technologies`, `javascript/`), `httpx -td`
+- **Exports (optional):** agent-authored from `findings/` (+ `jq`) — OpenAPI 3, Postman v2.1 collection, SARIF 2.1.0
 - **Glue:** `jq`, `semgrep`, `ripgrep`
 - **Findings (JSONL) assembly:** `node` / `jq` — emit one JSON object per line into `findings/*.jsonl`
 - **Notes + summary:** authored by the agent (not a tool) — per-file `analysis/**/*.md` + `analysis/site-summary.md`
@@ -90,12 +97,16 @@ out/<site>/                         # e.g. out/app.target.com/, one per site
 │   ├── external/                   # {name}.md — one note per JS file
 │   └── site-summary.md             # cross-file: auth flow, API surface, stack
 ├── findings/                       # machine-readable, one JSON object per line
-│   ├── endpoints.jsonl             # {url, method?, source_file, line, state: live|historical|unauthed}
-│   ├── params.jsonl                # {name, context, source_file, line, likely_vuln: bool}
-│   ├── apis.jsonl                  # {path, group, version?, source_file}
-│   ├── secrets.jsonl               # {type, match_redacted, entropy?, source_file, line}
-│   ├── gadgets.jsonl               # {sink, snippet, source_file, line}
+│   ├── endpoints.jsonl             # {url, method?, source_file, line, state: live|historical|unauthed, kind?: page|xhr|route, guard?}
+│   ├── params.jsonl                # {name, context, source_file, line, likely_vuln: bool, kind?: query|body|form|header|cookie|storage|data-attr}
+│   ├── apis.jsonl                  # {path, group, version?, method?, source_file}   (GraphQL ops: group "graphql")
+│   ├── secrets.jsonl               # {type, match_redacted, entropy?, source_file, line, severity?, provider_meta?}   (redacted; offline enrichment only)
+│   ├── gadgets.jsonl               # {sink, snippet, source_file, line, category?: dom|postmessage, origin_check?}
 │   └── libraries.jsonl             # {name, version, cves[], source_file}
+├── exports/                        # OPTIONAL interchange, derived from findings/ (skip cleanly when not produced)
+│   ├── openapi.json                #   OpenAPI 3     (from endpoints + apis)
+│   ├── postman_collection.json     #   Postman v2.1
+│   └── findings.sarif              #   SARIF 2.1.0   (secrets + gadgets)
 └── logs/                           # one log per tool/action
 ```
 
@@ -111,4 +122,4 @@ object matching the shape commented beside it above; keep them consistent.
 
 ## Phases
 - **Phase 1 (generic):** passive enumerate + historical + fetch + store + deobfuscate + parse AST + build symbol table.
-- **Phase 2 (target-specific):** findings (endpoints/params/APIs/secrets/gadgets/libraries) + per-file notes + site-summary + report/curl.
+- **Phase 2 (target-specific):** findings (endpoints/params/APIs/secrets/gadgets/libraries — with the `kind`/`guard`/`category`/`origin_check`/enrichment tags) + per-file notes + site-summary + report/curl + OPTIONAL interchange exports.

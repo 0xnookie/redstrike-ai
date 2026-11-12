@@ -1,6 +1,8 @@
-# DOM / client-side dangerous sinks for the gadget-mapping pass (step 10).
+# DOM / client-side dangerous sinks for the gadget-mapping pass (step 12).
 # Feeds semgrep + grep; output -> findings/gadgets.jsonl. Consumed downstream by xss-dom.
 # Grouping mirrors how a DOM-XSS agent reasons about source -> sink flows.
+# For message_passing handlers, also record origin-check strength + the routed sink
+# (gadgets row: category "postmessage", origin_check "none|weak|strict").
 
 sinks:
   html_injection:        # value parsed as HTML -> script execution
