@@ -2,19 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Monitor, Upload, RotateCcw } from "lucide-react";
+import { Sun, Moon, Monitor, Upload, RotateCcw, PlugZap, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useConsole } from "@/lib/store";
-import { useControl } from "@/components/control/ControlProvider";
-import { ConnectCard } from "@/components/control/ConnectCard";
-import { LlmConnectCard } from "@/components/control/LlmConnectCard";
 import { cx } from "@/lib/format";
 import { Card, PageHeader } from "@/components/ui/primitives";
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { mode, clearData, loadFiles } = useConsole();
-  const { conn } = useControl();
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => setMounted(true), []);
@@ -30,20 +26,23 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Connections, appearance, data source and engagement rules." />
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {/* agent runtimes & control plane */}
-        <div className="lg:col-span-2">
-          <h2 className="text-sm font-semibold">Agent runtimes &amp; control plane</h2>
-          <p className="mb-3 mt-0.5 text-xs text-muted">
-            Connect the opt-in control plane, then give the launched agents an engine — a coding-agent
-            runtime (Claude Code, Codex, Gemini) via subscription login or an API key. Launch and steer
-            engagements from the{" "}
-            <Link href="/engagements" className="text-fg underline-offset-2 hover:underline">Engagements</Link> view.
-          </p>
-          <div className="space-y-3">
-            <ConnectCard />
-            {conn === "ready" && <LlmConnectCard />}
+        {/* agent runtimes & control plane — now their own view */}
+        <Link
+          href="/connections"
+          className="group flex items-center gap-3 rounded-2xl border border-line bg-card p-4 transition hover:border-brand/40 lg:col-span-2"
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">
+            <PlugZap size={19} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold">Agent runtimes &amp; control plane</h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Connect the opt-in control plane and give the launched agents an engine — Claude Code, Codex, Gemini or
+              Grok, via subscription login or an API key. Now on the Connections view.
+            </p>
           </div>
-        </div>
+          <ArrowRight size={17} className="shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-fg" />
+        </Link>
 
         {/* appearance */}
         <Card className="p-5">

@@ -104,6 +104,10 @@ _PROVIDERS = {
                "model_var": "GEMINI_MODEL", "default_model": "gemini-2.5-pro",
                "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-preview"],
                "login_cmd": ["gemini"], "cred_paths": ["~/.gemini/oauth_creds.json"]},
+    "grok":   {"label": "Grok (xAI)", "live": False,
+               "methods": {"api_key": "XAI_API_KEY"},
+               "model_var": "XAI_MODEL", "default_model": "grok-code-fast-1",
+               "models": ["grok-code-fast-1", "grok-4", "grok-4-fast-reasoning", "grok-4-fast-non-reasoning"]},
 }
 _CRED_SOURCE: dict[str, str] = {}   # provider -> "ui" (set here) | "env" (present at startup)
 _LOGIN: dict[str, dict] = {}        # provider -> {proc, out:[lines]} for an in-flight CLI login
