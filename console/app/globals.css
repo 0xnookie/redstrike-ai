@@ -293,6 +293,10 @@ body {
 .pulse-dot { animation: blinkdot 1.6s ease-in-out infinite; }
 @keyframes blinkdot { 50% { opacity: .25; } }
 
+/* a row that just landed via live refresh flashes once */
+.row-flash { animation: row-flash 1.6s ease; }
+@keyframes row-flash { from { background-color: rgb(34 197 94 / 0.16); } to { background-color: transparent; } }
+
 /* a row arriving in a live feed slides down into place */
 .row-in { animation: row-in .5s ease; }
 @keyframes row-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }

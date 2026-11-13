@@ -14,6 +14,8 @@
 // and the UI explains how to start the control plane; under `console_control.py` they work
 // once a valid token is supplied.
 
+import { agentRoster } from "./data";
+
 export interface ControlStatus {
   ok: boolean;
   engagements: string[];
@@ -267,7 +269,9 @@ export async function openRunStream(
 
 /* ---- autorun.jsonl event parsing ---- */
 export type RunEventTone = "ok" | "warn" | "muted" | "cyan";
-export type RunEventKind = "run" | "system" | "tool" | "result" | "error";
+// dispatch = the orchestrator handing work to a named skill/subagent; return = a subagent's
+// result coming back to the orchestrator (both drive the orchestration dispatch log)
+export type RunEventKind = "run" | "system" | "tool" | "dispatch" | "return" | "step" | "result" | "error";
 export interface RunEvent {
   key: string;
   kind: RunEventKind;
@@ -280,6 +284,11 @@ export interface RunEvent {
 
 let _seq = 0;
 const nextKey = () => `ev-${Date.now().toString(36)}-${(_seq++).toString(36)}`;
+
+const clip = (v: string) => {
+  const s = v.replace(/\s+/g, " ").trim();
+  return s.length > 90 ? s.slice(0, 89) + "…" : s;
+};
 
 const INPUT_KEYS = ["command", "url", "file_path", "pattern", "path", "description", "prompt"];
 function shortInput(inp: Record<string, any>): string {
@@ -341,8 +350,15 @@ function eventsOf(o: any): RunEvent[] {
   if (t === "assistant") {
     const out: RunEvent[] = [];
     for (const b of o.message?.content || []) {
-      if (b && b.type === "tool_use") {
-        const si = shortInput(b.input || {});
+      if (!b || b.type !== "tool_use") continue;
+      const inp = b.input || {};
+      if (b.name === "Skill") {
+        // name the skill being run, not the generic tool
+        out.push({ key: nextKey(), kind: "dispatch", text: String(inp.skill || "skill"), detail: inp.args ? clip(String(inp.args)) : undefined });
+      } else if (b.name === "Agent" || b.name === "Task") {
+        out.push({ key: nextKey(), kind: "dispatch", text: String(inp.subagent_type || "agent"), detail: inp.description ? clip(String(inp.description)) : undefined });
+      } else {
+        const si = shortInput(inp);
         out.push({ key: nextKey(), kind: "tool", text: b.name || "tool", detail: si || undefined });
       }
     }
@@ -379,9 +395,10 @@ function eventsOf(o: any): RunEvent[] {
 /* ============================================================================
    Orchestration — a live view of the engine's run, folded from the SAME stream.
    Steps come from the engine's task list (TaskCreate/TaskUpdate); agents from
-   Skill invocations + subagent (Agent/Task) spawns. Subagent internals are not
-   in the stream (they run opaquely), so an agent is shown spawned → running →
-   returned, with its handoff; not a keylog of its inner tool calls.
+   Skill invocations + subagent (Agent/Task) spawns — and, when the engine works a
+   step WITHOUT invoking a skill for it, from the step itself, so the task flow
+   never lags the task queue. Subagent internals are not in the stream (they run
+   opaquely), so an agent is shown spawned → running → returned.
    ========================================================================== */
 export type TaskStatus = "pending" | "running" | "done" | "error";
 export interface RunTask {
@@ -394,12 +411,16 @@ export interface RunTask {
 export type AgentRole = "orchestrator" | "skill" | "executor" | "reviewer";
 export interface RunAgent {
   uid: string;
-  name: string;         // skill id or subagent type
+  name: string;         // skill id / subagent type (a step node: the skill it runs, else its subject)
   role: AgentRole;
   task?: string;
   status: "running" | "done" | "error";
+  spawned?: boolean;    // a subagent (Agent/Task tool) — it genuinely RETURNS at its tool_result
+  taskUid?: string;     // the engine task this node is working
+  fromTask?: boolean;   // made from the task list: no skill call has been seen for that step yet
 }
-export interface OrchState { tasks: RunTask[]; agents: RunAgent[]; }
+// `cur` = the engine task currently in progress (fold bookkeeping, not rendered)
+export interface OrchState { tasks: RunTask[]; agents: RunAgent[]; cur?: string; }
 export const emptyOrch = (): OrchState => ({ tasks: [], agents: [] });
 
 const STATUS_MAP: Record<string, TaskStatus> = {
@@ -410,7 +431,57 @@ const STATUS_MAP: Record<string, TaskStatus> = {
 };
 const isReviewer = (name: string) => /-?verify$/i.test(name);
 
-function applyTaskUpdate(s: OrchState, inp: any): boolean {
+// Framework skill slugs, longest first, so a step node can be named for the skill it runs.
+const SKILL_SLUGS = agentRoster.map((a) => a.slug).sort((a, b) => b.length - a.length);
+const slugify = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+/** "Run JS analysis on the bundles" → "redstrike-js-analysis" (whole-token match), else null. */
+function skillForSubject(subject: string): string | null {
+  const s = `-${slugify(subject)}-`;
+  const hit = SKILL_SLUGS.find((slug) => s.includes(`-${slug}-`));
+  return hit ? `redstrike-${hit}` : null;
+}
+/** Is this skill named in the task's subject? ("redstrike-osint" ↔ "Passive OSINT recon") */
+const skillMatchesTask = (skill: string, task: RunTask) =>
+  `-${slugify(task.subject)}-`.includes(`-${slugify(skill.replace(/^redstrike-/i, ""))}-`);
+/** work done in the orchestrator's own context: a skill or step node (not the hub, not a subagent) */
+const inContext = (a: RunAgent) => a.role !== "orchestrator" && !a.spawned;
+
+/** A task went in_progress: the engine moved on to this step. */
+function startTask(s: OrchState, task: RunTask) {
+  s.cur = task.uid;
+  for (const a of s.agents) {
+    if (!inContext(a) || a.status !== "running" || a.taskUid === task.uid) continue;
+    // a skill invoked just before this step began, not yet tied to a step, and named for it
+    // → it's this step's skill (engines often load the skill, then mark the task started)
+    if (!a.taskUid && !a.fromTask && skillMatchesTask(a.name, task)) { a.taskUid = task.uid; continue; }
+    // anything else still "running" in-context belongs to an earlier step: the engine moved on.
+    // (Without this, a finished skill stayed the only active node while the queue had already
+    // advanced — the graph only learned about work from skill calls.)
+    a.status = "done";
+  }
+  if (s.agents.some((a) => inContext(a) && a.taskUid === task.uid && a.status === "running")) return;
+  // nothing is working this step yet → show the step itself so the flow matches the queue
+  const uid = `task-${task.uid}`;
+  const again = s.agents.find((a) => a.uid === uid);
+  if (again) { again.status = "running"; return; } // the same step resumed (e.g. next invocation)
+  s.agents.push({
+    uid, name: skillForSubject(task.subject) ?? task.subject, role: "skill",
+    task: task.activeForm || task.subject, status: "running", taskUid: task.uid, fromTask: true,
+  });
+}
+
+/** A task left in_progress (completed / failed): its in-context node ends with it. */
+function endTask(s: OrchState, task: RunTask) {
+  for (const a of s.agents) {
+    if (inContext(a) && a.taskUid === task.uid && a.status === "running") a.status = task.status === "error" ? "error" : "done";
+  }
+  if (s.cur === task.uid) s.cur = undefined;
+}
+
+// a task-list transition worth narrating in the dispatch log (started / done / failed)
+type StepNote = { task: RunTask; phase: "start" | "done" | "error" };
+
+function applyTaskUpdate(s: OrchState, inp: any, notes: StepNote[]): boolean {
   // The engine's TaskUpdate input shape isn't pinned, so match defensively and
   // fall back to the latest still-open task when we can't key it precisely.
   const n = Number(inp?.n ?? inp?.task ?? inp?.task_id ?? inp?.taskId ?? inp?.id ?? inp?.number);
@@ -419,20 +490,53 @@ function applyTaskUpdate(s: OrchState, inp: any): boolean {
   if (!task && inp?.subject) task = s.tasks.find((x) => x.subject === inp.subject);
   if (!task) task = [...s.tasks].reverse().find((x) => x.status !== "done");
   if (!task) return false;
+  const before = task.status;
   let changed = false;
-  if (st && task.status !== st) { task.status = st; changed = true; }
+  if (st && task.status !== st) {
+    task.status = st;
+    changed = true;
+    notes.push({ task, phase: st === "running" ? "start" : st === "error" ? "error" : "done" });
+  }
   if (inp?.activeForm) {
     const af = String(inp.activeForm);
-    if (task.activeForm !== af) { task.activeForm = af; changed = true; }
+    if (task.activeForm !== af) {
+      task.activeForm = af;
+      changed = true;
+      for (const a of s.agents) if (a.fromTask && a.taskUid === task.uid) a.task = af; // keep the step caption live
+    }
   }
+  if (task.status === "running" && before !== "running") startTask(s, task);
+  else if (before === "running" && task.status !== "running") endTask(s, task);
   return changed;
+}
+
+/** A Skill call: skills run INLINE (one at a time, in the orchestrator's own context). */
+function startSkill(s: OrchState, uid: string, skill: string, args: unknown) {
+  const caption = args ? String(args) : undefined;
+  const role: AgentRole = isReviewer(skill) ? "reviewer" : "skill";
+  // the current step is shown by a step node → this skill IS that step's work: take the node over
+  const step = s.cur ? s.agents.find((a) => a.fromTask && a.taskUid === s.cur && a.status === "running") : undefined;
+  if (step) {
+    step.name = skill;
+    step.role = role;
+    step.fromTask = false;
+    if (caption) step.task = caption;
+    return;
+  }
+  // otherwise a new skill supersedes whatever in-context work was running. A skill's own
+  // tool_result returns at once (it only loads), so it ends by supersede / step end / run end.
+  for (const a of s.agents) if (inContext(a) && a.status === "running") a.status = "done";
+  s.agents.push({ uid, name: skill, role, task: caption, status: "running", taskUid: s.cur });
 }
 
 /** Fold one already-parsed autorun.jsonl object into the orchestration accumulator (mutates
  *  `s`). Returns whether anything visible changed — most lines (assistant text, ordinary tool
- *  calls and their results) don't, and the caller skips a re-render for those. */
-function foldRunObject(o: any, s: OrchState): boolean {
+ *  calls and their results) don't, and the caller skips a re-render for those — plus the
+ *  subagents that just RETURNED to the orchestrator on this line. */
+function foldRunObject(o: any, s: OrchState): { changed: boolean; returned: RunAgent[]; steps: StepNote[] } {
   let changed = false;
+  const returned: RunAgent[] = [];
+  const steps: StepNote[] = [];
   const type = o?.type;
   if (type === "assistant") {
     for (const b of o.message?.content || []) {
@@ -444,7 +548,7 @@ function foldRunObject(o: any, s: OrchState): boolean {
         s.tasks.push({ uid, subject: String(inp.subject || "step"), activeForm: inp.activeForm ? String(inp.activeForm) : undefined, status: "pending" });
         changed = true;
       } else if (name === "TaskUpdate" || name === "TaskStatus") {
-        if (applyTaskUpdate(s, inp)) changed = true;
+        if (applyTaskUpdate(s, inp, steps)) changed = true;
       } else if (name === "Skill") {
         const skill = String(inp.skill || "skill");
         if (skill === "redstrike") {
@@ -453,16 +557,15 @@ function foldRunObject(o: any, s: OrchState): boolean {
             changed = true;
           }
         } else {
-          // Skills run INLINE: the Skill tool_result returns at once (it just loads the skill),
-          // then the work happens in the main context. So a skill stays "running" until the NEXT
-          // skill supersedes it or the run ends — not when its own tool_result arrives.
-          for (const a of s.agents) if (a.role === "skill" && a.status === "running") a.status = "done";
-          s.agents.push({ uid, name: skill, role: isReviewer(skill) ? "reviewer" : "skill", task: inp.args ? String(inp.args) : undefined, status: "running" });
+          startSkill(s, uid, skill, inp.args);
           changed = true;
         }
       } else if (name === "Agent" || name === "Task") {
         const sub = String(inp.subagent_type || inp.description || "agent");
-        s.agents.push({ uid, name: sub, role: isReviewer(sub) ? "reviewer" : "executor", task: inp.description ? String(inp.description) : undefined, status: "running" });
+        s.agents.push({
+          uid, name: sub, role: isReviewer(sub) ? "reviewer" : "executor",
+          task: inp.description ? String(inp.description) : undefined, status: "running", spawned: true, taskUid: s.cur,
+        });
         changed = true;
       }
     }
@@ -472,10 +575,13 @@ function foldRunObject(o: any, s: OrchState): boolean {
       for (const b of content) {
         if (!b || b.type !== "tool_result") continue;
         const ref = String(b.tool_use_id || "");
-        // Only subagents (Agent/Task) genuinely finish at their tool_result; a skill's
-        // immediate result just means it loaded, so skills end via supersede / run-end.
+        // a subagent's tool_result IS its report back to the orchestrator
         const ag = s.agents.find((a) => a.uid === ref && a.status === "running");
-        if (ag && (ag.role === "executor" || ag.role === "reviewer")) { ag.status = "done"; changed = true; }
+        if (ag?.spawned) {
+          ag.status = b.is_error ? "error" : "done";
+          returned.push(ag);
+          changed = true;
+        }
         // Only a TaskCreate's own result carries its "Task #N". Look the task up FIRST so a
         // large unrelated tool output (scanner dumps, fetched pages) is never stringified and
         // regex-scanned — that was the dominant per-line cost when replaying a long run.
@@ -490,8 +596,9 @@ function foldRunObject(o: any, s: OrchState): boolean {
   } else if (type === "result") {
     for (const a of s.agents) if (a.status === "running") { a.status = "done"; changed = true; }
     for (const t2 of s.tasks) if (t2.status === "running") { t2.status = "done"; changed = true; }
+    s.cur = undefined;
   }
-  return changed;
+  return { changed, returned, steps };
 }
 
 /** Ingest one raw autorun.jsonl line: parse it ONCE, fold it into the orchestration
@@ -507,7 +614,26 @@ export function ingestRunLine(line: string, s: OrchState): { events: RunEvent[];
   } catch {
     return { events: plainLineEvents(t), orchChanged: false };
   }
-  return { events: eventsOf(o), orchChanged: foldRunObject(o, s) };
+  const { changed, returned, steps } = foldRunObject(o, s);
+  const events = eventsOf(o);
+  // the engine's own task list moving: narrate it, so inline work shows in the dispatch log too
+  for (const { task, phase } of steps) {
+    events.push({
+      key: nextKey(), kind: "step", text: task.subject,
+      tone: phase === "start" ? "cyan" : phase === "done" ? "ok" : "warn",
+      detail: phase === "start" ? "started" : phase === "done" ? "done" : "failed",
+    });
+  }
+  // A subagent reporting back → a "return" line in the dispatch log. Stateless parsing can't
+  // tell a subagent's tool_result from any other tool's; the fold knows who was dispatched.
+  for (const a of returned) {
+    const err = a.status === "error";
+    events.push({
+      key: nextKey(), kind: "return", text: a.name, tone: err ? "warn" : "ok",
+      detail: err ? "returned an error" : a.task ? clip(a.task) : undefined,
+    });
+  }
+  return { events, orchChanged: changed };
 }
 
 /* ---- coverage ledger (per-category status, file-backed, authoritative) ---- */

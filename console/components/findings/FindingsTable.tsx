@@ -24,7 +24,9 @@ function CvssChip({ score, severity }: { score: number | null; severity: Finding
 }
 
 /** Pure, presentational findings table — rows are already filtered + sorted. */
-export function FindingsTable({ rows, onSelect }: { rows: Finding[]; onSelect: (f: Finding) => void }) {
+export function FindingsTable({
+  rows, onSelect, fresh,
+}: { rows: Finding[]; onSelect: (f: Finding) => void; fresh?: Set<string> }) {
   return (
     <div className="scroll-thin overflow-x-auto">
       <table className="w-full min-w-[820px] border-collapse text-sm">
@@ -54,6 +56,7 @@ export function FindingsTable({ rows, onSelect }: { rows: Finding[]; onSelect: (
                 className={cx(
                   "cursor-pointer border-t border-line/70 outline-none transition hover:bg-fg/[0.03] focus-visible:bg-fg/[0.04]",
                   v === "rejected" && "opacity-50",
+                  fresh?.has(f.id) && "row-flash", // just landed via live refresh
                 )}
               >
                 <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted" style={{ boxShadow: `inset 3px 0 0 ${sevMeta(f.severity).color}` }}>

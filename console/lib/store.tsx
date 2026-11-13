@@ -7,6 +7,7 @@ import {
   deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
 } from "./data";
 import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
+import { useToast } from "@/components/ui/Toast";
 
 // "empty" = nothing loaded (honest zero-state); "live" = reading real engagements.
 type Mode = "empty" | "live";
@@ -21,6 +22,48 @@ const ACTIVE_KEY = "redstrike.activeEngagement";
 // engagement that finishes (its findings_consolidated.json lands) flips from
 // "running" to "completed" on its own instead of waiting for a manual reload.
 const MANIFEST_REFRESH_MS = 15_000;
+
+// While a run is live for the engagement being viewed, re-check its data files this often
+// (HEAD only; a file is re-downloaded only when its size changed). Without the control plane
+// (read-only viewer) we can't see the run, so fall back to a slow check while the DATA says
+// the engagement is running.
+const LIVE_REFRESH_MS = 6_000;
+const DATA_RUNNING_REFRESH_MS = 20_000;
+const FRESH_FLASH_MS = 2_600;
+
+// An engagement's canonical files, in datasetFromFiles' argument order.
+const ENG_FILES = [
+  "findings_consolidated.json", "host_discovery.json", "attack_chains.json", "coverage_ledger.json",
+  "cve_intel.json", "js_analysis.json", "content.json", "http_history.json", "notebook.json", "js_recon.json",
+] as const;
+
+/** A response's change signature: status + byte length (the server sends no Last-Modified). */
+const sigOf = (status: number, len: string | number | null) => (status >= 200 && status < 300 ? `${status}:${len ?? "?"}` : String(status));
+
+/** GET + parse one engagement file, with its signature (undefined json for a miss). */
+async function fetchWithSig(url: string): Promise<{ json: any; sig: string }> {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return { json: undefined, sig: sigOf(res.status, null) };
+    const text = await res.text();
+    const len = res.headers.get("content-length") ?? new TextEncoder().encode(text).length;
+    let json: any;
+    try { json = JSON.parse(text); } catch { json = undefined; }
+    return { json, sig: sigOf(res.status, len) };
+  } catch {
+    return { json: undefined, sig: "err" };
+  }
+}
+
+/** HEAD one engagement file → its signature, or null on a network error (don't treat as a change). */
+async function headSig(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+    return sigOf(res.status, res.headers.get("content-length"));
+  } catch {
+    return null;
+  }
+}
 
 interface ConsoleCtx {
   mode: Mode;
@@ -60,6 +103,10 @@ interface ConsoleCtx {
   closeEndpoint: () => void;
   findingsQuery: string;
   setFindingsQuery: (q: string) => void;
+  /** finding ids that just landed via live refresh (rows flash briefly) */
+  freshFindingIds: Set<string>;
+  /** fed by the control plane: "|"-joined ids of engagements with a live run */
+  setLiveRunIds: (key: string) => void;
 }
 
 const Ctx = createContext<ConsoleCtx | null>(null);
@@ -126,6 +173,11 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, in
   // web_routes_seen + api_endpoints (type/confirmed) + live_hosts, which the derived
   // services/assets above intentionally drop.
   return { findings, chains, services, assets, apiEndpoints, jsFiles, jsRecon, coverage, cveIntel, content, history, notebook, hostRaw: host };
+}
+
+/** Assemble a dataset from the raw files array (ENG_FILES order). */
+function datasetFromRaw(r: any[]): Dataset {
+  return datasetFromFiles(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]);
 }
 
 /** Does a parsed object look like notebook.json (leads / recon_intel / roe / test_accounts)? */
@@ -214,6 +266,15 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const cvePinnedRef = useRef(false);
   const cveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadedRef = useRef<Set<string>>(new Set());
+  const rawRef = useRef<Record<string, any[]>>({});    // per engagement: parsed files (ENG_FILES order)
+  const sigRef = useRef<Record<string, string[]>>({}); // per engagement: their change signatures
+  const refreshing = useRef(false);
+  const datasetsRef = useRef(datasets);
+  datasetsRef.current = datasets;
+  const toast = useToast();
+  const [liveRunIds, setLiveRunIds] = useState(""); // fed by the control-plane bridge
+  const [freshFindingIds, setFreshFindingIds] = useState<Set<string>>(() => new Set());
+  const freshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeEngagement = engagements.find((e) => e.id === activeId) ?? engagements[0];
   const active = datasets[activeId] ?? EMPTY_DS;
@@ -244,26 +305,74 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const loadEngagement = useCallback(async (id: string) => {
     if (loadedRef.current.has(id)) return;
     loadedRef.current.add(id);
-    const base = `/e/${id}`;
-    const [cons, host, chainsFile, cover, intel, js, content, history, notebook, jsRecon] = await Promise.all([
-      fetchJson(`${base}/findings_consolidated.json`),
-      fetchJson(`${base}/host_discovery.json`),
-      fetchJson(`${base}/attack_chains.json`),
-      fetchJson(`${base}/coverage_ledger.json`),
-      fetchJson(`${base}/cve_intel.json`),
-      fetchJson(`${base}/js_analysis.json`),
-      fetchJson(`${base}/content.json`),
-      fetchJson(`${base}/http_history.json`),
-      fetchJson(`${base}/notebook.json`),
-      fetchJson(`${base}/js_recon.json`),
-    ]);
-    if (cons === undefined && host === undefined && chainsFile === undefined && cover === undefined && intel === undefined && js === undefined && content === undefined && history === undefined && notebook === undefined && jsRecon === undefined) {
+    const got = await Promise.all(ENG_FILES.map((f) => fetchWithSig(`/e/${id}/${f}`)));
+    // keep the raw files + their signatures: a live refresh re-fetches only what changed
+    rawRef.current[id] = got.map((g) => g.json);
+    sigRef.current[id] = got.map((g) => g.sig);
+    if (got.every((g) => g.json === undefined)) {
       loadedRef.current.delete(id); // nothing served (e.g. scaffold-only) — allow a retry later
       return;
     }
-    const ds = datasetFromFiles(cons, host, chainsFile, cover, intel, js, content, history, notebook, jsRecon);
-    setDatasets((d) => ({ ...d, [id]: ds }));
+    setDatasets((d) => ({ ...d, [id]: datasetFromRaw(rawRef.current[id]) }));
   }, []);
+
+  /* ---- live refresh: re-read only the files that changed while a run produces them ---- */
+  const refreshEngagement = useCallback(async (id: string) => {
+    if (refreshing.current) return; // a slow tick is still in flight
+    refreshing.current = true;
+    try {
+      // nothing served at first load (a brand-new engagement) → try a full load instead
+      if (!loadedRef.current.has(id) || !rawRef.current[id]) { await loadEngagement(id); return; }
+      const raw = rawRef.current[id];
+      const sigs = sigRef.current[id];
+      const heads = await Promise.all(ENG_FILES.map((f) => headSig(`/e/${id}/${f}`)));
+      const changed = heads.map((h, i) => h !== null && h !== sigs[i]);
+      if (!changed.some(Boolean)) return; // the common case: nothing new, no re-render
+      const got = await Promise.all(ENG_FILES.map((f, i) => (changed[i] ? fetchWithSig(`/e/${id}/${f}`) : null)));
+      got.forEach((g, i) => { if (g) { raw[i] = g.json; sigs[i] = g.sig; } });
+      const ds = datasetFromRaw(raw);
+      const before = new Set((datasetsRef.current[id]?.findings ?? []).map((f) => f.id));
+      const added = ds.findings.filter((f) => !f.composite && !before.has(f.id));
+      setDatasets((d) => ({ ...d, [id]: ds }));
+      if (added.length) {
+        // new findings landed: flash their rows + say so (only for a refresh, never the first load)
+        setFreshFindingIds(new Set(added.map((f) => f.id)));
+        if (freshTimer.current) clearTimeout(freshTimer.current);
+        freshTimer.current = setTimeout(() => setFreshFindingIds(new Set()), FRESH_FLASH_MS);
+        const hot = added.filter((f) => f.severity === "critical" || f.severity === "high").length;
+        toast(`${added.length} new finding${added.length === 1 ? "" : "s"} landed${hot ? ` · ${hot} critical/high` : ""}`);
+      }
+    } finally {
+      refreshing.current = false;
+    }
+  }, [loadEngagement, toast]);
+
+  // which cadence applies to the engagement being viewed (if any)
+  const runLive = !!activeId && liveRunIds.split("|").includes(activeId);
+  const dataLive = activeEngagement?.status === "running";
+  useEffect(() => {
+    if (!served || !activeId || (!runLive && !dataLive)) return;
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") void refreshEngagement(activeId);
+    };
+    const t = setInterval(tick, runLive ? LIVE_REFRESH_MS : DATA_RUNNING_REFRESH_MS);
+    // catch up at once when the tab comes back (the interval skips hidden ticks)
+    const onVisible = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [served, activeId, runLive, dataLive, refreshEngagement]);
+
+  // the run just ended → one last pass picks up whatever it wrote on the way out
+  const wasLive = useRef(false);
+  useEffect(() => {
+    if (wasLive.current && !runLive && served && activeId) void refreshEngagement(activeId);
+    wasLive.current = runLive;
+  }, [runLive, served, activeId, refreshEngagement]);
+
+  useEffect(() => () => { if (freshTimer.current) clearTimeout(freshTimer.current); }, []);
 
   const setActiveId = useCallback((id: string) => {
     setActiveIdState(id);
@@ -477,6 +586,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     selectedHost, openHost, closeHost,
     selectedEndpoint, openEndpoint, closeEndpoint,
     findingsQuery, setFindingsQuery,
+    freshFindingIds, setLiveRunIds,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -13,7 +13,7 @@ import { AreaLine, Donut, Legend, Progress } from "@/components/ui/charts";
 import { CyberFeed } from "@/components/dashboard/CyberFeed";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding } = useConsole();
+  const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
   const [sevHover, setSevHover] = useState<string | null>(null); // shared by the donut + its legend
 
@@ -132,7 +132,7 @@ export default function DashboardPage() {
             {topIssues.map((f) => {
               const score = cvssScore(f.cvss_vector);
               return (
-                <li key={f.id} className="border-t border-line/70">
+                <li key={f.id} className={cx("border-t border-line/70", freshFindingIds.has(f.id) && "row-flash")}>
                   <button onClick={() => openFinding(f)} className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-fg/[0.03]">
                     <SeverityBadge severity={f.severity} dot />
                     <div className="min-w-0 flex-1">

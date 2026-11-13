@@ -21,7 +21,7 @@ const VERDICT_OPTS: { value: string; label: string }[] = [
 ];
 
 export default function FindingsPage() {
-  const { findings, openFinding, findingsQuery, setFindingsQuery } = useConsole();
+  const { findings, openFinding, findingsQuery, setFindingsQuery, freshFindingIds } = useConsole();
   const toast = useToast();
   const [sevFilter, setSevFilter] = useState<Set<Severity>>(new Set());
   const [verdictFilter, setVerdictFilter] = useState<string>("all");
@@ -124,7 +124,7 @@ export default function FindingsPage() {
       </div>
 
       <Panel tall className="mt-5">
-        <FindingsTable rows={rows} onSelect={openFinding} />
+        <FindingsTable rows={rows} onSelect={openFinding} fresh={freshFindingIds} />
         <div className="mt-auto flex items-center justify-between border-t border-line px-5 py-3 font-mono text-[11px] text-faint">
           <span>Showing {rows.length} of {total} findings</span>
           <span>{rows.filter((f) => (f.evidence?.length ?? 0) > 0).length} with proof</span>

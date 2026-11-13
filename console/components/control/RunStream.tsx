@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
-import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu, ChevronRight, ChevronDown } from "lucide-react";
+import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu, ChevronRight, ChevronDown, CornerDownLeft, ListChecks } from "lucide-react";
 import { useControl, useRunStream } from "./ControlProvider";
 import type { RunEvent } from "@/lib/control";
 import { Card } from "@/components/ui/primitives";
@@ -14,8 +14,11 @@ const toneClass: Record<string, string> = {
   muted: "text-muted",
 };
 
-function EventIcon({ kind }: { kind: RunEvent["kind"] }) {
-  if (kind === "tool") return <ArrowRight size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
+function EventIcon({ kind, tone }: { kind: RunEvent["kind"]; tone?: RunEvent["tone"] }) {
+  if (kind === "dispatch") return <ArrowRight size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
+  if (kind === "return") return <CornerDownLeft size={13} className={cx("mt-0.5 shrink-0", tone === "warn" ? "text-amber-400" : "text-emerald-400")} />;
+  if (kind === "step") return <ListChecks size={13} className={cx("mt-0.5 shrink-0", tone === "ok" ? "text-emerald-400" : tone === "warn" ? "text-amber-400" : "text-cyan-400")} />;
+  if (kind === "tool") return <ChevronRight size={13} className="mt-0.5 shrink-0 text-muted" />;
   if (kind === "system") return <Cpu size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
   if (kind === "result") return <CircleCheck size={13} className="mt-0.5 shrink-0" />;
   if (kind === "error") return <CircleAlert size={13} className="mt-0.5 shrink-0 text-amber-400" />;
@@ -27,10 +30,13 @@ function EventIcon({ kind }: { kind: RunEvent["kind"] }) {
 const EventRow = memo(function EventRow({ ev, billed }: { ev: RunEvent; billed: boolean }) {
   return (
     <li className={cx("row-in flex items-start gap-2", ev.kind === "run" && "mt-2 border-t border-line pt-2")}>
-      <EventIcon kind={ev.kind} />
+      <EventIcon kind={ev.kind} tone={ev.tone} />
       <div className="min-w-0 flex-1">
         <div className={cx("flex flex-wrap items-baseline gap-x-2", toneClass[ev.tone ?? "muted"])}>
-          <span className={cx(ev.kind === "tool" && "text-fg")}>{ev.text}</span>
+          <span className={cx((ev.kind === "tool" || ev.kind === "dispatch") && "text-fg", ev.kind === "dispatch" && "font-medium")}>
+            {ev.text}
+            {ev.kind === "return" && ev.tone !== "warn" ? " returned" : ""}
+          </span>
           {ev.detail && <span className="truncate text-muted">{ev.detail}</span>}
           {ev.kind === "result" && ev.costUsd != null && (
             <span

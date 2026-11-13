@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect, type CSSProperties } from "react";
+import { useMemo, useState, useEffect, useRef, useLayoutEffect, useCallback, type CSSProperties } from "react";
 import Link from "next/link";
 import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers, Loader2 } from "lucide-react";
 import { useControl, useRunStream } from "@/components/control/ControlProvider";
@@ -32,8 +32,69 @@ function useReducedMotion() {
   return reduced;
 }
 
+/** One result travelling back along an edge: agent → orchestrator, once. Driven by rAF along
+ *  the edge's own geometry (getPointAtLength), like the dispatch packets but in reverse. */
+function ReturnPacket({ path, color, reduced, onDone }: { path: SVGPathElement; color: string; reduced: boolean; onDone: () => void }) {
+  const g = useRef<SVGGElement>(null);
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+  useLayoutEffect(() => {
+    const len = path.getTotalLength();
+    const dur = reduced ? 200 : 1100;
+    const place = (t: number) => {
+      const p = path.getPointAtLength(len * (1 - t)); // the edge runs hub → agent; walk it backwards
+      g.current?.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
+    };
+    place(0); // at the agent before the first paint
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - t0) / dur);
+      place(t);
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else doneRef.current();
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [path, reduced]);
+  return (
+    <g ref={g} pointerEvents="none">
+      <circle r={10} fill={color} opacity={0.16} />
+      <circle r={4.5} fill={color} />
+    </g>
+  );
+}
+
+type Packet = { id: string; uid: string; color: string };
+
 function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[]; running: boolean; progress: number }) {
   const reduced = useReducedMotion();
+  const pathEls = useRef(new Map<string, SVGPathElement>());
+
+  // Return packets: a subagent that goes running → done/error WHILE WATCHED sends its result
+  // back along its edge. Only real subagents (spawned) — an inline skill never "reports back".
+  // Agents first seen already-finished (page load, reconnect replay) don't fire one.
+  const prevStatus = useRef(new Map<string, RunAgent["status"]>());
+  const [packets, setPackets] = useState<Packet[]>([]);
+  useEffect(() => {
+    const prev = prevStatus.current;
+    if (!agents.length) { prev.clear(); return; } // engagement switch / fresh run
+    const fresh: Packet[] = [];
+    for (const a of agents) {
+      const was = prev.get(a.uid);
+      if (was === "running" && a.status !== "running" && a.spawned && pathEls.current.has(a.uid)) {
+        fresh.push({ id: `${a.uid}:${Date.now()}`, uid: a.uid, color: a.status === "error" ? "#f59e0b" : "#22c55e" });
+      }
+      prev.set(a.uid, a.status);
+    }
+    // add the new ones; drop any whose edge left the graph (node capped out) so none get stuck
+    setPackets((ps) => {
+      const keep = ps.filter((p) => pathEls.current.has(p.uid));
+      return fresh.length || keep.length !== ps.length ? [...keep, ...fresh] : ps;
+    });
+  }, [agents]);
+  const landed = useCallback((id: string) => setPackets((ps) => ps.filter((p) => p.id !== id)), []);
+  const inflight = useMemo(() => new Set(packets.map((p) => p.uid)), [packets]);
   // the orchestrator is always Redstrike (the center) — never a peripheral node.
   // show running agents first, then the most recent others, capped for layout.
   const nodes = useMemo(() => {
@@ -66,14 +127,22 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
         {geo.map(({ a, hot, path }) => (
           <path
             key={`e-${a.uid}`}
+            ref={(el) => { if (el) pathEls.current.set(a.uid, el); else pathEls.current.delete(a.uid); }}
             d={path}
             fill="none"
             className={cx(hot && "edge-flow")}
-            stroke={hot ? "rgb(214 235 253 / 0.5)" : "rgb(214 235 253 / 0.12)"}
+            // lit while the agent works AND while its result is travelling back
+            stroke={hot || inflight.has(a.uid) ? "rgb(214 235 253 / 0.5)" : "rgb(214 235 253 / 0.12)"}
             strokeWidth={1.3}
             style={{ transition: "stroke .35s" }}
           />
         ))}
+
+        {/* return packets — a finished subagent's result travels back to the orchestrator */}
+        {packets.map((p) => {
+          const el = pathEls.current.get(p.uid);
+          return el ? <ReturnPacket key={p.id} path={el} color={p.color} reduced={reduced} onDone={() => landed(p.id)} /> : null;
+        })}
 
         {/* dispatch packets — a dot travels orchestrator → working agent along the hot edge */}
         {!reduced && geo.map(({ a, hot, path }) => hot && (
@@ -117,7 +186,7 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
               </g>
               <circle cx={ax + 24} cy={ay - 24} r={4.5} fill={col} style={{ stroke: "rgb(var(--bg))" }} strokeWidth={2.5} />
               <text x={ax} y={up ? ay - 52 : ay + 50} textAnchor="middle" className="fill-fg" style={{ font: "500 12px var(--font-mono)" }}>
-                {a.name.length > 20 ? a.name.slice(0, 19) + "…" : a.name}
+                {(() => { const label = a.name.replace(/^redstrike-/, ""); return label.length > 22 ? label.slice(0, 21) + "…" : label; })()}
               </text>
               <text x={ax} y={up ? ay - 38 : ay + 64} textAnchor="middle" className="fill-faint" style={{ font: "11px var(--font-sans)" }}>
                 {a.role}
@@ -154,6 +223,9 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
         <LegendDot color="rgb(var(--faint))" label="Returned" />
         <LegendDot color="#f59e0b" label="Error" />
         <span className="inline-flex items-center gap-2"><span className="h-px w-5" style={{ background: "rgb(214 235 253 / 0.5)" }} /> Active dispatch</span>
+        <span className="inline-flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full" style={{ background: "#22c55e", boxShadow: "0 0 0 3px rgb(34 197 94 / 0.18)" }} /> Result returning
+        </span>
       </div>
     </div>
   );
@@ -193,28 +265,58 @@ function TaskQueue({ tasks }: { tasks: RunTask[] }) {
 const TONE_COLOR: Record<string, string> = {
   ok: "#22c55e", warn: "#f59e0b", cyan: "#38bdf8", muted: "rgb(var(--faint))",
 };
+// the log's arrow column: → work handed out, ← a result handed back (green, amber on error)
+const LOG_MARK: Record<RunEvent["kind"], { tag: string; glyph: string }> = {
+  dispatch: { tag: "out", glyph: "→" },
+  return: { tag: "in", glyph: "←" },
+  step: { tag: "step", glyph: "▸" },
+  result: { tag: "done", glyph: "✓" },
+  error: { tag: "err", glyph: "!" },
+  tool: { tag: "tool", glyph: "›" },
+  run: { tag: "run", glyph: "·" },
+  system: { tag: "sys", glyph: "·" },
+};
+const markColor = (e: RunEvent) =>
+  e.kind === "dispatch" ? TONE_COLOR.cyan
+  : e.kind === "return" || e.kind === "step" || e.kind === "result" || e.kind === "error" ? TONE_COLOR[e.tone ?? "ok"]
+  : TONE_COLOR.muted;
+// a finished step reads as ✓, a failed one as !
+const glyphOf = (e: RunEvent, base: string) => (e.kind === "step" ? (e.tone === "ok" ? "✓" : e.tone === "warn" ? "!" : "▸") : base);
+// what this log narrates: the orchestration, not every tool call (that's the raw engine log)
+const ORCH_KINDS = new Set<RunEvent["kind"]>(["dispatch", "return", "step", "result", "error", "run", "system"]);
+
 function DispatchLog({ events, running }: { events: RunEvent[]; running: boolean }) {
-  const rows = events.slice(-22).reverse();
+  const rows = useMemo(() => {
+    const out: RunEvent[] = [];
+    for (let i = events.length - 1; i >= 0 && out.length < 22; i--) if (ORCH_KINDS.has(events[i].kind)) out.push(events[i]);
+    return out;
+  }, [events]);
   return (
     <div className="scroll-thin max-h-[330px] overflow-auto px-5 pb-4 font-mono text-[12px] leading-[1.75]">
       {rows.length === 0 && <p className="py-8 text-center text-xs text-muted">No dispatch events yet.</p>}
       {running && rows.length > 0 && (
-        <div className="grid grid-cols-[52px_14px_1fr] gap-2">
-          <span className="text-faint/60" />
+        <div className="grid grid-cols-[44px_14px_1fr] gap-2">
+          <span />
           <span />
           <span className="text-muted"><span className="caret" /></span>
         </div>
       )}
-      {rows.map((e) => (
-        <div key={e.key} className="row-in grid grid-cols-[52px_14px_1fr] gap-2" title={`${e.text}${e.detail ? " · " + e.detail : ""}`}>
-          <span className="text-faint/70">{e.kind}</span>
-          <span style={{ color: TONE_COLOR[e.tone ?? "muted"] }}>{e.kind === "result" ? "✓" : e.kind === "error" ? "!" : "›"}</span>
-          <span className="truncate text-muted">
-            <span className="text-fg">{e.text}</span>
-            {e.detail ? ` · ${e.detail}` : ""}
-          </span>
-        </div>
-      ))}
+      {rows.map((e) => {
+        const m = LOG_MARK[e.kind] ?? LOG_MARK.tool;
+        const named = e.kind === "dispatch" || e.kind === "return" || e.kind === "step";
+        const verb = e.kind === "return" && e.tone !== "warn" ? " · returned" : "";
+        return (
+          <div key={e.key} className="row-in grid grid-cols-[44px_14px_1fr] gap-2" title={`${e.text}${verb}${e.detail ? " · " + e.detail : ""}`}>
+            <span className="text-faint/60">{m.tag}</span>
+            <span className="text-center" style={{ color: markColor(e) }}>{glyphOf(e, m.glyph)}</span>
+            <span className="truncate text-muted">
+              {named ? <b className="font-medium text-fg">{e.text}</b> : <span className="text-fg">{e.text}</span>}
+              {verb}
+              {e.detail ? ` · ${e.detail}` : ""}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
