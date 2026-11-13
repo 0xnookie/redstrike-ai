@@ -85,7 +85,7 @@ export function Legend({
             <span className="h-2.5 w-2.5 rounded-sm" style={{ background: d.color }} />
             {d.label}
           </span>
-          <span className="tabular-nums text-muted">
+          <span className="shrink-0 whitespace-nowrap tabular-nums text-muted">
             {d.value}
             {total ? ` · ${pct(d.value, total)}%` : ""}
           </span>

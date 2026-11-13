@@ -30,8 +30,11 @@ export function PanelHeader({
     <div className="panel-head">
       <div className="flex min-w-0 items-center gap-2.5">
         {icon}
-        <span className="truncate text-[15px] font-medium text-fg-strong">{title}</span>
-        {sub && <span className="min-w-0 shrink truncate font-mono text-xs text-faint">{sub}</span>}
+        {/* The title never flex-shrinks — even a sub-pixel shrink makes the browser swap its
+            last letters for an ellipsis. It's capped at the row's width instead (a very long
+            title still truncates there), and the subtitle absorbs all the squeeze. */}
+        <span className="max-w-full shrink-0 truncate text-[15px] font-medium text-fg-strong">{title}</span>
+        {sub && <span className="min-w-0 truncate font-mono text-xs text-faint">{sub}</span>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
     </div>
