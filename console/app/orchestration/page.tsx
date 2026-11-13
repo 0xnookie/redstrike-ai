@@ -57,6 +57,8 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
 
   const C = 2 * Math.PI * NODE_R;
   const RING_R = 61, RING_C = 2 * Math.PI * RING_R;
+  // every agent the orchestrator has handed work to — drives the one-shot dispatch pulse
+  const dispatches = useMemo(() => agents.filter((a) => a.role !== "orchestrator").length, [agents]);
   return (
     <div className="px-2 pb-1">
       <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="block w-full" style={{ maxHeight: 620 }} role="img" aria-label="Orchestrator dispatching to agents">
@@ -69,6 +71,7 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
             className={cx(hot && "edge-flow")}
             stroke={hot ? "rgb(214 235 253 / 0.5)" : "rgb(214 235 253 / 0.12)"}
             strokeWidth={1.3}
+            style={{ transition: "stroke .35s" }}
           />
         ))}
 
@@ -125,7 +128,9 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
 
         {/* center orchestrator core */}
         <g>
-          {running && <circle cx={CX} cy={CY} r={54} className="orch-pulse" />}
+          {/* one pulse per dispatch: re-keyed on the dispatch count, so each newly
+              dispatched agent replays it exactly once (not a constant throb) */}
+          {dispatches > 0 && <circle key={`pulse-${dispatches}`} cx={CX} cy={CY} r={54} className="orch-pulse go" />}
           {/* ambient ring: dashed always, but only SPINS while a run is live */}
           <circle cx={CX} cy={CY} r={68} className={cx("orch-ring", running && "orch-spin")} />
           {/* overall run progress — real: steps done / total, fills clockwise from the top */}
@@ -201,7 +206,7 @@ function DispatchLog({ events, running }: { events: RunEvent[]; running: boolean
         </div>
       )}
       {rows.map((e) => (
-        <div key={e.key} className="grid grid-cols-[52px_14px_1fr] gap-2" title={`${e.text}${e.detail ? " · " + e.detail : ""}`}>
+        <div key={e.key} className="row-in grid grid-cols-[52px_14px_1fr] gap-2" title={`${e.text}${e.detail ? " · " + e.detail : ""}`}>
           <span className="text-faint/70">{e.kind}</span>
           <span style={{ color: TONE_COLOR[e.tone ?? "muted"] }}>{e.kind === "result" ? "✓" : e.kind === "error" ? "!" : "›"}</span>
           <span className="truncate text-muted">

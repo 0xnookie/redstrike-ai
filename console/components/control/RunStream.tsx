@@ -26,7 +26,7 @@ function EventIcon({ kind }: { kind: RunEvent["kind"] }) {
 // it's new — a flush appending 5 lines to a 500-line log renders 5 rows, not 500.
 const EventRow = memo(function EventRow({ ev, billed }: { ev: RunEvent; billed: boolean }) {
   return (
-    <li className={cx("flex items-start gap-2", ev.kind === "run" && "mt-2 border-t border-line pt-2")}>
+    <li className={cx("row-in flex items-start gap-2", ev.kind === "run" && "mt-2 border-t border-line pt-2")}>
       <EventIcon kind={ev.kind} />
       <div className="min-w-0 flex-1">
         <div className={cx("flex flex-wrap items-baseline gap-x-2", toneClass[ev.tone ?? "muted"])}>

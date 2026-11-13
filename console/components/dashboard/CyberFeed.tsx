@@ -87,7 +87,7 @@ export function CyberFeed({ feed, live = false }: { feed?: CveFeed; live?: boole
                   target="_blank"
                   rel="noopener noreferrer"
                   title={`${it.id} — open full record`}
-                  className="group flex items-start gap-3 px-4 py-3 transition hover:bg-card2"
+                  className="row-in group flex items-start gap-3 px-4 py-3 transition hover:bg-card2"
                 >
                   <span className="mt-0.5 h-9 w-[3px] shrink-0 rounded-full" style={{ background: m?.color ?? "rgb(var(--fg) / 0.18)" }} />
                   <div className="min-w-0 flex-1">

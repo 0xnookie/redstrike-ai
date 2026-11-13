@@ -136,7 +136,7 @@ export default function EngagementsPage() {
                         {e.starred && <Star size={12} className="shrink-0 fill-amber-400 text-amber-400" />}
                         <span className="truncate text-sm font-medium text-fg-strong">{e.name}</span>
                       </span>
-                      <Pill label={st.label} color={st.color} dot />
+                      <Pill label={st.label} color={st.color} dot pulse={e.status === "running"} />
                     </div>
                     <div className="truncate font-mono text-[11px] text-faint">{e.id} · {e.target}</div>
                     <div className="mt-0.5 flex items-center justify-between gap-3">
@@ -278,15 +278,16 @@ function EngagementDetail({
                   <span
                     className={cx(
                       "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-medium tabular-nums",
-                      done ? "border-transparent bg-fg text-bg"
-                      : current ? "border-fg text-fg-strong"
+                      done ? "border-emerald-500 bg-emerald-500 text-[#00110a]"
+                      : current ? "border-fg/60 text-fg-strong shadow-[0_0_0_4px_rgb(var(--fg)/0.06)]"
                       : "border-line text-faint",
                     )}
                   >
-                    {done ? <Check size={12} /> : i + 1}
+                    {/* done → check; current → a blinking "you are here" dot; ahead → its number */}
+                    {done ? <Check size={12} strokeWidth={3} /> : current ? <span className="pulse-dot h-[7px] w-[7px] rounded-full bg-fg-strong" /> : i + 1}
                   </span>
                   <span className={cx("whitespace-nowrap text-xs", done || current ? "text-fg" : "text-faint")}>{p}</span>
-                  {i < last && <span className={cx("mx-1 h-px flex-1", done ? "bg-fg/40" : "bg-line")} />}
+                  {i < last && <span className={cx("mx-1 h-px flex-1", done ? "bg-emerald-500" : "bg-line")} />}
                 </div>
               );
             })}

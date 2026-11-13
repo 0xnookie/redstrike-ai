@@ -15,6 +15,7 @@ import { CyberFeed } from "@/components/dashboard/CyberFeed";
 export default function DashboardPage() {
   const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
+  const [sevHover, setSevHover] = useState<string | null>(null); // shared by the donut + its legend
 
   const rep = reportable(findings);
   const counts = severityCounts(rep);
@@ -23,7 +24,8 @@ export default function DashboardPage() {
   const inScopeAssets = assets.filter((a) => a.scope === "in").length;
   const running = activeEngagement.status === "running";
 
-  // cumulative reportable findings by reviewer-acceptance date
+  // cumulative reportable findings by reviewer-acceptance date (ISO days sort correctly;
+  // the days double as the chart's hover labels)
   const cumulative = useMemo(() => {
     const byDay = new Map<string, number>();
     rep.forEach((f) => {
@@ -31,8 +33,9 @@ export default function DashboardPage() {
       if (d === "—") return;
       byDay.set(d, (byDay.get(d) || 0) + 1);
     });
+    const days = [...byDay.entries()].sort();
     let run = 0;
-    return [...byDay.entries()].sort().map(([, v]) => (run += v));
+    return { points: days.map(([, v]) => (run += v)), labels: days.map(([d]) => d) };
   }, [rep]);
 
   const topIssues = useMemo(
@@ -85,7 +88,7 @@ export default function DashboardPage() {
               <span className="font-mono text-xs text-faint">max CVSS {maxCvss(rep).toFixed(1)}</span>
             </div>
             <div className="text-fg">
-              <AreaLine points={cumulative} />
+              <AreaLine points={cumulative.points} labels={cumulative.labels} valueLabel="Reportable" />
             </div>
           </PanelBody>
         </Panel>
@@ -94,8 +97,8 @@ export default function DashboardPage() {
           <PanelHeader title="Severity breakdown" sub="open" />
           <PanelBody>
             <div className="flex items-center gap-4">
-              <Donut data={sevData} centerSub="findings" />
-              <Legend data={sevData} />
+              <Donut data={sevData} centerSub="findings" active={sevHover} onActive={setSevHover} />
+              <Legend data={sevData} active={sevHover} onActive={setSevHover} />
             </div>
           </PanelBody>
         </Panel>
@@ -216,7 +219,7 @@ function OutcomeRow({ label, value, total, color }: { label: string; value: numb
   );
 }
 
-/* pill-style range toggle matching the strix segmented control */
+/* pill-style range toggle matching the console's segmented control */
 function Segmentedish({ value, onChange }: { value: "all" | "window"; onChange: (v: "all" | "window") => void }) {
   const opts: { v: "all" | "window"; label: string }[] = [
     { v: "all", label: "All time" },

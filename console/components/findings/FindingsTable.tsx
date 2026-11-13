@@ -23,7 +23,7 @@ function CvssChip({ score, severity }: { score: number | null; severity: Finding
   );
 }
 
-/** Pure, presentational strix findings table — rows are already filtered + sorted. */
+/** Pure, presentational findings table — rows are already filtered + sorted. */
 export function FindingsTable({ rows, onSelect }: { rows: Finding[]; onSelect: (f: Finding) => void }) {
   return (
     <div className="scroll-thin overflow-x-auto">
