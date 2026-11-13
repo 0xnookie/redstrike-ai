@@ -246,33 +246,45 @@ is a safety net over the OS sandbox (WSL2/Linux), not a replacement. Full docs: 
 
 ### 🖥️ Console
 
-A zero-backend **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the real JSON the skills emit — `findings_consolidated.json` (reporting), `host_discovery.json` (host-discovery), `chains.json` (attack-chain-discovery) and `scope.yaml` — with **no demo data**. Point `scripts/console.py` at your `engagements/` directory and it serves **every** engagement at once (switch between them in the UI); point it at a single engagement dir for just that one. It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, derives the agent/activity views from each finding's reviewer record, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
+A **web console** over the engagement data model — dark-mode, keyboard-driven, and built for an operator running a live assessment. Press <kbd>⌘K</kbd> to jump to any view, switch engagement, or open any finding; a terminal status bar keeps scope, rate limit and live severity tallies in view. It renders the real JSON the skills emit — `findings_consolidated.json` (reporting), `host_discovery.json` (host-discovery), `chains.json` (attack-chain-discovery), `coverage_ledger.json` and `scope.yaml` — with **no demo data** (the screenshots below show a synthetic `example.test` engagement). Point `scripts/console.py` at your `engagements/` directory and it serves **every** engagement at once (switch between them in the UI); point it at a single engagement dir for just that one. It scores CVSS 3.1 in-browser to match `scripts/cvss.py`, keeps composite kill-chains out of the severity counts, derives the agent/activity views from each finding's reviewer record, and colors the asset map by open-port risk. Built with **Next.js + TypeScript + Tailwind**.
+
+Start it through `scripts/console_control.py --enable-control` instead and the same console becomes an opt-in, token-gated, localhost-only **control plane**: launch, approve and stop autonomous runs from the browser and watch them as they happen —
+
+- **Live orchestration** — the task flow follows the engine's own task list. Work streams out to each skill and subagent, and a subagent's result travels back to the orchestrator when it returns (green; amber on an error). The dispatch log narrates steps, dispatches and returns, while the raw engine log keeps every tool call.
+- **Findings land as they happen** — while a run is live the console re-reads only the data files that changed; new findings flash into the tables with a notice.
+- **Status follows the run** — *Running*, *Paused* (stopped by the operator) or *Completed*, with phase progress from the coverage ledger — and an explicit note when a run ended short (categories that never ran, no consolidated report yet).
 
 ```sh
-python scripts/console.py                                # build (first run) + serve ALL engagements/ → :8787
+python scripts/console.py                                # read-only viewer: build (first run) + serve ALL engagements/ → :8787
 python scripts/console.py engagements/<client>-<date>/   # or just one engagement
+python scripts/console_control.py --enable-control      # control plane: launch + steer runs live → :8788
 cd console && npm install && npm run dev                 # or: dev server for UI work (empty state)
 ```
 
 <p align="center">
   <img src="assets/console/dashboard.png" alt="Redstrike console — dashboard" width="100%" />
+  <br/><sub><b>Dashboard</b> — KPIs, findings over time, severity breakdown, two-altitude review, top issues, exposed assets, agent activity</sub>
+</p>
+
+<p align="center">
+  <img src="assets/console/orchestration.png" alt="Redstrike console — live orchestration" width="100%" />
+  <br/><sub><b>Orchestration</b> — a live run: the orchestrator dispatching to skills and subagents, a result on its way back, the task queue and the narrated dispatch log</sub>
 </p>
 
 <table>
   <tr>
+    <td width="50%"><img src="assets/console/engagements.png" alt="Engagements" width="100%" /><br/><sub><b>Engagements</b> — status that follows the run, coverage progress, launch / stop / approvals, scope and metrics</sub></td>
     <td width="50%"><img src="assets/console/findings.png" alt="Findings" width="100%" /><br/><sub><b>Findings</b> — filter, sort, severity-coded; full write-up drawer with evidence &amp; CVSS</sub></td>
-    <td width="50%"><img src="assets/console/attack-chains.png" alt="Attack chains" width="100%" /><br/><sub><b>Attack chains</b> — kill-chain graph composed from accepted findings</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — radial domain mindmap of the coverage map (tested / in-progress / out-of-scope)</sub></td>
-    <td width="50%"><img src="assets/console/agents.png" alt="Agent fleet" width="100%" /><br/><sub><b>Agents</b> — the executor + independent-reviewer fleet, by family &amp; tier</sub></td>
+    <td width="50%"><img src="assets/console/attack-chains.png" alt="Attack chains" width="100%" /><br/><sub><b>Attack chains</b> — kill-chain graph composed from accepted findings</sub></td>
+    <td width="50%"><img src="assets/console/assets.png" alt="Assets and scope" width="100%" /><br/><sub><b>Assets &amp; scope</b> — radial domain mindmap of the coverage map, inventory, ports &amp; services, RoE</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/console/agents.png" alt="Agent fleet" width="100%" /><br/><sub><b>Agents</b> — the executor + independent-reviewer fleet, by family &amp; tier, with live status during a run</sub></td>
+    <td width="50%"><img src="assets/console/report.png" alt="Report" width="100%" /><br/><sub><b>Report</b> — executive summary, risk-ordered findings, attack chains, export / print</sub></td>
   </tr>
 </table>
-
-<p align="center">
-  <img src="assets/console/report.png" alt="Report" width="100%" />
-  <br/><sub><b>Report</b> — executive summary, risk-ordered findings, export / print</sub>
-</p>
 
 > Theme toggles light/dark; everything is monochrome chrome with color reserved for data (severity, verdict, coverage, graphs). See [`console/`](console/) for the full view list and how to load real engagement data.
 
