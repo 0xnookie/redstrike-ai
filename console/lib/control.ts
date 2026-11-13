@@ -20,6 +20,8 @@ export interface ControlStatus {
   ok: boolean;
   engagements: string[];
   runs: Record<string, number>; // engagement id -> live run pid
+  // engagement id -> how its last run ended this session (absent on older planes)
+  ended?: Record<string, { how: "exited" | "stopped"; rc?: number | null }>;
 }
 
 export interface PendingItem {

@@ -85,6 +85,12 @@ export interface Engagement {
     approval_required_phases?: string[];
   };
   phase_progress?: { done: number; total: number };
+  /** the autonomous-run log: present? last written when? (liveness for runs we didn't launch) */
+  run?: { log: boolean; updated?: string | null };
+  /** the final consolidated report exists (the reporting phase ran) */
+  report?: boolean;
+  /** status came from scope.yaml (an operator override) — never re-derived */
+  status_explicit?: boolean;
   starred?: boolean;
   /** summary counts for the engagements list (active engagement is computed live) */
   summary?: { findings: number; critical: number; high: number; medium: number; low: number; chains: number };

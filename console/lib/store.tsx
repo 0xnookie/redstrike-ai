@@ -8,6 +8,7 @@ import {
 } from "./data";
 import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
 import { useToast } from "@/components/ui/Toast";
+import { resolveStatus, type ControlRuns } from "./engagementStatus";
 
 // "empty" = nothing loaded (honest zero-state); "live" = reading real engagements.
 type Mode = "empty" | "live";
@@ -105,8 +106,8 @@ interface ConsoleCtx {
   setFindingsQuery: (q: string) => void;
   /** finding ids that just landed via live refresh (rows flash briefly) */
   freshFindingIds: Set<string>;
-  /** fed by the control plane: "|"-joined ids of engagements with a live run */
-  setLiveRunIds: (key: string) => void;
+  /** fed by the control plane: its live runs + how runs ended (a JSON key; "" = no plane) */
+  setControlRuns: (key: string) => void;
 }
 
 const Ctx = createContext<ConsoleCtx | null>(null);
@@ -238,6 +239,10 @@ function toEngagement(entry: any): Engagement {
     out_of_scope: sc.out_of_scope || { domains: [], cidrs: [], urls: [] },
     rules: sc.rules || {},
     summary: entry.summary,
+    phase_progress: entry.progress && entry.progress.total ? entry.progress : undefined,
+    run: entry.run || undefined,
+    report: hasConsolidated,
+    status_explicit: !!explicit,
   };
 }
 
@@ -272,11 +277,20 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const datasetsRef = useRef(datasets);
   datasetsRef.current = datasets;
   const toast = useToast();
-  const [liveRunIds, setLiveRunIds] = useState(""); // fed by the control-plane bridge
+  const [controlRuns, setControlRuns] = useState(""); // fed by the control-plane bridge
   const [freshFindingIds, setFreshFindingIds] = useState<Set<string>>(() => new Set());
   const freshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const activeEngagement = engagements.find((e) => e.id === activeId) ?? engagements[0];
+  const ctl = useMemo<ControlRuns | null>(() => (controlRuns ? JSON.parse(controlRuns) : null), [controlRuns]);
+  // re-resolved whenever the manifest re-polls (every 15s), so a quiet run log ages into "completed"
+  const shownEngagements = useMemo(() => {
+    const now = Date.now();
+    return engagements.map((e) => {
+      const status = resolveStatus(e, ctl, now);
+      return status === e.status ? e : { ...e, status };
+    });
+  }, [engagements, ctl]);
+  const activeEngagement = shownEngagements.find((e) => e.id === activeId) ?? shownEngagements[0];
   const active = datasets[activeId] ?? EMPTY_DS;
 
   const findings = active.findings;
@@ -348,7 +362,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   }, [loadEngagement, toast]);
 
   // which cadence applies to the engagement being viewed (if any)
-  const runLive = !!activeId && liveRunIds.split("|").includes(activeId);
+  const runLive = !!activeId && !!ctl?.live.includes(activeId);
   const dataLive = activeEngagement?.status === "running";
   useEffect(() => {
     if (!served || !activeId || (!runLive && !dataLive)) return;
@@ -578,7 +592,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   }, [loadEngagement]);
 
   const value: ConsoleCtx = {
-    mode, engagements, activeEngagement, activeId, setActiveId,
+    mode, engagements: shownEngagements, activeEngagement, activeId, setActiveId,
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, jsRecon, tests, coverage, cveIntel,
     content, history, notebook, hostRaw,
     cveFeed, cveLive, loadFiles, clearData, reloadEngagements,
@@ -586,7 +600,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     selectedHost, openHost, closeHost,
     selectedEndpoint, openEndpoint, closeEndpoint,
     findingsQuery, setFindingsQuery,
-    freshFindingIds, setLiveRunIds,
+    freshFindingIds, setControlRuns,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -6,14 +6,16 @@ import { ConsoleProvider, useConsole } from "@/lib/store";
 import { ControlProvider, useControl } from "@/components/control/ControlProvider";
 import { ToastProvider } from "@/components/ui/Toast";
 
-/** Tells the data store which engagements have a live run (from the control plane), so it
- *  can live-refresh the one being viewed. A key string, so the store only re-renders when the
- *  set of live runs actually changes — not on every control-plane update. */
+/** Tells the data store which engagements have a live run and how finished runs ended (from
+ *  the control plane), so it can show the true status and live-refresh the one being viewed.
+ *  A key string, so the store only re-renders when that run state actually changes — not on
+ *  every control-plane update. */
 function LiveRunBridge() {
-  const { runs } = useControl();
-  const { setLiveRunIds } = useConsole();
-  const key = Object.keys(runs).sort().join("|");
-  useEffect(() => setLiveRunIds(key), [key, setLiveRunIds]);
+  const { conn, runs, status } = useControl();
+  const { setControlRuns } = useConsole();
+  // "" = no word from a control plane (offline / read-only viewer): the store falls back to data
+  const key = conn === "ready" ? JSON.stringify({ live: Object.keys(runs).sort(), ended: status?.ended ?? {} }) : "";
+  useEffect(() => setControlRuns(key), [key, setControlRuns]);
   return null;
 }
 
