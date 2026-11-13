@@ -44,7 +44,16 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
 
 export function Logo() {
   return (
-    <div className="flex items-center" title="Redstrike">
+    <div className="flex items-center gap-2.5" title="Redstrike">
+      {/* the app mark — a black tile by design (the face's black is part of the art), so it
+          reads as an app icon on the light sidebar and blends into the dark one */}
+      <img
+        src="/redstrike-logo.png"
+        alt=""
+        width={30}
+        height={30}
+        className="h-[30px] w-[30px] shrink-0 rounded-[9px] ring-1 ring-black/5 dark:ring-white/10"
+      />
       <span className="font-sans text-[17px] font-bold leading-none tracking-tight text-fg">Redstrike</span>
     </div>
   );
