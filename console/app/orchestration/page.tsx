@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
-import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers } from "lucide-react";
+import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers, Loader2 } from "lucide-react";
 import { useControl } from "@/components/control/ControlProvider";
 import type { RunAgent, RunTask, RunEvent } from "@/lib/control";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, LivePill } from "@/components/ui/primitives";
@@ -229,7 +229,12 @@ function OrchestrationInner() {
   // "live" = real activity on the stream (an agent/orchestrator or task running) — not just
   // whether the control plane spawned the process, so a terminal-launched run animates too.
   const live = agentsRunning > 0 || tasks.some((t) => t.status === "running") || running;
-  const idle = !offline && agents.length === 0 && tasks.length === 0;
+  const hasFolded = agents.length > 0 || tasks.length > 0;
+  // A run is live (pid tracked, or the stream is active) but the engine hasn't streamed anything
+  // yet — the few seconds between launch and the first event, or a reconnect. Show a "starting"
+  // state so the view doesn't read as "No active run" while a run is genuinely spinning up.
+  const booting = !offline && !hasFolded && live;
+  const idle = !offline && !hasFolded && !live;
   const progress = tasks.length ? stepsDone / tasks.length : 0;
 
   return (
@@ -276,6 +281,12 @@ function OrchestrationInner() {
                 <PanelBody className="flex flex-col items-center gap-2 py-16 text-center">
                   <p className="text-sm font-medium text-fg">No active run</p>
                   <p className="max-w-sm text-xs text-muted">Launch or resume an engagement from Engagements — the orchestrator and its agents animate here as they work.</p>
+                </PanelBody>
+              ) : booting ? (
+                <PanelBody className="flex flex-col items-center gap-3 py-16 text-center">
+                  <Loader2 size={20} className="animate-spin text-emerald-500" />
+                  <p className="text-sm font-medium text-fg">Run starting…</p>
+                  <p className="max-w-sm text-xs text-muted">Connecting to the engine stream — the orchestrator and its agents appear here as the first events arrive.</p>
                 </PanelBody>
               ) : (
                 <OrchestrationGraph agents={agents} running={live} progress={progress} />
