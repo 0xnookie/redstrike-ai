@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Bot, ShieldCheck, Lock, Share2, Cpu } from "lucide-react";
 import { useConsole } from "@/lib/store";
-import { useControl } from "@/components/control/ControlProvider";
+import { useControl, useRunStream } from "@/components/control/ControlProvider";
 import type { RunAgent } from "@/lib/control";
 import { AGENT_STATUS } from "@/lib/theme";
 import { cx } from "@/lib/format";
@@ -25,7 +25,8 @@ function liveSlug(name: string): string {
 
 export default function AgentsPage() {
   const { agents } = useConsole();
-  const { conn, orch } = useControl();
+  const { conn } = useControl();
+  const { orch } = useRunStream();
   const [family, setFamily] = useState<string>("all");
 
   // live "working now" from the control-plane run stream (real time). The orchestrator

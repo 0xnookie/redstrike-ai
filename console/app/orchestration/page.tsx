@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect, type CSSProperties } from "react";
 import Link from "next/link";
 import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers, Loader2 } from "lucide-react";
-import { useControl } from "@/components/control/ControlProvider";
+import { useControl, useRunStream } from "@/components/control/ControlProvider";
 import type { RunAgent, RunTask, RunEvent } from "@/lib/control";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, LivePill } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
@@ -216,7 +216,8 @@ function DispatchLog({ events, running }: { events: RunEvent[]; running: boolean
 
 /* -------------------------------------------------------------- the view --- */
 function OrchestrationInner() {
-  const { conn, orch, coverage, running, activeId, events } = useControl();
+  const { conn, coverage, running, activeId } = useControl();
+  const { orch, events } = useRunStream();
   const { agents, tasks } = orch;
 
   const agentsRunning = agents.filter((a) => a.status === "running").length;

@@ -292,29 +292,40 @@ function shortInput(inp: Record<string, any>): string {
   return "";
 }
 
+// run-boundary marker teed by autorun.py: "# --- redstrike autonomous run <iso> ---"
+function markerEvents(s: string): RunEvent[] {
+  const text = s.replace(/^#+\s*/, "").replace(/-{2,}/g, "").trim() || "run";
+  return [{ key: nextKey(), kind: "run", text, tone: "muted" }];
+}
+
+// Non-JSON line. In stream-json mode the engine emits only JSON, so a plain-text line here
+// is almost always an error claude printed to stderr (e.g. "Error: Session ID … is already
+// in use.") before it could stream anything — the kind of failure that otherwise leaves the
+// run stuck at the boundary marker with nothing shown. Surface those; skip other chatter.
+function plainLineEvents(s: string): RunEvent[] {
+  if (/^\s*(error|exception|traceback|fatal|panic)\b/i.test(s) || /\berror:/i.test(s)) {
+    return [{ key: nextKey(), kind: "error", tone: "warn", text: s.length > 180 ? s.slice(0, 179) + "…" : s }];
+  }
+  return []; // chatty non-JSON line — skip, exactly like the CLI does
+}
+
 /** Parse one line of the tailed autorun.jsonl into zero or more render-ready events.
  *  (An `assistant` line can carry several tool_use blocks → several events.) */
 export function parseRunLine(line: string): RunEvent[] {
   const s = line.trim();
   if (!s) return [];
-  if (s.startsWith("#")) {
-    // run-boundary marker teed by autorun.py: "# --- redstrike autonomous run <iso> ---"
-    const text = s.replace(/^#+\s*/, "").replace(/-{2,}/g, "").trim() || "run";
-    return [{ key: nextKey(), kind: "run", text, tone: "muted" }];
-  }
+  if (s.startsWith("#")) return markerEvents(s);
   let o: any;
   try {
     o = JSON.parse(s);
   } catch {
-    // Non-JSON line. In stream-json mode the engine emits only JSON, so a plain-text line here
-    // is almost always an error claude printed to stderr (e.g. "Error: Session ID … is already
-    // in use.") before it could stream anything — the kind of failure that otherwise leaves the
-    // run stuck at the boundary marker with nothing shown. Surface those; skip other chatter.
-    if (/^\s*(error|exception|traceback|fatal|panic)\b/i.test(s) || /\berror:/i.test(s)) {
-      return [{ key: nextKey(), kind: "error", tone: "warn", text: s.length > 180 ? s.slice(0, 179) + "…" : s }];
-    }
-    return []; // chatty non-JSON line — skip, exactly like the CLI does
+    return plainLineEvents(s);
   }
+  return eventsOf(o);
+}
+
+/** Render-ready events for one already-parsed autorun.jsonl object. */
+function eventsOf(o: any): RunEvent[] {
   const t = o?.type;
   if (t === "system" && o.subtype === "init") {
     const skills = (o.slash_commands || []).filter((x: any) => String(x).toLowerCase().includes("redstrike")).length;
@@ -399,7 +410,7 @@ const STATUS_MAP: Record<string, TaskStatus> = {
 };
 const isReviewer = (name: string) => /-?verify$/i.test(name);
 
-function applyTaskUpdate(s: OrchState, inp: any) {
+function applyTaskUpdate(s: OrchState, inp: any): boolean {
   // The engine's TaskUpdate input shape isn't pinned, so match defensively and
   // fall back to the latest still-open task when we can't key it precisely.
   const n = Number(inp?.n ?? inp?.task ?? inp?.task_id ?? inp?.taskId ?? inp?.id ?? inp?.number);
@@ -407,17 +418,21 @@ function applyTaskUpdate(s: OrchState, inp: any) {
   let task = Number.isFinite(n) ? s.tasks.find((x) => x.n === n) : undefined;
   if (!task && inp?.subject) task = s.tasks.find((x) => x.subject === inp.subject);
   if (!task) task = [...s.tasks].reverse().find((x) => x.status !== "done");
-  if (!task) return;
-  if (st) task.status = st;
-  if (inp?.activeForm) task.activeForm = String(inp.activeForm);
+  if (!task) return false;
+  let changed = false;
+  if (st && task.status !== st) { task.status = st; changed = true; }
+  if (inp?.activeForm) {
+    const af = String(inp.activeForm);
+    if (task.activeForm !== af) { task.activeForm = af; changed = true; }
+  }
+  return changed;
 }
 
-/** Fold one raw autorun.jsonl line into orchestration state (mutates + returns it). */
-export function foldOrchestration(line: string, s: OrchState): OrchState {
-  const t = line.trim();
-  if (!t || t.startsWith("#")) return s;
-  let o: any;
-  try { o = JSON.parse(t); } catch { return s; }
+/** Fold one already-parsed autorun.jsonl object into the orchestration accumulator (mutates
+ *  `s`). Returns whether anything visible changed — most lines (assistant text, ordinary tool
+ *  calls and their results) don't, and the caller skips a re-render for those. */
+function foldRunObject(o: any, s: OrchState): boolean {
+  let changed = false;
   const type = o?.type;
   if (type === "assistant") {
     for (const b of o.message?.content || []) {
@@ -427,22 +442,28 @@ export function foldOrchestration(line: string, s: OrchState): OrchState {
       const inp = b.input || {};
       if (name === "TaskCreate") {
         s.tasks.push({ uid, subject: String(inp.subject || "step"), activeForm: inp.activeForm ? String(inp.activeForm) : undefined, status: "pending" });
+        changed = true;
       } else if (name === "TaskUpdate" || name === "TaskStatus") {
-        applyTaskUpdate(s, inp);
+        if (applyTaskUpdate(s, inp)) changed = true;
       } else if (name === "Skill") {
         const skill = String(inp.skill || "skill");
         if (skill === "redstrike") {
-          if (!s.agents.some((a) => a.role === "orchestrator")) s.agents.push({ uid, name: "redstrike", role: "orchestrator", task: "engagement orchestrator", status: "running" });
+          if (!s.agents.some((a) => a.role === "orchestrator")) {
+            s.agents.push({ uid, name: "redstrike", role: "orchestrator", task: "engagement orchestrator", status: "running" });
+            changed = true;
+          }
         } else {
           // Skills run INLINE: the Skill tool_result returns at once (it just loads the skill),
           // then the work happens in the main context. So a skill stays "running" until the NEXT
           // skill supersedes it or the run ends — not when its own tool_result arrives.
           for (const a of s.agents) if (a.role === "skill" && a.status === "running") a.status = "done";
           s.agents.push({ uid, name: skill, role: isReviewer(skill) ? "reviewer" : "skill", task: inp.args ? String(inp.args) : undefined, status: "running" });
+          changed = true;
         }
       } else if (name === "Agent" || name === "Task") {
         const sub = String(inp.subagent_type || inp.description || "agent");
         s.agents.push({ uid, name: sub, role: isReviewer(sub) ? "reviewer" : "executor", task: inp.description ? String(inp.description) : undefined, status: "running" });
+        changed = true;
       }
     }
   } else if (type === "user") {
@@ -454,17 +475,39 @@ export function foldOrchestration(line: string, s: OrchState): OrchState {
         // Only subagents (Agent/Task) genuinely finish at their tool_result; a skill's
         // immediate result just means it loaded, so skills end via supersede / run-end.
         const ag = s.agents.find((a) => a.uid === ref && a.status === "running");
-        if (ag && (ag.role === "executor" || ag.role === "reviewer")) ag.status = "done";
-        const txt = typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? "");
-        const m = /Task #(\d+)/.exec(txt);
-        if (m) { const task = s.tasks.find((x) => x.uid === ref); if (task) task.n = Number(m[1]); }
+        if (ag && (ag.role === "executor" || ag.role === "reviewer")) { ag.status = "done"; changed = true; }
+        // Only a TaskCreate's own result carries its "Task #N". Look the task up FIRST so a
+        // large unrelated tool output (scanner dumps, fetched pages) is never stringified and
+        // regex-scanned — that was the dominant per-line cost when replaying a long run.
+        const task = s.tasks.find((x) => x.uid === ref);
+        if (task && task.n == null) {
+          const txt = typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? "");
+          const m = /Task #(\d+)/.exec(txt);
+          if (m) { task.n = Number(m[1]); changed = true; }
+        }
       }
     }
   } else if (type === "result") {
-    for (const a of s.agents) if (a.status === "running") a.status = "done";
-    for (const t2 of s.tasks) if (t2.status === "running") t2.status = "done";
+    for (const a of s.agents) if (a.status === "running") { a.status = "done"; changed = true; }
+    for (const t2 of s.tasks) if (t2.status === "running") { t2.status = "done"; changed = true; }
   }
-  return s;
+  return changed;
+}
+
+/** Ingest one raw autorun.jsonl line: parse it ONCE, fold it into the orchestration
+ *  accumulator (mutates `s`), and return its render-ready events plus whether the
+ *  orchestration view changed — so the caller can skip a re-render when it didn't. */
+export function ingestRunLine(line: string, s: OrchState): { events: RunEvent[]; orchChanged: boolean } {
+  const t = line.trim();
+  if (!t) return { events: [], orchChanged: false };
+  if (t.startsWith("#")) return { events: markerEvents(t), orchChanged: false };
+  let o: any;
+  try {
+    o = JSON.parse(t);
+  } catch {
+    return { events: plainLineEvents(t), orchChanged: false };
+  }
+  return { events: eventsOf(o), orchChanged: foldRunObject(o, s) };
 }
 
 /* ---- coverage ledger (per-category status, file-backed, authoritative) ---- */
