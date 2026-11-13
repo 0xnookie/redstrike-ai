@@ -136,13 +136,13 @@ export default function EngagementsPage() {
                         {e.starred && <Star size={12} className="shrink-0 fill-amber-400 text-amber-400" />}
                         <span className="truncate text-sm font-medium text-fg-strong">{e.name}</span>
                       </span>
-                      <Pill label={st.label} color={st.color} dot />
+                      <Pill label={st.label} color={st.color} dot pulse={e.status === "running"} />
                     </div>
                     <div className="truncate font-mono text-[11px] text-faint">{e.id} · {e.target}</div>
                     <div className="mt-0.5 flex items-center justify-between gap-3">
-                      {e.status === "running" && prog ? (
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <Progress value={prog.done} max={prog.total} color={st.color} className="max-w-[120px]" animated />
+                      {(e.status === "running" || e.status === "paused") && prog ? (
+                        <span className="flex min-w-0 flex-1 items-center gap-2" title="coverage categories no longer pending">
+                          <Progress value={prog.done} max={prog.total} color={st.color} className="max-w-[120px]" animated={e.status === "running"} />
                           <span className="shrink-0 font-mono text-[11px] text-faint tabular-nums">{prog.done}/{prog.total}</span>
                         </span>
                       ) : (
@@ -208,6 +208,20 @@ function EngagementDetail({
   );
 
   const last = PHASE_STEPS.length - 1;
+  const paused = e.status === "paused";
+  // a run that ended short of a full pass: say what's missing instead of a bare "Completed"
+  const prog = e.phase_progress;
+  const pending = prog ? prog.total - prog.done : 0;
+  const runNote =
+    e.status === "completed" && e.run?.log && (pending > 0 || !e.report)
+      ? [
+          "Run ended",
+          prog ? `${prog.done}/${prog.total} categories covered${pending ? ` · ${pending} never ran` : ""}` : null,
+          e.report ? null : "no consolidated report yet",
+        ].filter(Boolean).join(" · ")
+      : paused
+        ? `Run stopped${prog ? ` at ${prog.done}/${prog.total} categories` : ""} — resume to continue`
+        : null;
 
   return (
     <Panel tall className="lg:col-span-3">
@@ -278,19 +292,28 @@ function EngagementDetail({
                   <span
                     className={cx(
                       "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-medium tabular-nums",
-                      done ? "border-transparent bg-fg text-bg"
-                      : current ? "border-fg text-fg-strong"
+                      done ? "border-emerald-500 bg-emerald-500 text-[#00110a]"
+                      : current ? "border-fg/60 text-fg-strong shadow-[0_0_0_4px_rgb(var(--fg)/0.06)]"
                       : "border-line text-faint",
                     )}
                   >
-                    {done ? <Check size={12} /> : i + 1}
+                    {/* done → check; current → a blinking "you are here" dot; ahead → its number */}
+                    {done ? <Check size={12} strokeWidth={3} />
+                      : current && paused ? <span className="h-[7px] w-[7px] rounded-sm bg-amber-500" />
+                      : current ? <span className="pulse-dot h-[7px] w-[7px] rounded-full bg-fg-strong" />
+                      : i + 1}
                   </span>
-                  <span className={cx("whitespace-nowrap text-xs", done || current ? "text-fg" : "text-faint")}>{p}</span>
-                  {i < last && <span className={cx("mx-1 h-px flex-1", done ? "bg-fg/40" : "bg-line")} />}
+                  <span className={cx("whitespace-nowrap text-xs", done || current ? "text-fg" : "text-faint", paused && current && "text-amber-500")}>
+                    {paused && current ? "Paused" : p}
+                  </span>
+                  {i < last && <span className={cx("mx-1 h-px flex-1", done ? "bg-emerald-500" : "bg-line")} />}
                 </div>
               );
             })}
           </div>
+          {runNote && (
+            <p className={cx("mt-2.5 font-mono text-[11.5px]", paused ? "text-amber-500" : "text-faint")}>{runNote}</p>
+          )}
         </div>
 
         {/* metrics */}

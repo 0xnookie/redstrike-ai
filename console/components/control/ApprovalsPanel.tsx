@@ -5,9 +5,11 @@ import { ShieldQuestion, Check, CheckCheck, Play, Loader2 } from "lucide-react";
 import { useControl } from "./ControlProvider";
 import { Card, EmptyState } from "@/components/ui/primitives";
 import { cx, relTime } from "@/lib/format";
+import { useToast } from "@/components/ui/Toast";
 
 export function ApprovalsPanel() {
   const { pending, busy, running, doApprove, doResume } = useControl();
+  const toast = useToast();
   const [sel, setSel] = useState<Set<string>>(new Set());
 
   // drop selections for items that are no longer pending (approved / resumed away)
@@ -29,8 +31,13 @@ export function ApprovalsPanel() {
 
   const approveSelected = async () => {
     if (!sel.size) return;
-    await doApprove([...sel]);
+    const n = sel.size;
+    if (await doApprove([...sel])) toast(`Approved ${n} action${n === 1 ? "" : "s"} — resume to run ${n === 1 ? "it" : "them"}`);
     setSel(new Set());
+  };
+  const approveAll = async () => {
+    const n = pending.length;
+    if (await doApprove("all")) toast(`Approved all ${n} pending action${n === 1 ? "" : "s"}`);
   };
 
   return (
@@ -44,7 +51,7 @@ export function ApprovalsPanel() {
         </h2>
         {pending.length > 0 && (
           <button
-            onClick={() => void doApprove("all")}
+            onClick={() => void approveAll()}
             disabled={busy}
             className="inline-flex items-center gap-1 text-xs font-medium text-muted transition hover:text-fg disabled:opacity-60"
           >

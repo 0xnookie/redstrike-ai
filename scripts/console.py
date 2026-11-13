@@ -42,6 +42,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -416,6 +417,31 @@ def _minimal_scope_read(path: Path) -> dict:
     return doc
 
 
+def run_info(eng: Path) -> dict:
+    """Whether this engagement has an autonomous-run log, and when it was last written.
+    The console reads "written moments ago" as a run still going — the one liveness signal
+    that also covers runs this server didn't launch (e.g. from a terminal)."""
+    log = eng / "runtime" / "autorun.jsonl"
+    if not log.is_file():
+        return {"log": False, "updated": None}
+    ts = datetime.fromtimestamp(log.stat().st_mtime, timezone.utc)
+    return {"log": True, "updated": ts.isoformat().replace("+00:00", "Z")}
+
+
+def coverage_progress(files: dict):
+    """Phase progress from the coverage ledger: of the categories in phase (not n/a), how many
+    are no longer pending (attempted / skipped-with-reason / blocked / pipeline)."""
+    led = _read_json(files.get("coverage_ledger.json"))
+    cats = led.get("categories") if isinstance(led, dict) else None
+    if not isinstance(cats, list):
+        return None
+    in_phase = [c for c in cats if isinstance(c, dict) and c.get("status") != "n/a"]
+    if not in_phase:
+        return None
+    pending = sum(1 for c in in_phase if c.get("status") == "pending")
+    return {"done": len(in_phase) - pending, "total": len(in_phase)}
+
+
 def manifest_entries(target: Path) -> list:
     """One entry per discovered engagement — rebuilt live on each request, so a
     console left running reflects a scan that finished after launch."""
@@ -432,6 +458,8 @@ def manifest_entries(target: Path) -> list:
             "summary": summarize(eng, files),
             "generated": (cons.get("generated") if isinstance(cons, dict) else None),
             "has": has,
+            "run": run_info(eng),
+            "progress": coverage_progress(files),
         })
     return entries
 

@@ -3,7 +3,7 @@ import { cx } from "@/lib/format";
 import { SEVERITY, VERDICT, CONFIDENCE, hexA } from "@/lib/theme";
 import type { Severity, Verdict, Confidence } from "@/lib/types";
 
-/* ---------- Card = strix panel (frameless in dark, filled in light) ---------- */
+/* ---------- Card = panel (frameless in dark, filled in light) ---------- */
 export function Card({ className, children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div className={cx("panel", className)} {...rest}>
@@ -12,7 +12,7 @@ export function Card({ className, children, ...rest }: React.HTMLAttributes<HTML
   );
 }
 
-/* ---------- Panel + header/body (structured strix layout) ---------- */
+/* ---------- Panel + header/body (structured layout) ---------- */
 export function Panel({
   className, tall, children, ...rest
 }: React.HTMLAttributes<HTMLDivElement> & { tall?: boolean }) {
@@ -108,13 +108,16 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 }
 
 /* ---------- Pill (colored chip for data: severity / verdict / mappings …) ---------- */
-export function Pill({ label, color = "#94a3b8", dot = false, className }: { label: string; color?: string; dot?: boolean; className?: string }) {
+export function Pill({
+  label, color = "#94a3b8", dot = false, pulse = false, className,
+}: { label: string; color?: string; dot?: boolean; pulse?: boolean; className?: string }) {
   return (
     <span
       className={cx("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium", className)}
       style={{ color, background: hexA(color, "1f"), border: `1px solid ${hexA(color, "55")}` }}
     >
-      {dot && <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />}
+      {/* pulse: the dot blinks while the thing it labels is live (e.g. a running engagement) */}
+      {dot && <span className={cx("h-1.5 w-1.5 rounded-full", pulse && "pulse-dot")} style={{ background: color }} />}
       {label}
     </span>
   );
@@ -133,7 +136,7 @@ export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
   return <Pill label={m.label} color={m.color} />;
 }
 
-/* ---------- Tile / KPI (strix metric card) ---------- */
+/* ---------- Tile / KPI (metric card) ---------- */
 export function Kpi({
   label, value, color, sub, note, suffix, icon, onClick, active,
 }: {

@@ -7,6 +7,7 @@ import {
   ScrollText, Radio,
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
+import { useToast } from "@/components/ui/Toast";
 import { cx, isReportable, verdictOf } from "@/lib/format";
 import { SEVERITY, VERDICT, sevMeta } from "@/lib/theme";
 import type { Finding, HttpExchange } from "@/lib/types";
@@ -44,6 +45,7 @@ const COLS: { k: SortKey; label: string; num?: boolean }[] = [
 
 export default function SiteMapPage() {
   const { activeEngagement: eng, activeId, content, hostRaw, history, findings, openHost, openFinding } = useConsole();
+  const toast = useToast();
 
   const byId = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
   const map = useMemo(() => buildSiteMap(content, hostRaw, findings, history), [content, hostRaw, findings, history]);
@@ -199,6 +201,7 @@ export default function SiteMapPage() {
     const a = document.createElement("a");
     a.href = url; a.download = `${activeId || "engagement"}-sitemap.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Exported ${lines.length - 1} site map item${lines.length === 2 ? "" : "s"}`);
   };
 
   /* counts for the filter chips */

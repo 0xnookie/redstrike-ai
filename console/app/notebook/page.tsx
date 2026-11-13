@@ -6,6 +6,7 @@ import {
   CheckCircle2, XCircle, Ban, ChevronRight, Users, ScrollText,
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
+import { useToast } from "@/components/ui/Toast";
 import { cx, fmtDate } from "@/lib/format";
 import { SEVERITY, sevMeta } from "@/lib/theme";
 import type { Finding, NotebookLead, NotebookAccount, LeadStatus } from "@/lib/types";
@@ -42,6 +43,7 @@ const leadTarget = (l: NotebookLead) => `${l.host ?? ""}${l.path ?? ""}` || "—
 /* ── page ───────────────────────────────────────────────────────────────── */
 export default function NotebookPage() {
   const { activeEngagement: eng, activeId, notebook, findings, openFinding } = useConsole();
+  const toast = useToast();
   const view = useMemo(() => buildNotebook(notebook), [notebook]);
   const byId = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
 
@@ -88,7 +90,7 @@ export default function NotebookPage() {
         title="Notebook"
         live={eng.status === "running"}
         sub={`${eng.name} · ${k.activeLeads} active lead${k.activeLeads === 1 ? "" : "s"} · ${view.reconCount} recon rows`}
-        actions={<button onClick={() => exportMarkdown(view, eng.name, activeId, byId)} className="btn-ghost"><Download size={14} /> Export notes</button>}
+        actions={<button onClick={() => { exportMarkdown(view, eng.name, activeId, byId); toast("Notebook exported as Markdown"); }} className="btn-ghost"><Download size={14} /> Export notes</button>}
       />
 
       {/* KPI strip */}

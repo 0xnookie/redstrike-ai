@@ -67,6 +67,10 @@ import http.server  # noqa: E402
 # in-flight runs: engagement id -> Popen (process-group leader)
 _RUNS: dict[str, subprocess.Popen] = {}
 _RUNS_LOCK = threading.Lock()
+# engagement id -> how its last run ended THIS session: {"how": "stopped"} (operator Stop)
+# or {"how": "exited", "rc": n} (the run finished on its own). Lets the console say
+# Paused vs Completed instead of guessing from whether a report exists.
+_ENDED: dict[str, dict] = {}
 
 
 def _rmtree_robust(path: Path) -> None:
@@ -446,10 +450,15 @@ def make_control_handler(target: Path, token: str):
             if path == "/api/status":
                 with _RUNS_LOCK:
                     runs = {k: v.pid for k, v in _RUNS.items() if v.poll() is None}
+                    ended = dict(_ENDED)
+                    for k, v in _RUNS.items():
+                        if v.poll() is not None:  # finished on its own (still tracked)
+                            ended[k] = {"how": "exited", "rc": v.returncode}
                 return self._json(HTTPStatus.OK, {
                     "ok": True,
                     "engagements": [e.name for e in console.discover(target)],
                     "runs": runs,
+                    "ended": ended,
                 })
             if path == "/api/auth":
                 return self._json(HTTPStatus.OK, auth_snapshot())
@@ -539,6 +548,7 @@ def make_control_handler(target: Path, token: str):
             proc = _run_cli(args, background=True)
             with _RUNS_LOCK:
                 _RUNS[eid] = proc
+                _ENDED.pop(eid, None)  # a fresh run: forget how the last one ended
             return self._json(HTTPStatus.ACCEPTED, {"ok": True, "pid": proc.pid, "engagement": eid})
 
         def _approve(self, eid: str, body: dict):
@@ -566,9 +576,11 @@ def make_control_handler(target: Path, token: str):
                 _terminate(proc)
             except Exception as e:  # noqa: BLE001 — surface any platform signal/kill failure
                 return self._json(HTTPStatus.OK, {"ok": False, "note": str(e)})
-            # drop the handle so /status stops reporting it as a live run right away
+            # drop the handle so /status stops reporting it as a live run right away, and
+            # remember it was STOPPED (paused, resumable) rather than finished
             with _RUNS_LOCK:
                 _RUNS.pop(eid, None)
+                _ENDED[eid] = {"how": "stopped"}
             return self._json(HTTPStatus.OK, {"ok": True, "stopped": proc.pid})
 
         def _delete(self, eid: str, eng: Path):
@@ -595,6 +607,7 @@ def make_control_handler(target: Path, token: str):
                 return self._json(HTTPStatus.OK, {"ok": False, "error": msg})
             with _RUNS_LOCK:
                 _RUNS.pop(eid, None)
+                _ENDED.pop(eid, None)
             return self._json(HTTPStatus.OK, {"ok": True, "deleted": eid})
 
         # -- LLM provider auth ----------------------------------------------
