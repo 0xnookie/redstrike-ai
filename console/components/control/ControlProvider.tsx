@@ -75,6 +75,11 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const streamAbort = useRef<AbortController | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // latest status + startStream, read from inside the stream's async body without stale closures
+  const statusRef = useRef<ControlStatus | null>(null);
+  statusRef.current = status;
+  const startStreamRef = useRef<((id: string) => void) | null>(null);
 
   const engagements = status?.engagements ?? [];
   const runs = status?.runs ?? {};
@@ -132,6 +137,10 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
 
   /* ---- SSE stream lifecycle ---- */
   const stopStream = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
     if (streamAbort.current) {
       streamAbort.current.abort();
       streamAbort.current = null;
@@ -178,12 +187,37 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
             ac.signal,
           );
         } catch (e) {
-          if (e instanceof ControlError && e.kind === "unauthorized") setConn("locked");
+          if (e instanceof ControlError && e.kind === "unauthorized") {
+            setConn("locked");
+            return;
+          }
+        }
+        // The backend closed the stream — either because there's no run log YET (the engine is
+        // still booting right after launch, so the tail returns "no-run" immediately) or because
+        // a long run hit the tail's deadline. If this is still the active stream (not superseded
+        // or aborted by us) AND a run is live for this engagement, reopen shortly so the live view
+        // keeps following WITHOUT a manual refresh. The backend replays the current run from the
+        // top on reconnect, so re-folding from empty stays correct. If no run is live, we stop.
+        if (ac.signal.aborted || streamAbort.current !== ac) return;
+        let stillLive = false;
+        try {
+          const st = await api.getStatus(tokenRef.current);
+          setStatus(st);
+          setConn("ready");
+          stillLive = st.runs[id] != null;
+        } catch {
+          /* leave stillLive false — a probe failure shouldn't spin a reconnect loop */
+        }
+        if (stillLive && !ac.signal.aborted && streamAbort.current === ac) {
+          reconnectTimer.current = setTimeout(() => {
+            if (!ac.signal.aborted && streamAbort.current === ac) startStreamRef.current?.(id);
+          }, 1200);
         }
       })();
     },
     [stopStream, refresh, refreshApprovals],
   );
+  startStreamRef.current = startStream;
 
   /* ---- boot: auto-connect via same-origin token hand-off, else presence probe ---- */
   useEffect(() => {
@@ -296,9 +330,24 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
       setBusy(true);
       setLastError("");
       try {
+        const before = new Set(statusRef.current?.engagements ?? []);
         const r = await api.initEngagement(tokenRef.current, body);
         if (!r.ok) setLastError((r.stderr || r.error || "init failed").trim());
-        await refresh();
+        // Refresh the engagement list AND resolve the id of the one just scaffolded, so a
+        // "create & launch" can start the run on the FIRST click. The backend's init doesn't
+        // echo the id, and the component's `engagements` closure is stale this tick, so diff a
+        // freshly-fetched list against the pre-init one instead of relying on a slug guess.
+        try {
+          const st = await api.getStatus(tokenRef.current);
+          setStatus(st);
+          setConn("ready");
+          if (r.ok && !r.engagement) {
+            const added = st.engagements.filter((e) => !before.has(e));
+            if (added.length === 1) r.engagement = added[0];
+          }
+        } catch {
+          /* couldn't refresh — caller falls back to its slug match */
+        }
         return r;
       } catch (e) {
         setLastError(msgOf(e));
@@ -307,7 +356,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
         setBusy(false);
       }
     },
-    [refresh],
+    [],
   );
 
   // Launch a run against an EXPLICIT engagement id — lets a fresh "create & launch"
