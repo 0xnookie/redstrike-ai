@@ -88,7 +88,7 @@ def read_ledger(eng_dir: Path) -> dict | None:
 
 def pending_ids(ledger: dict | None) -> frozenset:
     """Category ids still `pending` (routed but never run) — the remaining-work set the
-    coverage gate blocks on and the no-progress breaker compares across legs."""
+    no-progress breaker compares across legs."""
     if not isinstance(ledger, dict):
         return frozenset()
     out = set()
@@ -100,10 +100,32 @@ def pending_ids(ledger: dict | None) -> frozenset:
     return frozenset(out)
 
 
+def redrivable_ids(ledger: dict | None) -> frozenset:
+    """Category ids that are NOT yet genuinely run — status `pending` OR `blocked`. This is the set
+    that must empty before the engagement is DONE. `blocked` is included on purpose: an autonomous
+    engine can over-cautiously mark non-destructive vulnerability DETECTION as "approval-gated" and
+    `blocked` (observed), and the coverage gate then PASSES (blocked counts as accounted) even with
+    no report — so `gate.verify == 0` alone would falsely call a recon-only run "done". Treating
+    `blocked` as re-drivable makes the loop resume and actually run those categories; a category that
+    is legitimately blocked (e.g. needs test accounts) simply makes no progress and is caught by the
+    no-progress breaker, which stops with an honest "coverage partial" outcome rather than a false
+    "clean"."""
+    if not isinstance(ledger, dict):
+        return frozenset()
+    out = set()
+    for c in ledger.get("categories") or []:
+        if isinstance(c, dict) and str(c.get("status", "")).lower() in ("pending", "blocked"):
+            cid = c.get("id") or c.get("name")
+            if cid:
+                out.add(str(cid))
+    return frozenset(out)
+
+
 def outstanding_categories(ledger: dict | None) -> list[dict]:
-    """Categories the continue-prompt should name: still `pending`, OR `attempted` with zero
-    findings and an escalation ladder that is not obviously exhausted (so an empty-but-signalled
-    surface gets another, deeper pass)."""
+    """Categories the continue-prompt should name: still `pending`, still `blocked` (re-drive its
+    non-destructive detection — see `redrivable_ids`), OR `attempted` with zero findings and an
+    escalation ladder that is not obviously exhausted (so an empty-but-signalled surface gets
+    another, deeper pass)."""
     if not isinstance(ledger, dict):
         return []
     out: list[dict] = []
@@ -111,7 +133,7 @@ def outstanding_categories(ledger: dict | None) -> list[dict]:
         if not isinstance(c, dict):
             continue
         st = str(c.get("status", "")).lower()
-        if st == "pending":
+        if st in ("pending", "blocked"):
             out.append(c)
         elif st == "attempted" and int(c.get("findings_count", 0) or 0) == 0:
             # attempted-but-empty: worth another pass only while the ladder isn't clearly spent.
@@ -195,22 +217,30 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
         f"Continue Redstrike engagement '{engagement_id}' from where the previous invocation "
         f"stopped (it hit its per-invocation turn cap, not the end of the work). Authorization "
         f"and scope are already recorded (RoE appended) — §0 is SATISFIED, do not re-ask. Do NOT "
-        f"repeat completed work: consult coverage_ledger.json and skip every category already "
-        f"'attempted'/'skipped'/'n/a'."
+        f"repeat completed work: consult coverage_ledger.json and skip every category already done "
+        f"('attempted' with findings, 'skipped', or 'n/a')."
     )
     if not outstanding:
         return (
             head + " No specific categories were parseable as outstanding — finish any remaining "
-            "coverage per coverage_ledger.json, then re-converge, run the recall-audit, compose "
-            "attack chains over accepted findings, and write the report. Honor the active scope "
-            "gate and STOP/defer at any approval-gated or destructive step."
+            "coverage per coverage_ledger.json (run non-destructive detection for any category still "
+            "'pending' or 'blocked' — detection and benign PoCs are NOT gated), then re-converge, run "
+            "the recall-audit, compose attack chains over accepted findings, and write the report. "
+            "Only a genuine exploitation / destructive / RCE command defers for operator approval; "
+            "when one does, record it, skip that one step, and CONTINUE the rest — never halt the "
+            "whole run at a gate."
         )
     shown = outstanding[:max_list]
     bullets = []
     for c in shown:
         cid = c.get("id") or c.get("name") or "?"
         st = str(c.get("status", "")).lower()
-        tag = "pending" if st == "pending" else "attempted, 0 findings — escalate further"
+        if st == "pending":
+            tag = "pending — run it now"
+        elif st == "blocked":
+            tag = "blocked as approval-gated — run its NON-DESTRUCTIVE detection now (detection is not gated)"
+        else:
+            tag = "attempted, 0 findings — escalate deeper"
         bullets.append(f"- {cid} ({tag})")
     more = len(outstanding) - len(shown)
     if more > 0:
@@ -221,10 +251,14 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
         + "\n".join(bullets)
         + "\nInvoke the redstrike orchestrator skill and run the orchestrator pipeline on exactly "
         "these: for each, its context feeder (if any) → executor → the independent verify "
-        "subagent, then mark coverage_ledger.json with scripts/coverage.py --mark. When no "
-        "outstanding categories remain, re-converge, run the recall-audit, compose attack chains "
-        "over accepted findings, and write the report. Honor the active scope gate and STOP/defer "
-        "at any approval-gated or destructive step instead of proceeding."
+        "subagent, then mark coverage_ledger.json with scripts/coverage.py --mark. Vulnerability "
+        "DETECTION and benign PoCs are NON-destructive and are NOT gated — run them now; a category "
+        "previously left 'blocked' as approval-gated must have its non-destructive detection run. "
+        "Only a genuine exploitation / destructive / RCE command defers at the scope gate: when one "
+        "does, it is queued in runtime/approvals_pending.json for the operator — record it, skip "
+        "that one step, and CONTINUE the rest; never halt the whole run at a gate. When no "
+        "categories remain outstanding, re-converge, run the recall-audit, compose attack chains "
+        "over accepted findings, and write the report."
     )
 
 
@@ -237,17 +271,17 @@ def loop_degraded_reason(reason: str, *, invocations: int, cumulative_cost: floa
     if reason == BUDGET_EXHAUSTED:
         return (f"stopped after {invocations} invocation(s): the global budget (${max_budget:.2f}) "
                 f"was exhausted (${cumulative_cost:.2f} spent) with {pending_count} category/ies "
-                f"still pending — coverage is partial, relaunch with a higher --max-budget-usd")
+                f"still outstanding — coverage is partial, relaunch with a higher --max-budget-usd")
     if reason == MAX_INVOCATIONS:
         return (f"stopped after the max of {invocations} resume invocation(s) with {pending_count} "
-                f"category/ies still pending — coverage is partial (raise REDSTRIKE_MAX_INVOCATIONS "
+                f"category/ies still outstanding — coverage is partial (raise REDSTRIKE_MAX_INVOCATIONS "
                 f"to allow more legs)")
     if reason == WALL_CLOCK:
         return (f"stopped after {invocations} invocation(s): the wall-clock ceiling was hit with "
-                f"{pending_count} category/ies still pending — coverage is partial")
+                f"{pending_count} category/ies still outstanding — coverage is partial")
     if reason == NO_PROGRESS:
         return (f"stopped after {invocations} invocation(s): two consecutive resumes made no "
-                f"progress ({pending_count} category/ies still pending) — the run is stuck")
+                f"progress ({pending_count} category/ies still outstanding) — the run is stuck")
     if reason == BLOCKED_ON_APPROVAL:
         return (f"run paused after {invocations} invocation(s): {pending_approvals} action(s) await "
                 f"operator approval and nothing else advanced — approve in the console, then "
@@ -360,7 +394,12 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
         cumulative_cost += _cost_of(res)
 
         # --- completion / stop decisions ---
-        if _gate_done(gate_verify, repo, eng_dir):
+        # DONE only when the gate is clear AND no re-drivable work (pending OR blocked) remains. A
+        # gate that PASSES while categories are still `blocked` (e.g. non-destructive detection an
+        # over-cautious engine mislabeled "approval-gated") is NOT a finished engagement — keep
+        # resuming so the continue-prompt drives those categories to actually run.
+        gate_clear = _gate_done(gate_verify, repo, eng_dir)
+        if gate_clear and not redrivable_ids(read_ledger(eng_dir)):
             reason = DONE
             break
 
@@ -376,13 +415,13 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
             break
 
         prev = cur
-        pend = len(cur.pending)
-        emit(ui.info(f"invocation {invocations} complete · {_plural(pend, 'category')} still "
-                     f"pending · {_plural(cur.findings, 'finding')} so far · ${cumulative_cost:.4f} "
-                     f"of ${max_budget_usd:.2f} used · resuming…"))
+        outstanding_now = len(redrivable_ids(read_ledger(eng_dir)))
+        emit(ui.info(f"invocation {invocations} complete · {_plural(outstanding_now, 'category')} "
+                     f"still outstanding · {_plural(cur.findings, 'finding')} so far · "
+                     f"${cumulative_cost:.4f} of ${max_budget_usd:.2f} used · resuming…"))
 
     # --- combine the legs into one whole-run result for the single gate + diagnostics pass ---
-    pending_count = len(pending_ids(read_ledger(eng_dir)))
+    pending_count = len(redrivable_ids(read_ledger(eng_dir)))
     n_approvals = pending_approvals_count(eng_dir)
     detail = loop_degraded_reason(
         reason, invocations=invocations, cumulative_cost=cumulative_cost,
@@ -405,7 +444,7 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
     # --- final whole-run summary line ---
     emit(ui.rule("autonomous loop complete"))
     line = (f"{_plural(invocations, 'invocation')} · ${cumulative_cost:.4f} total · "
-            f"{_plural(pending_count, 'category')} still pending · {reason}")
+            f"{_plural(pending_count, 'category')} still outstanding · {reason}")
     emit((ui.ok if reason == DONE else ui.warn)(line))
     if detail:
         emit(ui.warn(detail))

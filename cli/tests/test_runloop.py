@@ -344,5 +344,49 @@ class TestAutonomousDryRunUnchanged(unittest.TestCase):
             self.assertNotIn("autonomous loop complete", out)  # the loop was never driven
 
 
+class TestBlockedCategoriesRedriven(unittest.TestCase):
+    """The real failure mode: an autonomous engine ran recon + baseline, marked the vuln categories
+    `blocked` ("approval-gated exploitation"), and the coverage gate PASSES (gate==0) even with no
+    report. The loop must NOT call that done — it must resume and re-drive the blocked categories."""
+
+    def test_redrivable_ids_includes_blocked(self):
+        led = {"categories": [{"id": "xss", "status": "pending"},
+                              {"id": "idor", "status": "blocked"},
+                              {"id": "sqli", "status": "attempted", "findings_count": 0},
+                              {"id": "cors", "status": "skipped"}]}
+        self.assertEqual(runloop.redrivable_ids(led), frozenset({"xss", "idor"}))
+        self.assertEqual(runloop.pending_ids(led), frozenset({"xss"}))  # blocked is NOT pending
+        self.assertEqual(runloop.redrivable_ids(None), frozenset())
+
+    def test_blocked_blocks_done_and_is_redriven(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "blocked"},
+                                {"id": "idor", "status": "blocked"}])
+
+            def run_them(e):  # leg 2: the re-driven categories actually run
+                _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1},
+                                  {"id": "idor", "status": "attempted", "findings_count": 0}])
+
+            legs = [_Leg(cost=0.1, tool_calls=8),                        # leg1: blocked, gate==0
+                    _Leg(cost=0.1, tool_calls=8, side_effect=run_them)]  # leg2: runs them -> done
+            engine = _FakeEngine(legs)
+            # gate==0 on EVERY leg, yet leg1 must not finish because blocked categories remain
+            res = _drive(engine, eng, gate=_gate([0]), max_budget_usd=100.0)
+            self.assertEqual(res.invocations, 2)        # did NOT stop at leg 1
+            self.assertEqual(res.reason, runloop.DONE)  # done only once nothing is blocked
+            self.assertIn("xss", engine.prompts[1])     # the continue-prompt named the blocked cats
+            self.assertIn("idor", engine.prompts[1])
+
+    def test_continue_prompt_drives_blocked_without_stop_wording(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "auth-bypass", "status": "blocked"}])
+            p = runloop.continue_prompt("acme-eng", eng)
+            self.assertIn("auth-bypass", p)            # blocked category is named
+            self.assertIn("NON-DESTRUCTIVE", p)        # told to run its detection
+            # the old "stop at the gate" framing must be gone from resume prompts
+            self.assertNotIn("instead of proceeding", p)
+            self.assertNotIn("STOP/defer", p)
+
+
 if __name__ == "__main__":
     unittest.main()
