@@ -59,10 +59,12 @@ class TestInitAndRunDryRun(unittest.TestCase):
             self.assertIn("PreToolUse", settings["hooks"])
             # the OS-sandbox network boundary is derived from the engagement scope (P0-1)
             self.assertIn("sandbox", settings)
-            allowed_hosts = settings["sandbox"]["network"]["allowedHosts"]
-            self.assertIn("*.acme.com", allowed_hosts)
-            self.assertIn("api.acme.com", allowed_hosts)
-            self.assertNotIn("admin.acme.com", allowed_hosts)  # explicit exclude dropped
+            self.assertIs(settings["sandbox"]["enabled"], True)
+            allowed_domains = settings["sandbox"]["network"]["allowedDomains"]
+            self.assertIn("api.anthropic.com", allowed_domains)  # engine host always present
+            self.assertIn("*.acme.com", allowed_domains)
+            self.assertIn("api.acme.com", allowed_domains)
+            self.assertNotIn("admin.acme.com", allowed_domains)  # explicit exclude dropped
             # dry-run prints the argv with the key flags
             self.assertIn("--append-system-prompt-file", out)
             self.assertIn("--add-dir", out)

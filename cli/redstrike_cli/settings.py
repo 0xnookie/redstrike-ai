@@ -47,6 +47,22 @@ def bash_allow_globs(extra: list[str] | None = None) -> list[str]:
     return _dedupe(globs)
 
 
+# Hosts the ENGINE itself relies on — always allow-listed, regardless of engagement scope.
+# Important: Claude Code's OWN process (model/API, auth, telemetry) runs OUTSIDE the OS sandbox.
+# The sandbox confines SHELL commands and their children only; the engine's core request loop and
+# its in-process tools (WebFetch/WebSearch), hooks and MCP servers are not constrained by this
+# allowlist (see Claude Code docs, "What runs outside the sandbox"). So a scope-only allowlist does
+# NOT break the engine. These entries are belt-and-suspenders: a SANDBOXED shell command starts with
+# an EMPTY allowlist (nothing is auto-permitted for it), so if any sandboxed path ever needs the
+# control plane it must be listed. All are first-party control-plane hosts, never engagement targets.
+_ENGINE_HOSTS = (
+    "api.anthropic.com",   # Anthropic API — model / control-plane traffic
+    "*.anthropic.com",     # auth / console / telemetry / feature-flag subdomains
+    "claude.ai",           # subscription login + server-managed settings
+    "*.claude.ai",
+)
+
+
 def _host_of(entry: str) -> str:
     """Hostname of an in_scope.urls entry (scheme optional); '' if none parseable."""
     s = str(entry).strip()
@@ -60,21 +76,39 @@ def _host_of(entry: str) -> str:
 
 
 def build_sandbox(scope: dict | None) -> dict | None:
-    """Build the OS-sandbox network block from the engagement scope.
+    """Build the Claude Code OS-sandbox block from the engagement scope.
 
-    This is the REAL network boundary on a WSL2/Linux host (the PreToolUse scope gate that
+    This is the REAL network boundary on a macOS/Linux/WSL2 host (the PreToolUse scope gate that
     matches tool *input* is a safety net over it, not a boundary — see hooks/scope_gate.py and
-    README "Safety model"). The settings file never emitted a `sandbox` key, so that boundary did
-    not exist; this derives `sandbox.network.allowedHosts` from the in-scope domains/cidrs/urls so
-    the kernel-level allowlist matches the authorization record.
+    README "Safety model"). The settings file never emitted a working `sandbox` key, so that boundary
+    did not exist; this derives the allowlist from the in-scope domains/cidrs/urls so the kernel-level
+    confinement matches the authorization record.
 
-    Allowlist semantics: everything not listed is denied by the OS sandbox, so out-of-scope assets
-    are blocked by omission. We additionally drop any in-scope entry that is itself an EXACT
-    out-of-scope entry. We do NOT try to carve an out-of-scope host out of an in-scope wildcard
-    (e.g. admin.acme.com under *.acme.com) here — an allowlist can't express that subtraction; the
-    scope gate's `classify` (where explicit excludes win, wildcards included) remains the layer that
-    catches that case. `allowUnixSockets` is left empty (the engagement needs no extra local sockets
-    by default; narrowing it keeps a local-socket escape off the boundary).
+    Schema (verified against the Claude Code docs — code.claude.com/docs/en/sandboxing and
+    /settings-reference):
+      * `sandbox.enabled` (bool, default OFF) turns the Bash sandbox on. WITHOUT it the whole
+        `network` block is inert, so we always set it when we emit a sandbox. It is a no-op on native
+        Windows (Claude Code runs unsandboxed there); the run path already prints a confinement banner.
+      * `sandbox.network.allowedDomains` is the allowlist key. (It is NOT `allowedHosts` — that spelling
+        is an unknown key Claude Code silently drops, which is why the previous block never confined
+        anything.) An entry with no port allows all ports on that host; `*.acme.com`-style wildcards work.
+      * `sandbox.network.strictAllowlist` makes a host outside the allowlist a hard DENY in every
+        permission mode (otherwise manual/default mode only *prompts*; headless dontAsk already denies).
+        It is honored from user/managed/`--settings` (the launcher passes `--settings runtime/...`),
+        requires Claude Code v2.1.219+, and is harmlessly dropped on older builds.
+      * `sandbox.network.allowUnixSockets` is left empty (the engagement needs no extra local sockets;
+        narrowing it keeps a local-socket escape — e.g. docker.sock — off the boundary).
+
+    Engine traffic: Claude Code's own API/auth/telemetry and its in-process tools (WebFetch/WebSearch),
+    hooks and MCP servers run OUTSIDE the sandbox, so a scope-only allowlist does not break the engine.
+    We still prepend `_ENGINE_HOSTS` defensively — a sandboxed shell command's allowlist starts EMPTY
+    (nothing is auto-permitted for it).
+
+    Allowlist semantics: everything not listed is denied by the OS sandbox, so out-of-scope assets are
+    blocked by omission. We additionally drop any in-scope entry that is itself an EXACT out-of-scope
+    entry. We do NOT try to carve an out-of-scope host out of an in-scope wildcard (e.g. admin.acme.com
+    under *.acme.com) here — an allowlist can't express that subtraction; the scope gate's `classify`
+    (where explicit excludes win, wildcards included) remains the layer that catches that case.
 
     Returns None when no scope is provided (callers then omit the block).
     """
@@ -100,7 +134,16 @@ def build_sandbox(scope: dict | None) -> dict | None:
         h = _host_of(u)
         if h:
             _add(h)
-    return {"network": {"allowedHosts": allowed, "allowUnixSockets": []}}
+    # Engine control-plane hosts first (always present), then the scope-derived allowlist.
+    allowed_domains = _dedupe(list(_ENGINE_HOSTS) + allowed)
+    return {
+        "enabled": True,
+        "network": {
+            "allowedDomains": allowed_domains,
+            "strictAllowlist": True,
+            "allowUnixSockets": [],
+        },
+    }
 
 
 # Shell-command tokens that perform ACTIVE exploitation (not just recon). A pre-allow glob that
