@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck, ShieldAlert } from "lucide-react";
 import { useConsole } from "@/lib/store";
@@ -8,13 +8,23 @@ import { reportable, severityCounts, severityChartData, groupByCategory, groupBy
 import { SEVERITY, VERDICT, TRANSPORT, sevMeta, hexA } from "@/lib/theme";
 import { fmtDate, relTime, cx } from "@/lib/format";
 import { cvssScore } from "@/lib/cvss";
+import { fetchDiagnostics, latestRun } from "@/lib/data";
+import type { Diagnostics } from "@/lib/types";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, LivePill, SeverityBadge, Pill } from "@/components/ui/primitives";
 import { AreaLine, Donut, Legend, Progress } from "@/components/ui/charts";
 import { CyberFeed } from "@/components/dashboard/CyberFeed";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds, diagnostics } = useConsole();
+  const { activeEngagement, activeId, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
+  // runtime/diagnostics.json is component-local (not carried by the shared store): fetch it for the
+  // active engagement so the reliability banner reflects the latest run.
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    fetchDiagnostics(activeId).then((d) => { if (live) setDiagnostics(d); });
+    return () => { live = false; };
+  }, [activeId]);
   const [sevHover, setSevHover] = useState<string | null>(null); // shared by the donut + its legend
 
   const rep = reportable(findings);
@@ -49,8 +59,7 @@ export default function DashboardPage() {
   // Reliability banner (runtime/diagnostics.json): a degraded/blocked run must NOT read as a green 100%.
   // Shown only when the latest run produced nothing for an environmental reason — empty ≠ clean.
   const reliability = useMemo(() => {
-    const runs = diagnostics?.runs;
-    const run = runs && runs.length ? runs[runs.length - 1] : undefined;
+    const run = latestRun(diagnostics);
     if (!run) return null;
     const overall = run.transport_health?.overall;
     const transportBlocked = overall?.status === "blocked";

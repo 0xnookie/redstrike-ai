@@ -152,11 +152,6 @@ export interface Asset {
   title?: string;       // page / portal title
   tier?: number;        // recon priority tier (1 = highest-value)
   note?: string;        // recon note, e.g. "health-sensitive: liveness-only, no scan"
-  // Phase-2 reliability (runtime/diagnostics.json transport_health): when a gateway blocked the run, a
-  // clean / asset-only render here is UNRELIABLE, not "no issues" — drives the per-host transport badge.
-  transport?: TransportClass;
-  transportBlockRate?: number;  // 0..1 share of requests blocked
-  transportWaf?: string | null; // detected gateway/WAF label, when known
 }
 
 // Open port + service, built from host-discovery's host_discovery.json
@@ -491,5 +486,4 @@ export interface ConsoleData {
   content?: ContentMap;
   history?: HttpHistory;
   notebook?: Notebook;
-  diagnostics?: Diagnostics;
 }

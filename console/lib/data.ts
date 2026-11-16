@@ -15,7 +15,7 @@
 //                       and derive activity + agent stats from the real findings.
 
 import type {
-  ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service, Diagnostics, TransportClass,
+  ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service, Diagnostics, DiagnosticsRun, TransportClass,
 } from "./types";
 import { assetHosts, isReportable, verdictOf } from "./format";
 
@@ -225,8 +225,8 @@ export function buildServices(o: Record<string, any>): Service[] {
         // no explicit ports[] but the host answered HTTP (or carries a scheme/port):
         // synthesize one service so the Ports table + asset map populate. A host with
         // neither ports nor an http probe (e.g. gateway-blocked) stays asset-only — and when
-        // runtime/diagnostics.json flags it transport-`blocked`, overlayAssetTransport() tags that
-        // asset so the console explains the gap ("WAF-blocked — coverage unreliable") instead of
+        // runtime/diagnostics.json flags it transport-`blocked`, the asset drawer looks that host up
+        // via transportHostMap() and explains the gap ("WAF-blocked — coverage unreliable") instead of
         // leaving it an unexplained asset-only row.
         const scheme = h?.scheme || httpMeta.scheme || "https";
         out.push({
@@ -393,18 +393,27 @@ export function transportHostMap(diag?: Diagnostics): Map<string, { classificati
   return map;
 }
 
+/** The latest diagnostics run (the contract: use the last runs[] entry), or undefined. */
+export function latestRun(diag?: Diagnostics): DiagnosticsRun | undefined {
+  const runs = diag?.runs;
+  return Array.isArray(runs) && runs.length ? runs[runs.length - 1] : undefined;
+}
+
 /**
- * Overlay transport reliability from runtime/diagnostics.json onto assets, matched by host value.
- * A no-op without diagnostics. A `blocked` host becomes a distinct state (not a verdict), so the asset
- * drawer can show it was WAF-blocked and its clean/asset-only render is UNRELIABLE, not "no issues".
+ * Fetch one engagement's runtime/diagnostics.json from the console server (component-local: the shared
+ * store does not carry it). Returns undefined when nothing is served / no file / a parse error, so the
+ * reliability UI simply stays hidden. Validates the runs[] shape before returning.
  */
-export function overlayAssetTransport(assets: Asset[], diag?: Diagnostics): Asset[] {
-  const map = transportHostMap(diag);
-  if (!map.size) return assets;
-  return assets.map((a) => {
-    const t = map.get(a.value);
-    return t ? { ...a, transport: t.classification, transportBlockRate: t.block_rate, transportWaf: t.waf } : a;
-  });
+export async function fetchDiagnostics(id: string): Promise<Diagnostics | undefined> {
+  if (!id) return undefined;
+  try {
+    const res = await fetch(`/e/${id}/diagnostics.json`, { cache: "no-store" });
+    if (!res.ok) return undefined;
+    const j = await res.json();
+    return j && typeof j === "object" && Array.isArray(j.runs) ? (j as Diagnostics) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
