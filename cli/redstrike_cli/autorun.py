@@ -28,6 +28,20 @@ class RunSummary:
     denials: list = field(default_factory=list)
     deferred: list = field(default_factory=list)
     result_text: str = ""
+    # --- reliability signals (fed to diagnostics) ---
+    tool_failures: list = field(default_factory=list)   # [{tool, exit_code, phase, count}] aggregated
+    non_json_lines: int = 0                              # stream lines we could not parse as JSON
+    non_json_sample: str = ""                            # first such line (truncated), for the log
+    tool_names: dict = field(default_factory=dict)       # tool_use id -> tool name (internal corr.)
+
+
+def _bump_tool_failure(s: "RunSummary", tool: str, exit_code=None, phase=None) -> None:
+    """Aggregate a failed tool invocation into s.tool_failures (by tool/exit_code/phase)."""
+    for e in s.tool_failures:
+        if e["tool"] == tool and e["exit_code"] == exit_code and e["phase"] == phase:
+            e["count"] += 1
+            return
+    s.tool_failures.append({"tool": tool, "exit_code": exit_code, "phase": phase, "count": 1})
 
 
 _INPUT_KEYS = ("command", "url", "file_path", "pattern", "path", "description", "prompt")
@@ -37,7 +51,15 @@ def _tool_uses(obj: dict):
     msg = obj.get("message") or {}
     for b in msg.get("content") or []:
         if isinstance(b, dict) and b.get("type") == "tool_use":
-            yield b.get("name", ""), (b.get("input") or {})
+            yield b.get("name", ""), (b.get("input") or {}), b.get("id", "")
+
+
+def _tool_results(obj: dict):
+    """Yield (tool_use_id, is_error) for every tool_result block in a `user` stream event."""
+    msg = obj.get("message") or {}
+    for b in msg.get("content") or []:
+        if isinstance(b, dict) and b.get("type") == "tool_result":
+            yield b.get("tool_use_id", ""), bool(b.get("is_error"))
 
 
 def _short_input(inp: dict) -> str:
@@ -61,12 +83,20 @@ def handle_event(o: dict, s: RunSummary, stream) -> None:
             file=stream,
         )
     elif t == "assistant":
-        for name, inp in _tool_uses(o):
+        for name, inp, tid in _tool_uses(o):
             s.tool_calls += 1
+            if tid:
+                s.tool_names[tid] = name
             si = _short_input(inp)
             arrow = ui.style("→", ui.CYAN, stream=stream)
             tail = f"  {ui.style(si, ui.DIM, stream=stream)}" if si else ""
             print(f"  {arrow} {name}{tail}", file=stream)
+    elif t == "user":
+        # A tool_result flagged is_error means that tool invocation failed — count it (correlating
+        # the tool_use id back to the tool name). exit_code/phase aren't in the stream → null.
+        for tid, is_err in _tool_results(o):
+            if is_err:
+                _bump_tool_failure(s, s.tool_names.get(tid, "?"))
     elif t == "result":
         s.subtype = o.get("subtype", "")
         s.num_turns = o.get("num_turns", 0)
@@ -89,6 +119,10 @@ def _print_summary(s: RunSummary, rc: int, stream) -> None:
     print(ui.kv("cost", f"${s.cost_usd:.4f}", stream=stream), file=stream)
     print(ui.kv("tool calls", str(s.tool_calls), stream=stream), file=stream)
     print(ui.kv("denied", str(len(s.denials)), stream=stream), file=stream)
+    n_fail = sum(int(e.get("count", 1)) for e in s.tool_failures)
+    if n_fail or s.non_json_lines:
+        print(ui.kv("tool errors", f"{n_fail} failed invocation(s), {s.non_json_lines} non-JSON line(s)",
+                    stream=stream), file=stream)
     for d in s.denials[:5]:
         nm = (d or {}).get("tool_name") or (d or {}).get("name") or "?"
         print(f"    {ui.style('✗', ui.RED, stream=stream)} {nm}", file=stream)
@@ -138,6 +172,11 @@ def run_autonomous(
             try:
                 o = json.loads(line)
             except Exception:
+                # A non-JSON stream line (a chatty warning / stray stderr merged in): count it and
+                # keep a sample instead of silently dropping it — it feeds the diagnostics record.
+                s.non_json_lines += 1
+                if not s.non_json_sample:
+                    s.non_json_sample = line[:200]
                 continue
             handle_event(o, s, stream)
     except KeyboardInterrupt:

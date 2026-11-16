@@ -126,6 +126,48 @@ class TestAutorunParser(unittest.TestCase):
         self.assertEqual(len(s.denials), 1)
         self.assertAlmostEqual(s.cost_usd, 0.12)
 
+    def test_tool_result_errors_counted(self):
+        s = autorun.RunSummary()
+        buf = io.StringIO()
+        # an assistant tool_use establishes the id->name correlation
+        autorun.handle_event(
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {"command": "ffuf ..."}}]}},
+            s, buf,
+        )
+        # a failed tool_result (is_error) for that id is counted against the tool name
+        autorun.handle_event(
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "is_error": True, "content": "boom"}]}},
+            s, buf,
+        )
+        # a successful tool_result is NOT counted
+        autorun.handle_event(
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "is_error": False}]}},
+            s, buf,
+        )
+        self.assertEqual(s.tool_failures, [{"tool": "Bash", "exit_code": None, "phase": None, "count": 1}])
+
+    def test_non_json_line_counting(self):
+        import pathlib as _pl
+        import tempfile as _tf
+        # drive run_autonomous against a fake "claude" that emits a mix of JSON and chatty lines
+        with _tf.TemporaryDirectory() as d:
+            d = _pl.Path(d)
+            script = d / "fake.py"
+            script.write_text(
+                "import sys\n"
+                "print('a stray warning line')\n"
+                "print('{\"type\": \"result\", \"subtype\": \"success\"}')\n"
+                "print('another non-json line')\n"
+            )
+            argv = [sys.executable, str(script)]
+            rc, s = autorun.run_autonomous(sys.executable, argv, d, d / "audit.jsonl", stream=io.StringIO())
+            self.assertEqual(rc, 0)
+            self.assertEqual(s.non_json_lines, 2)
+            self.assertEqual(s.non_json_sample, "a stray warning line")
+
 
 class TestAutonomousRoe(unittest.TestCase):
     def test_autonomous_note(self):

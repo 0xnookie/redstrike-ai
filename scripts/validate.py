@@ -609,6 +609,32 @@ else:
         if not tiers:
             err("hunt_plan.schema.json: $defs/depth_budget/tier must declare an enum (floor/standard/deep)")
 
+# 20 — diagnostics schema: the engagement run-diagnostics contract (runtime/diagnostics.json). A
+# closed, versioned coordination artifact the CLI writes and Phase 2 reads back. Registered here so
+# a drift (a dropped root `version`, an opened-up root, or a missing pinned key) fails the suite.
+dg_path = skills_dir / "_contract" / "diagnostics.schema.json"
+if not dg_path.is_file():
+    err("skills/_contract/diagnostics.schema.json missing (the engagement run-diagnostics contract)")
+else:
+    checked["diagnostics_schema"] = 1
+    try:
+        dg = json.loads(dg_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        dg = None
+        err(f"diagnostics.schema.json: invalid JSON: {e}")
+    if dg is not None:
+        dprops = dg.get("properties") or {}
+        if "version" not in dprops:
+            err("diagnostics.schema.json: must declare a root 'version' property (schema-versioning drift)")
+        if dg.get("additionalProperties") is not False:
+            err("diagnostics.schema.json: root must be additionalProperties:false (closed artifact)")
+        for req in ("engagement", "generated_at", "runs"):
+            if req not in dprops:
+                err(f"diagnostics.schema.json: root must declare a '{req}' property")
+        run_def = ((dg.get("$defs") or {}).get("run") or {})
+        if run_def.get("additionalProperties") is not False:
+            err("diagnostics.schema.json: $defs/run must be additionalProperties:false (closed run record)")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
