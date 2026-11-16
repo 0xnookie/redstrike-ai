@@ -188,6 +188,27 @@ A class the strategist mis-ranks low or under-budgets therefore still surfaces a
 is caught before reporting. If `hunt_plan.json` is missing or stale, fall back to map order — hunt
 ordering is an efficiency aid, **never a gate**, so its absence can never block or shrink the hunt.
 
+## 2.6 Zero-finding close — classify degraded vs clean (reliability; empty ≠ clean)
+A hunt that produced nothing has TWO very different meanings and they must never be conflated: a **real
+clean test** (the surface was reached and exercised, nothing found) vs a **degraded/blocked run** (a WAF
+or gateway blocked the requests, a dependency failed, recon came back empty). The run engine records this
+in `runtime/diagnostics.json` (latest `runs[]` entry — schema `skills/_contract/diagnostics.schema.json`,
+read-only); your job is to make the close **honest and explicit**.
+
+- **Executors note blocked-response observations.** When a `<class>` executor sees sustained blocking —
+  `403`/`429`, a JS/CAPTCHA challenge page, or a provider block banner on a large share of requests — it
+  records that as a reliability observation (it is both an escalation cue AND a transport-health signal),
+  so the run's `transport_health` reflects the block and the clear is attributable, not silently "clean".
+- **Classify the close before reporting.** At a zero-finding (or near-empty) close, set the latest run's
+  `outcome`: `clean-tested` only when the surface was genuinely reached and exercised; otherwise
+  `degraded-empty` / `failed` **with a concrete `degraded_reason`** (e.g. "cloudflare blocked 95% of
+  requests on app.example.com", "target 503 for the whole window"). A transport-`blocked` host means the
+  clear is **inconclusive, not clean** — carry that into §4.
+- **Enforced, not advisory.** The completion gate auto-marks a WAF-blocked host's web coverage categories
+  `blocked` (transport-sourced reason), and HARD-fails a zero-finding report whose diagnostics outcome is
+  missing or an unexplained empty. So an empty close that cannot say *why* cannot ship — align the
+  diagnostics outcome with reality before `redstrike-reporting`.
+
 ## 3. Chain + exploit  (approval-gated)
 `redstrike-attack-chain-discovery` composes accepted findings into kill chains. For high-value accepted
 findings, `redstrike-exploit-generator` produces a benign working PoC (**approval + kill switch**).
