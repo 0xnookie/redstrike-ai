@@ -201,9 +201,9 @@ read-only); your job is to make the close **honest and explicit**.
   so the run's `transport_health` reflects the block and the clear is attributable, not silently "clean".
 - **Classify the close before reporting.** At a zero-finding (or near-empty) close, set the latest run's
   `outcome`: `clean-tested` only when the surface was genuinely reached and exercised; otherwise
-  `degraded-empty` / `failed` **with a concrete `degraded_reason`** (e.g. "cloudflare blocked 95% of
-  requests on app.example.com", "target 503 for the whole window"). A transport-`blocked` host means the
-  clear is **inconclusive, not clean** — carry that into §4.
+  `degraded-empty` / `failed` **with a concrete `degraded_reason`** (e.g. "gateway blocked 95% of requests
+  on app.example.com", "target 503 for the whole window"). A transport-`blocked` host means the clear is
+  **inconclusive, not clean** — carry that into §4.
 - **Enforced, not advisory.** The completion gate auto-marks a WAF-blocked host's web coverage categories
   `blocked` (transport-sourced reason), and HARD-fails a zero-finding report whose diagnostics outcome is
   missing or an unexplained empty. So an empty close that cannot say *why* cannot ship — align the
