@@ -163,6 +163,27 @@ def plan(m: dict, signals: set, requested_phases: set, engagement: str = "") -> 
     }
 
 
+_VC_MOD = None
+
+
+def _discover_findings(eng: Path):
+    """Reuse verify_completion's multi-layout finding discovery (root / per-skill / consolidated) so the
+    soft cross-check fires on the REAL per-skill layout (<eng>/*/findings.json), not only a root
+    findings.json. Returns a flat list, or None when none/unparseable (cross-check then skipped)."""
+    global _VC_MOD
+    try:
+        if _VC_MOD is None:
+            import importlib.util
+            p = ROOT / "skills" / "_contract" / "verify_completion.py"
+            spec = importlib.util.spec_from_file_location("rs_vc_coverage", p)
+            _VC_MOD = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_VC_MOD)
+        findings, _src = _VC_MOD._discover_engagement_findings(eng)
+        return findings
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def validate(eng: Path, m: dict, strict: bool = False):
     """Return (ok, lines, warnings). ok=False => a real coverage gap (silent omission or pending-at-close)."""
     lines, warnings, errors = [], [], []
@@ -194,18 +215,16 @@ def validate(eng: Path, m: dict, strict: bool = False):
         if st in _NEED_REASON and not (c.get("reason") or "").strip():
             errors.append(f"'{cid}' is '{st}' but has no reason")
 
-    # 3. soft cross-check against findings.json
-    fj = eng / "findings.json"
-    if fj.is_file():
-        try:
-            findings = json.loads(fj.read_text(encoding="utf-8"))
-            n = len([f for f in findings if isinstance(f, dict)])
-            attempted = [c for c in by_id.values() if c.get("status") == "attempted"]
-            if n and not attempted:
-                warnings.append(f"findings.json has {n} finding(s) but no category is marked 'attempted' "
-                                f"(ledger not updated after the run?)")
-        except json.JSONDecodeError:
-            warnings.append("findings.json present but not valid JSON (skipped cross-check)")
+    # 3. soft cross-check against the engagement's findings — ANY layout (root / per-skill / consolidated),
+    #    not just a root findings.json (the real layout is per-skill <eng>/*/findings.json, so the old
+    #    root-only check never fired).
+    findings = _discover_findings(eng)
+    if findings is not None:
+        n = len([f for f in findings if isinstance(f, dict)])
+        attempted = [c for c in by_id.values() if c.get("status") == "attempted"]
+        if n and not attempted:
+            warnings.append(f"{n} finding(s) across the engagement but no category is marked 'attempted' "
+                            f"(ledger not updated after the run?)")
 
     # tally
     from collections import Counter

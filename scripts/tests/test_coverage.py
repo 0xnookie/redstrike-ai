@@ -120,6 +120,37 @@ class RoutingFromNestedDoc(unittest.TestCase):
         self.assertEqual(ids.get("sqli"), "skipped")
 
 
+class FindingsCrossCheck(unittest.TestCase):
+    """P2-5: the soft cross-check must fire on the REAL per-skill layout (<eng>/*/findings.json), not only
+    a root findings.json (which almost never exists), so 'findings but no attempted category' is caught."""
+
+    def _ledger_no_attempted(self, eng):
+        m = c.load_map()
+        led = c.plan(m, set(), {"web"})  # empty signals -> non-baseline web categories skip, nothing attempted
+        for cat in led["categories"]:
+            if cat["status"] == "attempted":
+                cat["status"] = "pending"
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return m
+
+    def test_per_skill_findings_trigger_the_cross_check(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            m = self._ledger_no_attempted(eng)
+            (eng / "idor").mkdir()
+            (eng / "idor" / "findings.json").write_text(
+                json.dumps([{"id": "RS-2026-001", "title": "x"}]), encoding="utf-8")
+            _ok, _lines, msgs = c.validate(eng, m, strict=False)
+            self.assertTrue(any("no category is marked 'attempted'" in str(x) for x in msgs), msgs)
+
+    def test_no_findings_no_crosscheck_warning(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            m = self._ledger_no_attempted(eng)
+            _ok, _lines, msgs = c.validate(eng, m, strict=False)
+            self.assertFalse(any("no category is marked 'attempted'" in str(x) for x in msgs), msgs)
+
+
 class SelfTest(unittest.TestCase):
     def test_coverage_selftest_passes(self):
         self.assertEqual(c.selftest(), 0)
