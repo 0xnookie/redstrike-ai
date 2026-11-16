@@ -103,6 +103,30 @@ for schema in sorted((skills_dir / "_contract").glob("*.schema.json")):
     except json.JSONDecodeError as e:
         err(f"{schema.name}: invalid JSON: {e}")
 
+# 4b — schema versioning: finding / attack_chain / *_context artifacts must declare a `version` field so
+# their shape can evolve without silently breaking consumers (extends the map_version pattern). A drift
+# guard: if the field is dropped, this fails.
+for scm in sorted((skills_dir / "_contract").glob("*_context.schema.json")) + [
+        skills_dir / "_contract" / "attack_chain.schema.json"]:
+    if not scm.is_file():
+        continue
+    try:
+        d = json.loads(scm.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        continue  # already reported by check 4
+    checked["schema_version"] = checked.get("schema_version", 0) + 1
+    if "version" not in (d.get("properties") or {}):
+        err(f"{scm.name}: schema must declare a root 'version' property (schema-versioning drift)")
+fsp = skills_dir / "_contract" / "finding.schema.json"
+if fsp.is_file():
+    try:
+        fd = json.loads(fsp.read_text(encoding="utf-8"))
+        checked["schema_version"] = checked.get("schema_version", 0) + 1
+        if "version" not in ((fd.get("$defs", {}).get("finding", {}) or {}).get("properties") or {}):
+            err("finding.schema.json: $defs/finding must declare a 'version' property (schema-versioning drift)")
+    except json.JSONDecodeError:
+        pass
+
 # 5 — .claude agents + skill bindings
 agents_dir = ROOT / ".claude" / "agents"
 if agents_dir.is_dir():

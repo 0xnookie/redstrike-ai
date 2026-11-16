@@ -670,6 +670,47 @@ class TestManifestSchemaRefs(unittest.TestCase):
         self.assertGreaterEqual(refs, 94, "expected the finding/context/cve_intel schema wiring to be present")
 
 
+class TestSchemaVersioning(unittest.TestCase):
+    """P2-3: finding / attack_chain / *_context schemas declare an optional `version` field so artifacts
+    can be stamped and evolve. It is optional (backward-compatible) and an integer when present."""
+
+    def test_finding_accepts_version_and_without(self):
+        eng = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(eng, ignore_errors=True))
+        # with a version stamp
+        f = valid_finding(version=1)
+        write_evidence(eng, f)
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok, detail)
+        # and without one (optional / backward-compatible)
+        f2 = valid_finding()
+        write_evidence(eng, f2)
+        ok2, detail2, _ = vc.check_finding(f2, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok2, detail2)
+
+    def test_context_schemas_accept_version(self):
+        base = {"target": "https://app.acme.com", "generated_at": "2026-01-01T00:00:00Z", "version": 1,
+                "injection_points": [{"id": "sq-001", "endpoint": "/q", "param": "q"}]}
+        self.assertTrue(vc._validate_against_schema(base, "skills/_contract/sqli_context.schema.json")[0])
+
+    def test_attack_chain_accepts_version(self):
+        doc = {"version": 1, "target": "x", "generated_at": "2026-01-01T00:00:00Z",
+               "chains": [{"id": "chain-001", "title": "t",
+                           "steps": [{"finding_id": "RS-2026-001", "role": "entry"},
+                                     {"finding_id": "RS-2026-002", "role": "exfil"}]}]}
+        self.assertTrue(vc._validate_against_schema(doc, "skills/_contract/attack_chain.schema.json")[0])
+
+    def test_all_target_schemas_declare_version(self):
+        import glob
+        for scm in sorted(glob.glob(str(REPO / "skills/_contract/*_context.schema.json"))):
+            d = json.loads(pathlib.Path(scm).read_text(encoding="utf-8"))
+            self.assertIn("version", d.get("properties", {}), scm)
+        ac = json.loads((REPO / "skills/_contract/attack_chain.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("version", ac["properties"])
+        fd = json.loads((REPO / "skills/_contract/finding.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("version", fd["$defs"]["finding"]["properties"])
+
+
 class TestContextSchemas(unittest.TestCase):
     """E4 context wiring: the *_context schemas are the canonical output contract
     (each producer's SKILL.md says its output 'validates against the schema'), so a

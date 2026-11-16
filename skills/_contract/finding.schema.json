@@ -11,6 +11,7 @@
       "required": ["id", "title", "asset", "category", "severity", "confidence", "status", "evidence", "reproduction"],
       "additionalProperties": false,
       "properties": {
+        "version": { "type": "integer", "description": "schema version of this finding (current = 1). Optional and backward-compatible; stamp it so the shape can evolve without silently breaking consumers (mirrors coverage_ledger.map_version)." },
         "id": { "type": "string", "pattern": "^RS-[0-9]{4}-[0-9]{3,}$", "description": "RS-<year>-<seq>, engagement-unique." },
         "title": { "type": "string", "minLength": 4 },
         "asset": { "type": "string", "description": "Target host/URL/endpoint. MUST be in engagement scope." },
