@@ -67,8 +67,14 @@ def _seed_coverage_ledger(engagement_dir: Path, repo_root: Path, python_exe: str
             cwd=str(repo_root), check=False,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Not fatal, but no longer silent: a failed seed means coverage tracking starts blind, which
+        # later shows up as a degraded-empty diagnosis — record WHY in the engagement's error.log.
+        ts = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        auditmod.append_line(
+            engagement_dir / "runtime" / "error.log",
+            auditmod.redact_text(f"[{ts}] _seed_coverage_ledger failed: {type(e).__name__}: {e}"),
+        )
 
 
 def prepare_runtime(

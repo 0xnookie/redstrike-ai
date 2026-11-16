@@ -43,9 +43,16 @@ from typing import Protocol
 # --- shared, engine-neutral types ------------------------------------------
 @dataclass
 class RunResult:
-    """Outcome of an engine run."""
+    """Outcome of an engine run.
+
+    ``summary`` is an ``autorun.RunSummary`` for autonomous runs (the captured event stream) and
+    left empty for interactive runs, which have no capturable stream. ``started``/``ended`` are
+    ISO-8601 wall-clock bounds of the engine process, fed into the per-run diagnostics record.
+    """
     rc: int
-    summary: str = ""
+    summary: object = ""
+    started: str = ""
+    ended: str = ""
 
 
 @dataclass
@@ -266,6 +273,7 @@ class ClaudeCodeEngine(Engine):
         return Invocation(argv=argv, allowed=None)
 
     def run(self, prep, eng_dir, inv, *, mode="interactive", audit=None) -> RunResult:
+        import datetime as _dt
         from .. import audit as auditmod, autorun, launch
         eng_dir = Path(eng_dir)
         if audit is None:
@@ -277,18 +285,22 @@ class ClaudeCodeEngine(Engine):
             session_id=getattr(prep, "session_id", ""),
             mode=mode,
         )
+        started = _dt.datetime.now(_dt.timezone.utc).isoformat()
         if mode == "autonomous":
             rc, summary = autorun.run_autonomous(
                 self._bin(), inv.argv, eng_dir, audit, pending_path=prep.pending_path,  # type: ignore[attr-defined]
                 audit_head=head,
             )
-            return RunResult(rc=rc, summary=summary)
+            ended = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            return RunResult(rc=rc, summary=summary, started=started, ended=ended)
         # Interactive: claude attaches to the terminal (no capturable stream), so the audit trail
         # records a stamped head + an outcome footer — chain-of-custody for the interactive run too.
+        # started/ended still bound the run so interactive diagnostics carry real timestamps.
         auditmod.append_line(audit, head)
         rc = launch.exec_claude(inv.argv, cwd=eng_dir)
+        ended = _dt.datetime.now(_dt.timezone.utc).isoformat()
         auditmod.append_line(audit, auditmod.run_footer(mode, rc))
-        return RunResult(rc=rc)
+        return RunResult(rc=rc, started=started, ended=ended)
 
 
 # --- skeletons: what a second engine must implement -------------------------

@@ -11,7 +11,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, engagement, gate, launch, preflight, ui
+from . import __version__, diagnostics, engagement, gate, launch, preflight, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
@@ -253,12 +253,16 @@ def _warn_no_sandbox() -> None:
         print()
 
 
-def _post_run_gate(repo: Path, eng_dir: Path, rc: int) -> int:
-    """Run the mechanical completion + coverage gate after an engine run. The engine itself
-    can't self-gate between phases, so this is where the gates become mechanical rather than
-    model-discretion. If the engine exited clean (rc 0) but the gate flags gaps (malformed
-    findings, missing evidence, a category left `pending`), surface it in the exit code so an
-    unattended caller sees the failure; a non-zero engine rc is left as-is."""
+def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "interactive") -> int:
+    """Run the mechanical completion + coverage gate after an engine run, then write the per-run
+    diagnostics record and surface the OUTCOME. The engine itself can't self-gate between phases,
+    so this is where the gates become mechanical rather than model-discretion. If the engine exited
+    clean (rc 0) but the gate flags gaps (malformed findings, missing evidence, a category left
+    `pending`), surface it in the exit code so an unattended caller sees the failure; a non-zero
+    engine rc is left as-is.
+
+    ``res`` is the engine's ``RunResult`` (an int is still tolerated for back-compat)."""
+    rc = getattr(res, "rc", res)
     print()
     print(ui.rule("post-run gate"))
     grc = gate.verify(repo, eng_dir)
@@ -266,8 +270,54 @@ def _post_run_gate(repo: Path, eng_dir: Path, rc: int) -> int:
         print(ui.ok("gate clear — findings well-formed, category coverage accounted for"))
     elif rc == 0:
         print(ui.warn("engine exited clean, but the completion/coverage gate flagged gaps (above) — not report-ready"))
+    # Diagnostics (reliability/observability): classify WHY this run produced what it did and record
+    # it — for INTERACTIVE runs too (they captured nothing before). Must never alter the exit code.
+    try:
+        _emit_diagnostics(eng_dir, res, prep=prep, mode=mode, gate_rc=grc)
+    except Exception:
+        pass
+    if grc != 0 and rc == 0:
         return grc
     return rc
+
+
+def _emit_diagnostics(eng_dir: Path, res, *, prep, mode: str, gate_rc: int) -> None:
+    summary = getattr(res, "summary", None)
+    if isinstance(summary, str):  # the empty-string default == no captured summary (interactive)
+        summary = None
+    record = diagnostics.assemble(
+        eng_dir,
+        session=getattr(prep, "session_id", "") if prep else "",
+        mode=mode,
+        started=getattr(res, "started", ""),
+        ended=getattr(res, "ended", ""),
+        engine_rc=getattr(res, "rc", 0),
+        gate_rc=gate_rc,
+        summary=summary,
+    ).to_record()
+    diagnostics.write(eng_dir, record)
+    _print_outcome(eng_dir, record)
+
+
+def _print_outcome(eng_dir: Path, record: dict) -> None:
+    """Prominent CLI block: the OUTCOME, and — when not healthy — WHY it produced nothing plus the
+    transport-health line, so an empty engagement is never silently indistinguishable from a clean one."""
+    outcome = record.get("outcome", "")
+    healthy = outcome in (diagnostics.PRODUCED, diagnostics.CLEAN)
+    print()
+    print(ui.rule("outcome diagnostics"))
+    line = f"OUTCOME: {outcome}"
+    print((ui.ok if healthy else ui.warn)(line))
+    if not healthy and record.get("degraded_reason"):
+        print(ui.warn(f"produced nothing because: {record['degraded_reason']}"))
+    overall = (record.get("transport_health") or {}).get("overall") or {}
+    if overall.get("status") in ("degraded", "blocked"):
+        worst = overall.get("worst_host") or "the target"
+        pct = round(float(overall.get("block_rate", 0.0) or 0.0) * 100)
+        waf = diagnostics._worst_host_waf(record.get("transport_health") or {}, overall.get("worst_host"))
+        tail = f" ({waf})" if waf else ""
+        print(ui.warn(f"{pct}% of requests to {worst} blocked/challenged{tail} — coverage UNRELIABLE"))
+    print(ui.info(f"diagnostics: {eng_dir / 'runtime' / 'diagnostics.json'}  (+ error.log)"))
 
 
 def cmd_console(args, repo: Path) -> int:
@@ -355,7 +405,7 @@ def cmd_run(args, repo: Path) -> int:
     print()
     audit = eng_dir / "runtime" / "autorun.jsonl"  # audit the interactive run too (stamped head + footer)
     res = engine.run(prep, eng_dir, inv, mode="interactive", audit=audit)
-    rc = _post_run_gate(repo, eng_dir, res.rc)
+    rc = _post_run_gate(repo, eng_dir, res, prep=prep, mode="interactive")
     maybe_launch_console(args, repo)
     return rc
 
@@ -427,7 +477,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
     print()
     audit = eng_dir / "runtime" / "autorun.jsonl"
     res = engine.run(prep, eng_dir, inv, mode="autonomous", audit=audit)
-    rc = _post_run_gate(repo, eng_dir, res.rc)
+    rc = _post_run_gate(repo, eng_dir, res, prep=prep, mode="autonomous")
     maybe_launch_console(args, repo)
     return rc
 
