@@ -81,6 +81,30 @@ def _bash_allowed(cmd: str, globs) -> bool:
     return False
 
 
+def _leading_token(s: str) -> str:
+    """Leading command/glob token: drop surrounding quotes, leading wildcards and any path,
+    take the first whitespace-delimited token's basename, lowercase. Mirrors settings._glob_head
+    (kept here so the gate stays self-contained / stdlib-only)."""
+    g = s.strip().strip("'\"").lstrip("*/ ").strip()
+    toks = g.split()
+    return (toks[0].rsplit("/", 1)[-1].lower()) if toks else ""
+
+
+def _narrow_allows(head: str, cmd: str, globs) -> bool:
+    """True when a NARROW operator pre-allow glob explicitly names `head` and matches the command —
+    the escape hatch for an always-defer (active-exploit) token. A blanket '*' / '' allow is NOT a
+    narrow pre-allow (it never lets an exploit token skip the gate); a leading-wildcard glob like
+    '* --dump' names no tool, so its leading token won't equal `head` either."""
+    cmd = cmd.strip()
+    for g in globs or []:
+        gs = str(g).strip()
+        if gs in ("", "*"):
+            continue
+        if _leading_token(gs) == head and fnmatch.fnmatch(cmd, gs):
+            return True
+    return False
+
+
 # --- host / scope matching --------------------------------------------------
 def normalize_host(h: str) -> str:
     h = h.strip().lower().rstrip(".")
@@ -277,12 +301,18 @@ def evaluate(
     defer: bool = False,
     bash_allow=(),
     approvals=frozenset(),
+    always_defer=frozenset(),
     now: _dt.datetime | None = None,
 ) -> dict:
     """Return {'decision': 'deny'|'defer'|'pass', 'reason': str, ['fingerprint': str]}.
 
     In `defer` mode (autonomous runs) an in-scope shell command that the operator has
     not pre-allowed (`--allow`) or approved is DEFERRED for sign-off instead of run.
+
+    `always_defer` is the set of active-exploit leading tokens (e.g. sqlmap, msfconsole) that
+    DEFER even under a broad `Bash`/`*` pre-allow — so RCE / active-exploit class steps always
+    reach the operator — UNLESS the operator pre-allowed that exact tool with a narrow glob
+    (`Bash(sqlmap *)`) or approved the exact command. DENY (out-of-scope) always takes precedence.
 
     Active (target-reaching) tools are additionally DENIED once the engagement window has closed
     (or before it opens) — fail-closed, framed as engagement policy.
@@ -343,6 +373,14 @@ def evaluate(
             fp = fingerprint(tool_name, tool_input)
             if fp in approvals:
                 return _pass()  # operator approved this exact command earlier
+            head = _leading_token(cmd)
+            if head in always_defer and not _narrow_allows(head, cmd, bash_allow):
+                # Active-exploit / RCE class: a broad `Bash` / `*` pre-allow does NOT auto-run it —
+                # only an explicit per-command approval or a narrow, operator-named pre-allow
+                # (Bash(sqlmap *)) lets it through. Keeps unattended exploitation behind the human gate.
+                return _defer(
+                    f"active-exploit step '{head}' needs operator approval: {cmd.strip()[:90]}", fp
+                )
             if _bash_allowed(cmd, bash_allow):
                 return _pass()  # operator pre-allowed this pattern via --allow
             return _defer(f"shell command needs operator approval: {cmd.strip()[:90]}", fp)
@@ -404,7 +442,10 @@ def _emit_deny(reason: str) -> None:
 
 
 def _emit_defer(reason: str) -> None:
-    _emit("defer", f"pending operator approval — {reason}. Summarize and stop; do not route around the gate.")
+    # A deferral QUEUES the item and the run KEEPS GOING — it must never read as "stop the run".
+    _emit("defer", f"pending operator approval — {reason}. Record it, SKIP this step for now, and "
+                   f"CONTINUE other in-scope, non-gated work; the operator approves pending items and "
+                   f"the run resumes. Do not retry or route around the gate.")
 
 
 def _load_bash_allow(policy_path: str) -> list:
@@ -412,6 +453,19 @@ def _load_bash_allow(policy_path: str) -> list:
         return []
     try:
         return list(json.loads(Path(policy_path).read_text(encoding="utf-8")).get("bash_allow", []) or [])
+    except Exception:
+        return []
+
+
+def _load_always_defer(policy_path: str) -> list:
+    """Active-exploit tokens that defer even under a broad allow (gate-policy.json
+    `always_defer_tokens`). Default empty when absent so older policy files stay back-compatible."""
+    if not policy_path:
+        return []
+    try:
+        return list(
+            json.loads(Path(policy_path).read_text(encoding="utf-8")).get("always_defer_tokens", []) or []
+        )
     except Exception:
         return []
 
@@ -454,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             defer=args.defer,
             bash_allow=_load_bash_allow(args.policy),
             approvals=_load_approvals(args.approvals),
+            always_defer=frozenset(_load_always_defer(args.policy)),
         )
     except Exception as e:  # fail closed on any internal error
         _emit_deny(f"scope-gate internal error ({type(e).__name__}) — failing closed")

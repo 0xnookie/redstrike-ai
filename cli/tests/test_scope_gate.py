@@ -231,6 +231,88 @@ class TestMcpGate(unittest.TestCase):
         self.assertEqual(self.mdec(["click", "role:button[name=Submit]"]), "pass")
 
 
+class TestAlwaysDeferExploitTokens(unittest.TestCase):
+    """Active-exploit tokens DEFER even under a broad `Bash` / `*` allow, so unattended
+    exploitation still reaches the operator — unless the operator pre-allowed that exact tool
+    with a narrow glob, or approved the exact command. DENY still takes precedence."""
+
+    ALWAYS = frozenset({"sqlmap", "msfconsole", "hydra"})
+
+    def _d(self, cmd, **kw):
+        return sg.evaluate("Bash", {"command": cmd}, SCOPE, PROT, CWD, **kw)["decision"]
+
+    def test_exploit_token_defers_under_blanket_allow(self):
+        # broad `Bash` → bash_allow=["*"]; sqlmap against an in-scope host must still DEFER
+        self.assertEqual(
+            self._d("sqlmap -u https://app.acme.com/x --batch", defer=True,
+                    bash_allow=["*"], always_defer=self.ALWAYS),
+            "defer",
+        )
+
+    def test_narrow_preallow_of_exploit_token_passes(self):
+        # operator explicitly pre-allowed this exact tool → escape hatch, PASS
+        self.assertEqual(
+            self._d("sqlmap -u https://app.acme.com/x --batch", defer=True,
+                    bash_allow=["sqlmap *"], always_defer=self.ALWAYS),
+            "pass",
+        )
+
+    def test_approved_exact_command_passes_despite_always_defer(self):
+        cmd = "sqlmap -u https://app.acme.com/x --batch"
+        fp = sg.fingerprint("Bash", {"command": cmd})
+        self.assertEqual(
+            self._d(cmd, defer=True, bash_allow=["*"], always_defer=self.ALWAYS,
+                    approvals=frozenset([fp])),
+            "pass",
+        )
+
+    def test_ordinary_tool_under_blanket_allow_passes(self):
+        # a non-exploit tool under `*` is unaffected — it runs
+        self.assertEqual(
+            self._d("nmap -sV api.acme.com", defer=True, bash_allow=["*"], always_defer=self.ALWAYS),
+            "pass",
+        )
+
+    def test_blanket_allow_is_not_a_narrow_preallow(self):
+        # the bare `*` must NOT count as naming the exploit tool
+        self.assertEqual(
+            self._d("hydra -l admin -P list.txt api.acme.com ssh", defer=True,
+                    bash_allow=["*"], always_defer=self.ALWAYS),
+            "defer",
+        )
+
+    def test_out_of_scope_host_still_denies_even_for_exploit_token(self):
+        # DENY precedence: out-of-scope wins over the always-defer branch
+        self.assertEqual(
+            self._d("sqlmap -u https://admin.acme.com/x", defer=True,
+                    bash_allow=["sqlmap *"], always_defer=self.ALWAYS),
+            "deny",
+        )
+
+    def test_empty_always_defer_is_back_compat(self):
+        # no always-defer set → broad allow runs the exploit tool as before
+        self.assertEqual(
+            self._d("sqlmap -u https://app.acme.com/x", defer=True, bash_allow=["*"]),
+            "pass",
+        )
+
+
+class TestEmitDeferMessage(unittest.TestCase):
+    """The defer message must tell the agent to CONTINUE, not stop the whole run."""
+
+    def test_defer_message_says_continue_not_stop(self):
+        import io
+        import contextlib
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            sg._emit_defer("shell command needs operator approval: sqlmap -u x")
+        out = buf.getvalue().lower()
+        self.assertIn("continue", out)
+        self.assertNotIn("summarize and stop", out)
+        self.assertNotIn("stop", out)  # no "stop" wording at all
+
+
 class TestPortScopedDomain(unittest.TestCase):
     """A scope authored as "host:port" must still match the (always port-less) target host —
     otherwise the whole host is silently out of scope and every active command is denied."""
