@@ -9,7 +9,7 @@
 - **TOOLS:** `subfinder`/`amass`/`fierce`/`dnsenum`, `dnsx`, `httpx`, `naabu`/`masscan`/`rustscan`/`nmap` (scoped), `httpx -td`. Tool-first — `_contract/tooling.md`.
 - **GOAL:** Produce the live-host inventory — in-scope subdomains, which are live (http/https), open ports/services, and host-level tech — so content-discovery + js-analysis know where to look. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `subdomains.txt`, `hosts.json`, `host_discovery.json`, `dangling_dns.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `scope.yaml` (in-scope domains/cidrs) + `<engagement>/osint/osint.json` (passive subs). `refs/` = `host_discovery_refs.md`. Chains FROM `osint`; chains TO `content-discovery`, `js-analysis`.
+- **DATA / RAG:** inputs = `scope.yaml` (in-scope domains/cidrs) + `<engagement>/osint/osint.json` (passive subs). `refs/` = `host_discovery_refs.md`. Chains FROM `osint`; chains TO `content-discovery`, `js-analysis`, and the **notebook** (host/network `recon_intel`; `dangling_dns.json` → subdomain-takeover **leads** — aggregated by `scripts/notebook.py --plan`).
 - **DECOMPOSITION:** n/a (recon feeder).
 
 ## Goal
@@ -33,6 +33,14 @@ Produce the in-scope live-host + service inventory. DONE = `checklist.md` `- [x]
     candidates to the `subdomain-takeover` executor as leads. No candidates ⇒ no signal (the class then
     skips with a real reason). DNS-level TRIAGE only — the executor does the HTTP-fingerprint + claimability.
 4. Probe live hosts (status/title/tech) · `httpx -td -sc -title` · `hosts.json`
+4b. **Reachability triage (esp. a large wildcard) — classify, then focus.** A `*.domain` wildcard can be
+    hundreds–thousands of CT names of which only a handful are an internet-facing *app*. Bucket each probed
+    host: **reachable** (2xx/3xx real content), **external-denied** (a gateway/WAF 403 on a host that
+    resolves — reachable but policy-blocked externally), **internal-only** (DNS/connect failure — not public).
+    Hunt the **reachable** set; note external-denied/internal and move on. Do NOT deep-probe all N hosts
+    (slow + raises the org's WAF/IP-rep across its estate) — triage by name (auth/account/app/API/admin/
+    dev-tooling/test-staging) first, then probe the shortlist low-and-slow. A direct probe is the source of
+    truth for reachability (`proxy.md` §8 — a proxy can mis-report an unreachable host as live).
 5. Port/service scan (scoped, rate-limited; fast sweep → service detail) · `naabu`/`masscan`/`rustscan` → `nmap -sV` · `hosts.json`
 5b. **Local/container discovery** (target is localhost or a local container) — `docker ps` + `docker inspect` for bind-mounts (→ source location, enabling the white-box `source-audit`) and container-internal services (DB/cache/mail/search a host port scan can't see) · `docker` · `host_discovery.json`
 6. Consolidate host map + **emit the tech signal** (`tech:wordpress`/`tech:nextjs`/`tech:shopware`, …) from the host tech fingerprint so the matching framework agent routes; flag a dev-image marker (`X-Debug-Token`/dockware/`*-dev`) for `exposed-surface` · synth · `host_discovery.json`

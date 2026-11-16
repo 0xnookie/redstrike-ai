@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Printer, FileDown, ShieldCheck } from "lucide-react";
 import { useConsole } from "@/lib/store";
+import { useToast } from "@/components/ui/Toast";
 import { reportable, severityCounts, maxCvss } from "@/lib/stats";
 import { SEVERITY, SEVERITY_ORDER, VERDICT, FEASIBILITY, sevMeta } from "@/lib/theme";
 import { cvssScore, cvssRating } from "@/lib/cvss";
@@ -12,6 +13,7 @@ import { Card, PageHeader, Pill, SeverityBadge } from "@/components/ui/primitive
 import { RichText } from "@/components/ui/RichText";
 export default function ReportPage() {
   const { activeEngagement: eng, findings, chains, openFinding } = useConsole();
+  const toast = useToast();
 
   const rep = reportable(findings);
   const counts = severityCounts(rep);
@@ -30,6 +32,7 @@ export default function ReportPage() {
     const a = document.createElement("a");
     a.href = url; a.download = "findings_consolidated.json"; a.click();
     URL.revokeObjectURL(url);
+    toast(`Downloaded ${rep.length} finding${rep.length === 1 ? "" : "s"} as JSON`);
   };
 
   return (

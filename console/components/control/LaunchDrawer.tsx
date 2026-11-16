@@ -21,7 +21,7 @@ export function LaunchDrawer({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <aside className="scroll-thin fixed inset-y-0 right-0 z-50 w-full max-w-lg animate-slide-in overflow-y-auto border-l border-line bg-card p-5">
+      <aside className="scroll-thin drawer-edge fixed inset-y-0 right-0 z-50 w-full max-w-lg animate-slide-in overflow-y-auto border-l border-line bg-card p-5">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <div className="font-mono text-xs tracking-wide text-faint">New engagement</div>

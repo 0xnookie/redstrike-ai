@@ -9,6 +9,7 @@ import {
 import { useControl } from "./ControlProvider";
 import { Panel, PanelHeader, PanelBody, Pill, Select } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
+import { useToast } from "@/components/ui/Toast";
 
 type Mode = "existing" | "new";
 type Depth = "quick" | "standard" | "deep";
@@ -34,7 +35,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-/* full-width segmented control (strix "seg") */
+/* full-width segmented control */
 function Seg<T extends string>({
   value, onChange, options,
 }: { value: T; onChange: (v: T) => void; options: { v: T; label: string; icon?: LucideIcon }[] }) {
@@ -59,6 +60,7 @@ function Seg<T extends string>({
 
 export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLaunched?: () => void } = {}) {
   const { engagements, activeId, setActiveId, running, busy, doInit, doRun, doRunFor, doStop, auth, lastError } = useControl();
+  const toast = useToast();
   const [mode, setMode] = useState<Mode>(engagements.length ? "existing" : "new");
 
   // scope / authorization (new engagement → redstrike init)
@@ -116,6 +118,7 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
       const id = r.engagement || slugMatch();
       setMode("existing");
       if (id) setActiveId(id);
+      toast(`Engagement ${id || "created"} scaffolded`);
       onLaunched?.();
     }
   };
@@ -128,12 +131,12 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
     setMode("existing");
     setActiveId(id);
     const ok = await doRunFor(id, runConfig()); // explicit id — the new one isn't `activeId` yet this tick
-    if (ok) onLaunched?.();
+    if (ok) { toast(`Run launched on ${id}`); onLaunched?.(); }
   };
 
   const launchExisting = async () => {
     const ok = await doRun(runConfig());
-    if (ok) onLaunched?.();
+    if (ok) { toast(`Run launched on ${activeId}`); onLaunched?.(); }
   };
 
   const canInit = client.trim() && toList(domains).length > 0 && authorizedBy.trim() && confirm;

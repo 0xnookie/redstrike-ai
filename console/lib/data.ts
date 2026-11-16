@@ -131,25 +131,58 @@ const hostFromUrl = (u?: string): string => {
 
 export function buildServices(o: Record<string, any>): Service[] {
   const out: Service[] = [];
-  // current shape: live_hosts[]
+  // current shape: live_hosts[] — tolerate three field layouts seen in the wild:
+  //   {url, ip, port, scheme, stack, app, title}                        (flat probe)
+  //   {host, http:{status,title,server,tech}, ports:[{port,proto,…}]}   (nested triage recon)
+  //   {host, http:{status,…}}  (no ports[] → synthesize one service from the http probe)
   if (Array.isArray(o.live_hosts)) {
     o.live_hosts.forEach((h: any, i: number) => {
-      const host = hostFromUrl(h?.url) || h?.ip || `host-${i}`;
-      const port = Number(h?.port) || (h?.scheme === "https" ? 443 : 80);
-      const stack: string[] = Array.isArray(h?.stack) ? h.stack : [];
-      out.push({
-        id: `svc-${i}`,
-        host,
-        ip: h?.ip,
-        port,
-        proto: "tcp",
-        service: h?.scheme || "http",
-        product: h?.app || stack[0],
-        version: stack.length ? stack.join(" · ") : undefined,
-        state: "open",
-        title: h?.title,
-        findings: 0,
-      });
+      const host = hostFromUrl(h?.url) || h?.host || h?.ip || `host-${i}`;
+      const httpMeta = h?.http && typeof h.http === "object" ? h.http : {};
+      const tech: string[] =
+        Array.isArray(h?.stack) ? h.stack :
+        Array.isArray(httpMeta.tech) ? httpMeta.tech :
+        Array.isArray(h?.tech) ? h.tech :
+        (typeof h?.tech === "string" && h.tech.trim() ? [h.tech.trim()] : []);
+      const title = h?.title || httpMeta.title;
+      const product0 = h?.app || tech[0] || httpMeta.server;
+      const version0 = tech.length > 1 ? tech.slice(1).join(" · ") : undefined;
+      const ports = Array.isArray(h?.ports) ? h.ports : [];
+      if (ports.length) {
+        ports.forEach((p: any, pi: number) => out.push({
+          id: `svc-${i}-${pi}`,
+          host,
+          ip: h?.ip,
+          port: Number(p?.port) || (p?.service === "https" ? 443 : 80),
+          proto: p?.proto ?? p?.protocol ?? "tcp",
+          service: p?.service ?? p?.name ?? h?.scheme ?? "http",
+          product: p?.product ?? product0,
+          version: p?.version ?? version0,
+          state: p?.state ?? "open",
+          tls: p?.tls,
+          title,
+          flagged: p?.flagged,
+          findings: 0,
+        }));
+      } else if (typeof httpMeta.status === "number" || h?.scheme || h?.port) {
+        // no explicit ports[] but the host answered HTTP (or carries a scheme/port):
+        // synthesize one service so the Ports table + asset map populate. A host with
+        // neither ports nor an http probe (e.g. gateway-blocked) stays asset-only.
+        const scheme = h?.scheme || httpMeta.scheme || "https";
+        out.push({
+          id: `svc-${i}`,
+          host,
+          ip: h?.ip,
+          port: Number(h?.port) || (scheme === "http" ? 80 : 443),
+          proto: "tcp",
+          service: scheme,
+          product: product0,
+          version: version0,
+          state: "open",
+          title,
+          findings: 0,
+        });
+      }
     });
     return out;
   }
@@ -183,7 +216,9 @@ export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
   // tech is a string in the current live_hosts shape ("tech") and an array in the older
   // one ("stack"); normalize either to a string[] for the Asset.
   const techOf = (h: any): string[] | undefined => {
+    const ht = h?.http && typeof h.http === "object" ? h.http : undefined;
     if (Array.isArray(h?.stack) && h.stack.length) return h.stack;
+    if (ht && Array.isArray(ht.tech) && ht.tech.length) return ht.tech;
     if (Array.isArray(h?.tech) && h.tech.length) return h.tech;
     if (typeof h?.tech === "string" && h.tech.trim()) return [h.tech.trim()];
     return undefined;
@@ -203,16 +238,19 @@ export function buildAssets(o: Record<string, any>, orgName: string): Asset[] {
       findings: 0,
       tech: techOf(meta),
       parent: orgName && host !== orgName ? orgName : undefined,
-      status: typeof meta?.status === "number" ? meta.status : undefined,
-      server: typeof meta?.server === "string" ? meta.server : undefined,
-      title: typeof meta?.title === "string" ? meta.title : undefined,
+      status: typeof meta?.status === "number" ? meta.status
+        : typeof meta?.http?.status === "number" ? meta.http.status : undefined,
+      server: typeof meta?.server === "string" ? meta.server
+        : typeof meta?.http?.server === "string" ? meta.http.server : undefined,
+      title: typeof meta?.title === "string" ? meta.title
+        : typeof meta?.http?.title === "string" ? meta.http.title : undefined,
       tier: typeof meta?.tier === "number" ? meta.tier : undefined,
       note: typeof meta?.note === "string" ? meta.note : undefined,
     });
   };
 
   if (Array.isArray(o.live_hosts)) {
-    o.live_hosts.forEach((h: any) => addHost(hostFromUrl(h?.url) || h?.ip, h));
+    o.live_hosts.forEach((h: any) => addHost(hostFromUrl(h?.url) || h?.host || h?.ip, h));
   } else if (Array.isArray(o.hosts)) {
     o.hosts.forEach((h: any) => addHost(h?.host ?? h?.hostname ?? String(h?.ip ?? ""), h));
   }

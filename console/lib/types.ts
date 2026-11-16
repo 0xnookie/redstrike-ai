@@ -85,6 +85,12 @@ export interface Engagement {
     approval_required_phases?: string[];
   };
   phase_progress?: { done: number; total: number };
+  /** the autonomous-run log: present? last written when? (liveness for runs we didn't launch) */
+  run?: { log: boolean; updated?: string | null };
+  /** the final consolidated report exists (the reporting phase ran) */
+  report?: boolean;
+  /** status came from scope.yaml (an operator override) — never re-derived */
+  status_explicit?: boolean;
   starred?: boolean;
   /** summary counts for the engagements list (active engagement is computed live) */
   summary?: { findings: number; critical: number; high: number; medium: number; low: number; chains: number };
@@ -180,6 +186,37 @@ export interface JsFile {
   name: string;
   rel: string;
   bytes?: number | null;
+}
+
+// JS Recon — the js-analysis skill's FINDINGS, parsed from each out/<site>/findings/*.jsonl
+// into /e/<id>/js_recon.json by scripts/console.py (see js_recon_report). Every row shape is
+// loose by design (recon emits what it found); the view tolerates partial/legacy records and
+// the extra enrichment fields the skill may add (kind/guard/category/origin_check/provider_meta).
+// Secrets arrive already redacted at the source (match_redacted) — the console never sees raw.
+export type JsEndpointState = "live" | "historical" | "unauthed" | string;
+export interface JsEndpoint { url: string; method?: string; source_file?: string; line?: number; state?: JsEndpointState; kind?: string; guard?: string; }
+export interface JsParam { name: string; context?: string; source_file?: string; line?: number; likely_vuln?: boolean; kind?: string; }
+export interface JsApi { path: string; group?: string; version?: string; method?: string; source_file?: string; }
+export interface JsSecret { type: string; match_redacted?: string; entropy?: number; source_file?: string; line?: number; severity?: string; provider_meta?: string; }
+export interface JsGadget { sink: string; snippet?: string; source_file?: string; line?: number; category?: string; origin_check?: string; }
+export interface JsLibrary { name: string; version?: string; cves?: string[]; source_file?: string; }
+export interface JsReconSite {
+  site: string;
+  endpoints?: JsEndpoint[];
+  params?: JsParam[];
+  apis?: JsApi[];
+  secrets?: JsSecret[];
+  gadgets?: JsGadget[];
+  libraries?: JsLibrary[];
+  counts?: Record<string, number>;      // total valid rows per stream (may exceed the rows shown)
+  truncated?: Record<string, boolean>;  // stream -> true when counts > rows returned
+  summary_md?: string;                  // analysis/site-summary.md, verbatim
+  has_report?: boolean;                 // report.md exists for this site
+}
+export interface JsRecon {
+  sites: JsReconSite[];
+  totals?: Record<string, number>;
+  site_count?: number;
 }
 
 // A discrete pentest run — feeds the Testing Activity heatmap + the Recent Tests list.
@@ -320,6 +357,72 @@ export interface HttpHistory {
   exchanges?: HttpExchange[];
 }
 
+// notebook.json (scripts/notebook.py / skills/_contract/notebook.schema.json) — "what an
+// engagement gathers that isn't a finding yet": investigative leads (open→testing→promoted/dead),
+// aggregated recon intel, the evidence locker, RoE, and test accounts. Cross-links the ledgers +
+// findings (a promoted lead carries the RS- finding id) rather than duplicating them. Loose by design
+// — every field but the few noted is optional; the view tolerates partial/missing sections.
+export type LeadStatus = "open" | "testing" | "promoted" | "dead";
+export interface NotebookLead {
+  id: string;
+  status: LeadStatus;
+  priority?: number;            // 1 (highest) .. 3
+  title: string;
+  host?: string;
+  path?: string;
+  owner?: string;
+  hypothesis?: string;
+  observations?: string[];
+  next_steps?: string[];
+  verdict?: string;             // present on `dead` (why it was closed)
+  surface_ref?: string;         // -> surface_ledger.surfaces[].id
+  promoted_to?: string;         // -> finding.id (RS-YYYY-NNN), present on `promoted`
+  related?: string[];           // related finding ids
+  discovered_by?: string;
+  updated_at?: string;
+}
+export type ScopeTag = "in" | "out" | "takeover" | "other";
+export interface NotebookSub { host: string; source?: string; resolves_to?: string; http_status?: number; scope?: ScopeTag; note?: string; }
+export interface NotebookDns { type: string; name: string; value: string; note?: string; severity?: string; }
+export interface NotebookNet { range: string; owner?: string; hosts?: string; ports?: string[]; note?: string; }
+export interface NotebookContentRow { path: string; status?: number; type?: string; methods?: string[]; params?: string[]; note?: string; }
+export interface NotebookDefense { control: string; where?: string; observed?: string; effect?: string; kind?: "block" | "gap" | "detect"; }
+export interface NotebookOsint { source: string; fact: string; use?: string; }
+export interface NotebookReconIntel {
+  subdomains?: NotebookSub[];
+  dns?: NotebookDns[];
+  network?: NotebookNet[];
+  content?: NotebookContentRow[];
+  defenses?: NotebookDefense[];
+  osint?: NotebookOsint[];
+  sources?: Record<string, string>; // aggregated-from artifact paths
+}
+export interface NotebookEvidence { id?: string; name: string; kind?: string; size?: number; finding_id?: string; by?: string; captured_at?: string; sha256?: string; }
+export interface NotebookRoeRule { allowed: boolean; text: string; }
+export interface NotebookRoe {
+  approach?: string;
+  authorization?: string;
+  window?: { from?: string; to?: string };
+  in_scope?: string[];
+  out_of_scope?: string[];
+  rate_limit?: number | string;
+  rules?: NotebookRoeRule[];
+  contacts?: { label: string; value: string }[];
+  egress?: string[];
+}
+export type AccountStatus = "active" | "expired" | "pending" | "retired";
+export interface NotebookAccount { id: string; tenant?: string; role?: string; identity?: string; auth?: string; used_on?: string; status?: AccountStatus; used_for?: string; }
+export interface Notebook {
+  engagement?: string;
+  target?: string;
+  generated_at?: string;
+  leads?: NotebookLead[];
+  recon_intel?: NotebookReconIntel;
+  evidence?: NotebookEvidence[];
+  roe?: NotebookRoe;
+  test_accounts?: NotebookAccount[];
+}
+
 export interface ConsoleData {
   engagements: Engagement[];
   activeEngagementId: string;
@@ -335,4 +438,5 @@ export interface ConsoleData {
   cveIntel?: CveIntel;
   content?: ContentMap;
   history?: HttpHistory;
+  notebook?: Notebook;
 }

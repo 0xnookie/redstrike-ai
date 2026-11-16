@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { ArrowRight, GitBranch, LogIn, TrendingUp, Upload, Workflow, type LucideIcon } from "lucide-react";
+import { GitBranch, LogIn, TrendingUp, Upload, Workflow, type LucideIcon } from "lucide-react";
 import type { AttackChain, Finding } from "@/lib/types";
 import { cvssScore } from "@/lib/cvss";
 import { hexA, roleColor, sevMeta } from "@/lib/theme";
@@ -19,8 +19,8 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 
 /**
  * Horizontal kill-chain flow: a row of step "nodes" (role-colored icon chip,
- * step kicker, finding title, id/asset, severity+CVSS) joined by arrow
- * connectors. Scrolls horizontally when the chain is long. Clicking a node
+ * step kicker, finding title, id/asset, severity+CVSS) joined by animated
+ * arrow connectors. Scrolls horizontally when the chain is long. Clicking a node
  * selects that step (drives the Step detail panel on the page).
  */
 export function ChainGraph({
@@ -43,9 +43,9 @@ export function ChainGraph({
         return (
           <Fragment key={s.finding_id + i}>
             {i > 0 && (
-              <div className="flex shrink-0 select-none items-center self-center px-0.5 text-faint" aria-hidden>
-                <span className="h-px w-6 bg-line sm:w-9" />
-                <ArrowRight size={15} className="-ml-[5px] shrink-0" />
+              // link to the next step — a light pulse travels toward the arrowhead
+              <div className="flex shrink-0 select-none items-center self-center px-1.5" aria-hidden>
+                <span className="chain-conn" />
               </div>
             )}
             <button

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/notebook.schema.json",
+  "title": "Redstrike Engagement Notebook",
+  "description": "Per-engagement record of what a hunt GATHERS that is not a finding (yet): investigative LEADS (open->testing->promoted-to-finding / dead-with-verdict), aggregated RECON INTEL (subdomains, DNS, network, content, defenses, OSINT), an EVIDENCE index, the Rules of Engagement, and the test accounts. Where the ledgers answer 'did we cover this?' (coverage_ledger/surface_ledger) the notebook answers 'what have we learned and what are we chasing?'. It CROSS-LINKS (never duplicates) the ledgers + findings: lead.surface_ref -> surface_ledger id, lead.promoted_to -> finding.id. Built by scripts/notebook.py --plan from the recon feeders; leads flipped with --mark as executors consume them; aggregated at the engagement root so it survives a zero-finding hunt (the recon it gathered still shows). Tolerant by design.",
+  "type": "object",
+  "required": ["engagement"],
+  "additionalProperties": true,
+  "properties": {
+    "engagement": { "type": "string" },
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "description": "ISO-8601 timestamp of the plan/last update." },
+    "leads": { "type": "array", "items": { "$ref": "#/$defs/lead" } },
+    "recon_intel": { "$ref": "#/$defs/recon_intel" },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+    "roe": { "$ref": "#/$defs/roe" },
+    "test_accounts": { "type": "array", "items": { "$ref": "#/$defs/test_account" } }
+  },
+  "$defs": {
+    "lead": {
+      "type": "object",
+      "required": ["id", "status", "title"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "pattern": "^L-[0-9]+$", "description": "stable lead id, e.g. L-1." },
+        "status": {
+          "enum": ["open", "testing", "promoted", "dead"],
+          "description": "open=hypothesis not yet worked; testing=an executor is on it; promoted=became a finding (promoted_to set); dead=closed (verdict required)."
+        },
+        "priority": { "type": "integer", "minimum": 1, "maximum": 3, "description": "1=highest." },
+        "title": { "type": "string" },
+        "host": { "type": "string" },
+        "path": { "type": "string" },
+        "owner": { "type": "string", "description": "who holds it (skill/agent id, or 'operator')." },
+        "hypothesis": { "type": "string" },
+        "observations": { "type": "array", "items": { "type": "string" } },
+        "next_steps": { "type": "array", "items": { "type": "string" } },
+        "verdict": { "type": "string", "description": "why it died. REQUIRED when status=dead. Reuse the reviewer rejection_class vocab where it fits: false-positive | out-of-scope | duplicate | open-proof-gap (+ prose)." },
+        "surface_ref": { "type": "string", "description": "-> surface_ledger.surfaces[].id (coverage stays owned by the ledger)." },
+        "promoted_to": { "type": "string", "pattern": "^RS-[0-9]{4}-[0-9]{3,}$", "description": "-> finding.id. REQUIRED when status=promoted." },
+        "related": { "type": "array", "items": { "type": "string" }, "description": "related finding ids." },
+        "discovered_by": { "type": "string" },
+        "updated_at": { "type": "string" }
+      }
+    },
+    "recon_intel": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Aggregated from the recon feeders (not a second copy of truth — see sources). Any bucket may be absent.",
+      "properties": {
+        "subdomains": { "type": "array", "items": {
+          "type": "object", "additionalProperties": true, "required": ["host"],
+          "properties": {
+            "host": { "type": "string" }, "source": { "type": "string", "description": "found-via: CT logs / DNS wordlist / passive DNS / scope / app bundle / CORS header / web archive." },
+            "resolves_to": { "type": "string", "description": "IP, CNAME target, or 'does not resolve'." },
+            "http_status": { "type": ["integer", "null"] },
+            "scope": { "enum": ["in", "out", "takeover", "other"] },
+            "note": { "type": "string" }
+          } } },
+        "dns": { "type": "array", "items": {
+          "type": "object", "additionalProperties": true, "required": ["type", "name"],
+          "properties": { "type": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "note": { "type": "string" }, "severity": { "enum": ["low", "medium", "high", null] } } } },
+        "network": { "type": "array", "items": {
+          "type": "object", "additionalProperties": true, "required": ["range"],
+          "properties": { "range": { "type": "string" }, "owner": { "type": "string" }, "hosts": { "type": "string" }, "ports": { "type": "array", "items": { "type": "string" } }, "note": { "type": "string" } } } },
+        "content": { "type": "array", "items": {
+          "type": "object", "additionalProperties": true, "required": ["path"],
+          "properties": { "path": { "type": "string" }, "status": { "type": "integer" }, "type": { "type": "string" }, "methods": { "type": "array", "items": { "type": "string" } }, "params": { "type": "array", "items": { "type": "string" } }, "note": { "type": "string" } } } },
+        "defenses": { "type": "array", "items": {
+          "type": "object", "additionalProperties": true, "required": ["control"],
+          "properties": { "control": { "type": "string" }, "where": { "type": "string" }, "observed": { "type": "string" }, "effect": { "type": "string" }, "kind": { "enum": ["block", "gap", "detect"] } } } },
+        "osint": { "type": "array", "items": {
+          "type": "object", "additionalProperties": true, "required": ["source"],
+          "properties": { "source": { "type": "string" }, "fact": { "type": "string" }, "use": { "type": "string" } } } },
+        "sources": { "type": "object", "additionalProperties": true, "description": "map of bucket -> the feeder artifact path it was aggregated from (provenance; the feeder stays the source of truth)." }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" }, "name": { "type": "string" },
+        "kind": { "type": "string", "description": "HAR / text / screenshot / detection / SBOM / config / json / ..." },
+        "size": { "type": "integer", "description": "bytes." },
+        "finding_id": { "type": "string" }, "by": { "type": "string" },
+        "captured_at": { "type": "string" }, "sha256": { "type": "string" }
+      }
+    },
+    "roe": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Sourced from scope.yaml + runtime/operator_decisions.json at engagement start.",
+      "properties": {
+        "approach": { "type": "string", "description": "grey-box / white-box / black-box / read-only ..." },
+        "authorization": { "type": "string" },
+        "window": { "type": "object", "additionalProperties": true, "properties": { "from": { "type": "string" }, "to": { "type": "string" } } },
+        "in_scope": { "type": "array", "items": { "type": "string" } },
+        "out_of_scope": { "type": "array", "items": { "type": "string" } },
+        "rate_limit": { "type": ["string", "number", "null"] },
+        "rules": { "type": "array", "items": { "type": "object", "additionalProperties": true, "properties": { "allowed": { "type": "boolean" }, "text": { "type": "string" } } } },
+        "contacts": { "type": "array", "items": { "type": "object", "additionalProperties": true, "properties": { "label": { "type": "string" }, "value": { "type": "string" } } } },
+        "egress": { "type": "array", "items": { "type": "string" }, "description": "egress IPs / UA for traffic attribution." }
+      }
+    },
+    "test_account": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" }, "tenant": { "type": "string" }, "role": { "type": "string" },
+        "identity": { "type": "string", "description": "email / ARN / API scope — REDACTED (never a live secret)." },
+        "auth": { "type": "string", "description": "password / password+TOTP / SAML SSO / API key / assumed role ..." },
+        "used_on": { "type": "string" },
+        "status": { "enum": ["active", "expired", "pending", "retired"] },
+        "used_for": { "type": "string" }
+      }
+    }
+  }
+}

@@ -63,3 +63,24 @@ The anti-automation ladder (`anti-automation-ladder.md`) stays orthogonal: it de
 blocked; this file decides **which** tool does the job. The proxy spine (`proxy.md`) is orthogonal too: when an
 interception proxy (the `intercept` category — Caido / Burp / `mitmproxy` / ZAP) is connected it becomes the
 HTTP **transport** for the whole toolchain, and `proxy-context` exports its History into the engagement.
+
+## Preflight — detect, don't assume
+The roster above *assumes a Linux host that ships these*. Do not confuse that assumption with the shell a
+command happens to run in. **A tool missing from one shell's `PATH` is not absent** — the toolkit may live in
+a WSL distro, a container, a `pipx`/`go/bin` dir, or a different user. Before concluding a capability is
+unavailable, probe the **real execution environment** (e.g. `wsl bash -lc 'command -v ffuf nmap sqlmap'`,
+`docker run … which …`, `pipx list`), and run tools from wherever they actually are. **Never report a tool
+"missing" — or a surface "untestable / exhausted" — off a single shell's `PATH`.** (Field lesson: "no ffuf"
+was read from the wrong shell while the whole toolkit sat in WSL, and nearly closed a host that had an
+unenumerated app on it.)
+
+At engagement start, **detect and record the capabilities the engagement actually has** (into the engagement
+dir), because they decide what is testable:
+- **toolkit location** — which shell/distro/container runs the roster; route tool calls there.
+- **interception proxy** — is one connected? If so it is the transport + a discovery source (`proxy.md`).
+- **browser automation** — `chrome-devtools-mcp` / `claude-in-chrome` / `playwright`. **Required** for
+  client-rendered surface: SPA/DOM-XSS confirmation, WebSocket/chatbot flows, anything behind JS. When it is
+  **absent**, say so and **flag the browser-gated tests for the human** — do not hand-roll a CLI substitute,
+  and never spoof a browser fingerprint to slip a scripted client past a WAF (that is evasion, barred by
+  `roe-gate.md` and any WAF-safe rule; a WebSocket upgrade that resets with no HTTP status is that signal —
+  stop and flag, don't bypass).

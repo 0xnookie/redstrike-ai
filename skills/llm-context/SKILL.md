@@ -6,7 +6,7 @@
 > Output: `llm_context.json` (schema `_contract/llm_context.schema.json`).
 
 ## Interview
-- **STEPS:** fingerprint the model → map the chat/inference API → discover LLM endpoints → classify guardrails → map the LLM's tools/agency → map data sources (RAG/system-prompt/memory) → map output sinks → route → emit → review.
+- **STEPS:** **verify it's actually generative-LLM-backed (gate — else hand off, don't route)** → fingerprint the model → map the chat/inference API → discover LLM endpoints → classify guardrails → map the LLM's tools/agency → map data sources (RAG/system-prompt/memory) → map output sinks → route → emit → review.
 - **TOOLS:** interceptor (chat API), `garak`/`PyRIT` (recon modes), endpoint fuzzing (`ffuf`), benign probes.
 - **GOAL:** Map the LLM app's surface — model, API, guardrails, tools (agency), data sources, and output sinks — into `llm_context.json`, so the variants fan out. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `api_map.json`, `surface_probes.jsonl`, `llm_context.json`, `summary.md`, `logs/`.
@@ -16,6 +16,23 @@
 ## Goal
 Produce the shared LLM context (model + API + guardrails + tools + data + output sinks + routing).
 DONE = `checklist.md` `- [x]` · `review.md` PASS (`llm_context.json` validates against the schema).
+
+## Gate — is there a real LLM behind it? (verify BEFORE routing to the AI variants)
+"A chatbot" ≠ "an LLM". Many production bots — especially municipal/enterprise help widgets — are
+**scripted intent/NLU/FAQ** engines (canned answers, keyword→intent routing, a vendor widget platform) with
+**no generative model**. Prompt-injection, sensitive-disclosure, excessive-agency and output-handling are
+**LLM-01..10 classes that simply do not apply** to those — routing them there burns cycles on an impossible
+target. So first **classify**, benignly:
+- **Generative-LLM signs** → novel/coherent answers to off-script questions, follows reformatting/translation
+  instructions, variable phrasing, reasoning, streamed tokens, a model/provider fingerprint.
+- **Rule/intent-bot signs** → canned/templated replies, falls back to "I didn't understand" off-script,
+  identical answers to paraphrases, a fixed intent list, a known widget vendor, **no** reasoning or novelty.
+
+Record the determination in `llm_context.json` (`llm_backed: true|false` + evidence). If it is **not**
+LLM-backed, **do not** route to the AI variants — hand the bot to the **web-app** skills (treat its API as a
+normal web backend: `bola-bfla`/`idor` on conversations, `llm-output-handling`→plain XSS via message
+rendering, injection on the backend) and note why. (Field lesson: a city chatbot read as "the AI surface"
+was a vendor intent bot — the real surface was its web backend + a weak-CSP widget, not prompt injection.)
 
 ## What do we want
 - **Model** — identify it (ask directly, streamed metadata, behaviour) + provider

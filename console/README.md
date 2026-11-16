@@ -11,15 +11,21 @@ there is **no bundled demo data**.
 | Route | View | What it shows |
 |---|---|---|
 | `/` | **Dashboard** | KPIs, severity donut, findings-over-time, activity feed, top findings, category/asset breakdowns, two-altitude review roll-up |
-| `/engagements` | **Engagements** | The authorized assessment; pick one to make it the active context |
+| `/engagements` | **Engagements** | The authorized assessments with their run status (*Running* / *Paused* / *Completed* — following the actual run) and coverage progress; pick one to make it the active context. With the control plane: launch, stop, and approve deferred actions |
 | `/findings` | **Findings** | Filterable/sortable table + full detail drawer (CVSS, mappings, reproduction, evidence, remediation, reviewer verdict) |
 | `/chains` | **Attack chains** | Kill-chain flow graph composed from accepted findings |
 | `/assets` | **Assets & scope** | In/out-of-scope tree, RoE rules, force-directed coverage map, asset table, and **open ports & services** from host discovery |
+| `/js-recon` | **JS Recon** | The client-side JavaScript intelligence the js-analysis skill mined — endpoints, params, APIs, secrets (redacted), DOM sinks/gadgets and libraries (per site), plus the site summary. Reads the parsed `findings/*.jsonl` |
+| `/notebook` | **Notebook** | What an engagement gathers that isn't a finding yet: investigative leads (open→testing→promoted/dead), recon intel (subdomains/DNS/network/defenses/OSINT), the evidence locker, RoE and test accounts; export to Markdown |
 | `/activity` | **Activity** | Execution timeline derived from each finding's reviewer record (findings → reviews) |
-| `/control` | **Control plane** | *(opt-in)* Launch & steer an engagement: scaffold/pick, run autonomously, watch the live event stream, approve deferrals. Needs `scripts/console_control.py` |
+| `/orchestration` | **Orchestration** | *(opt-in, live)* A running engagement as it happens: the task flow (orchestrator → skills and subagents, following the engine's task list), results travelling back as subagents return, the task queue, and a dispatch log narrating steps, dispatches and returns. Launch / stop / approvals live on **Engagements**. Needs `scripts/console_control.py` |
+| `/sitemap` | **Site map** | Every discovered URL per host as a tree, merged from content discovery, host discovery, the proxy history and findings |
+| `/coverage` | **Coverage** | The routing ledger: which vulnerability categories were attempted, skipped with a reason, blocked, still pending, or out of phase |
+| `/cve-intel` | **CVE intel** | Version-matched CVEs for the detected components, plus a live feed of newly published CVEs |
 | `/agents` | **Agents** | The executor + independent-reviewer fleet, by family and tier; per-skill produced/accepted counts derived from the loaded findings |
+| `/connections` | **Agent Connections** | *(opt-in)* Connect the control plane, then bring your own coding-agent runtime (Claude Code · Codex · Gemini · Grok) via subscription login or an API key; live per-provider status, model selection, and disconnect. Needs `scripts/console_control.py` |
 | `/report` | **Report** | Client-ready assembly: executive summary, risk-ordered findings, demonstration-limited section, attack chains; export JSON / print to PDF |
-| `/settings` | **Settings** | Theme, data source, about |
+| `/settings` | **Settings** | Theme, data source, about (runtimes moved to **Connections**) |
 
 ## Data model
 
@@ -32,6 +38,7 @@ files under `/e/<id>/…` — the console lazy-loads the one you select. Per eng
 - **`host_discovery.json`** (host-discovery) — `{ live_hosts: [...], api_endpoints: [...] }` → the Assets map + **Ports & services** table.
 - **`chains.json`** (attack-chain-discovery) — `{ chains: [{ steps: [...] }] }` → the **Attack chains** graph (served as `/attack_chains.json`).
 - **`scope.yaml`** (engagement root) — scope / rules / window → the **Scope** panel (the launcher converts it to `scope.json`).
+- **`notebook.json`** (notebook / `scripts/notebook.py`) — `{ leads: [...], recon_intel: {...}, evidence: [...], roe: {...}, test_accounts: [...] }` → the **Notebook** view. "What isn't a finding yet": leads cross-link findings (`promoted_to` → `finding.id`) and the surface ledger; recon_intel aggregates the recon feeders. Cross-references the ledgers rather than duplicating them.
 
 Agents stats and the activity timeline have no dedicated file — the console **derives** them from each
 finding's `review.reviewer` + `review.reviewed_at`.

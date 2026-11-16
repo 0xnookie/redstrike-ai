@@ -6,11 +6,14 @@
 
 ## Interview
 - **STEPS:** ingest live hosts + any provided identities → crawl **unauth AND authenticated (per identity)** → historical URLs → BUILD custom wordlist (osint terms + crawl + js) → directory/file brute-force → parameter discovery → **authed-vs-unauth surface diff + multi-step flow map** → virtual-host/bucket check → consolidate → review.
-- **AUTHENTICATED & STATE-AWARE (don't leave the post-login surface unmapped):** most access-control, BOLA/BFLA, workflow and business-logic bugs live *behind auth* and *across steps*. With provided credentials (or self-registered test accounts), **log in and crawl the authenticated surface**, then **diff authed-vs-unauth** to surface role-gated/hidden endpoints, and **map multi-step workflows** (checkout, password-reset, upload, admin, cart/coupon) as state transitions. Unauth-only recon starves `authz-context`/`api-context` and misses that surface entirely. Use TEST accounts only; never authenticate with found/real creds.
+- **AUTHENTICATED & STATE-AWARE (don't leave the post-login surface unmapped):** most access-control, BOLA/BFLA, workflow and business-logic bugs live *behind auth* and *across steps*. With provided credentials (or self-registered test accounts), **log in and crawl the authenticated surface**, then **diff authed-vs-unauth** to surface role-gated/hidden endpoints, and **map multi-step workflows** (checkout, password-reset, upload, admin, cart/coupon) as state transitions. Unauth-only recon starves `authz-context`/`api-context` and misses that surface entirely. Use TEST accounts only; never authenticate with found/real creds. **Persist the session** — save the
+authenticated cookie jar to a file (e.g. a Netscape/`MozillaCookieJar`) so multi-step authed crawling +
+every later executor reuse the SAME login instead of re-authenticating per request (re-login per step is
+slow, noisy, and lockout-risky). Log in once, save, reuse.
 - **TOOLS:** `katana`/`hakrawler`/`gospider` (crawl), `gau`/`waymore` (historical), `cewl` + synth (wordlist), `ffuf`/`feroxbuster`/`gobuster`/`dirsearch` (brute-force), `arjun`/`paramspider`/`x8` (params), `wafw00f` (WAF fingerprint). Tool-first — `_contract/tooling.md`.
 - **GOAL:** Produce the content map per host — crawled + brute-forced endpoints, discovered params, and a **custom wordlist** — feeding js-analysis and the vuln agents. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `crawl.txt`, `endpoints.txt`, `params.txt`, `custom_wordlist.txt`, `content.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `<engagement>/host-discovery/host_discovery.json` (live hosts) + `<engagement>/osint/terms.txt` + `js-analysis/out/<site>/findings/{endpoints,params}.jsonl` (if run) + `scope.yaml`. `refs/` = `content_discovery_refs.md`. Chains FROM `host-discovery`, `osint`; chains TO `js-analysis` + every vuln feeder (endpoints/params/wordlist). Canonical order: content-discovery PRECEDES js-analysis; the `js-analysis/*` inputs above are consumed ONLY on an OPTIONAL second enrichment pass, so recon stays acyclic.
+- **DATA / RAG:** inputs = `<engagement>/host-discovery/host_discovery.json` (live hosts) + `<engagement>/osint/terms.txt` + `js-analysis/out/<site>/findings/{endpoints,params}.jsonl` (if run) + `scope.yaml`. `refs/` = `content_discovery_refs.md`. Chains FROM `host-discovery`, `osint`; chains TO `js-analysis` + every vuln feeder (endpoints/params/wordlist) + the **notebook** (`content.json` → content `recon_intel`, via `scripts/notebook.py --plan`). Canonical order: content-discovery PRECEDES js-analysis; the `js-analysis/*` inputs above are consumed ONLY on an OPTIONAL second enrichment pass, so recon stays acyclic.
 - **DECOMPOSITION:** n/a (recon feeder). Includes wordlist building.
 
 ## Goal
@@ -21,6 +24,21 @@ Produce the content map + a target-specific wordlist. DONE = `checklist.md` `- [
 - A **custom wordlist** built from OSINT terms + crawled paths + JS strings (beats a generic list)
 - Brute-forced directories/files (with the custom + a standard list)
 - Discovered parameters (from crawl + active mining)
+
+## Discover smart, not loud (do this BEFORE mega-list brute-force)
+Brute-force is the *last*, noisiest rung — and it only finds paths you guessed. Three higher-yield,
+lower-noise sources come first (they matter double under a stealth/rate cap):
+1. **Proxy sitemap/history** (`_contract/proxy.md` §7) — real traffic reveals mounts/sub-apps/API bases a
+   wordlist can't guess, at **zero extra requests**. Ingest it first; seed `routes[]` + the wordlist from it.
+2. **Build/deploy artifacts** that enumerate the app in a handful of requests — check for each explicitly:
+   `asset-manifest.json` / `manifest.json` (SPA build → every chunk + page), `**/*.js.map` source maps
+   (→ full source + routes, via `js-analysis`), **directory listings / index pages**, `robots.txt`,
+   `sitemap.xml`, `/.well-known/` (incl. `openid-configuration`), and framework JSON error shapes (fingerprint
+   the backend). One `asset-manifest.json` can map an entire embedded app that no wordlist contains.
+3. **Recurse into every discovered mount.** A newly-found path prefix (a sub-app, an SPA mount, an embedded
+   third-party **widget/chatbot**, an API base) is a **new discovery root** — crawl it, pull *its*
+   manifests/source-maps, and wordlist it. Do not stop at the top level; the interesting app is often one the
+   host embeds, not the one it is.
 
 ## Steps  (action · tool · output)
 1. Ingest live hosts + osint terms · `jq host_discovery.json` + `terms.txt` · (seed)
@@ -79,3 +97,12 @@ list is parsed tolerantly, but prefer the `routes[]` record above.
 Active crawling + brute-forcing — **rate-limit** (respect `scope.yaml` `rate_limit_rps`); in-scope hosts
 only; no aggressive threading that could disrupt; honor `no_dos`. Prefer the custom wordlist (fewer, smarter
 requests) over mega-lists on prod. Audit-log.
+
+## Coverage — a host is not "mapped" (and never "exhausted") until:
+A premature "host mapped / nothing left / hardened" is the costly failure here — it ends the hunt on the
+*linked* surface and misses embedded apps. Do **not** emit that verdict until, for each live host:
+(1) the **proxy sitemap** was mined (`proxy.md` §7); (2) **build artifacts** were checked — `asset-manifest`,
+source maps, directory listings, `robots`/`sitemap`/`.well-known` (above); (3) real content-discovery tools
+actually **ran** (not a hand-typed list, and not from a shell where they only *appeared* missing —
+`tooling.md` §Preflight); and (4) **every discovered mount was recursed into**. Honest negatives are fine
+*after* that bar; a negative before it is a coverage gap, not a result.

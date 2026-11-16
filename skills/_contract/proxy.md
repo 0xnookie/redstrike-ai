@@ -60,3 +60,31 @@ Secrets are redacted on export; the raw proxy project stays local (never committ
 ## 6. Scope + audit convergence
 Generate the proxy's scope from `scope.yaml` so the transport layer and the scope gate **agree** (one scope,
 two enforcement points). Every exchange is appended to the immutable engagement audit log §`roe-gate.md`.
+
+## 7. Mine it as discovery (sitemap-first, before you brute-force)
+The connected proxy's **Sitemap/History is a primary discovery source, not just an evidence store** — and
+the cheapest one: it costs **zero extra requests** (it is traffic that already happened), so under a
+stealth/rate cap it outranks brute-force. **Before** leaning on a wordlist, pull what the proxy already saw:
+- A wordlist only finds paths you *thought to guess*; the sitemap holds the paths the app **actually
+  loaded** — sub-apps, SPA mounts, API bases, embedded third-party widgets — that no generic list contains.
+  (Field lesson: a whole second app on an in-scope host was invisible to a 140-word list and sat in plain
+  view in the proxy sitemap.)
+- `proxy-context` must **ingest the Sitemap/History first** and seed `content.json routes[]` + the
+  `content-discovery` wordlist from it; brute-force then *extends* that real surface instead of guessing it
+  cold. Treat every distinct path prefix in the sitemap as a **mount to recurse into** (§`content-discovery`).
+- Keep the human browsing in the loop: a few minutes of operator browse-through the proxy enumerates more
+  real surface than a long scan, and stays WAF-safe. Ask for / import their sitemap rather than re-deriving it.
+
+A host is **not** "mapped" until the proxy sitemap has been mined — see `content-discovery` §coverage.
+
+## 8. Sanity: did the proxy actually REACH it? (don't trust proxy output blindly)
+A proxy can answer *for* an upstream it could not reach — Burp returns its own **"Burp Suite" landing/error
+page** (often HTTP 200) when it can't connect (DNS failure, internal-only host, refused), and a transparent
+proxy may serve a captive/error page. Taken at face value this **corrupts discovery**: an unreachable host
+reads back as "200 + content". So **validate the transport before trusting a response**:
+- A 2xx whose body is the *proxy's own* page (title "Burp Suite", a generic proxy error, a captive portal)
+  is **not** the target — treat the host as **unreachable**, not live.
+- When a result looks surprising (every host "200", a tech fingerprint that doesn't fit), **cross-check one
+  host DIRECT** (no proxy). Direct-fails + proxy-"200" = the proxy is answering, not the host.
+- The proxy is the spine for reachable, in-scope hosts; it is **not** a way to reach a host your own client
+  can't — if direct and proxy both fail, the host is internal/blocked (record it as such, don't fabricate).

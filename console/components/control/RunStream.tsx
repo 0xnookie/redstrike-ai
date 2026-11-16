@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu, ChevronRight, ChevronDown } from "lucide-react";
-import { useControl } from "./ControlProvider";
+import { memo, useEffect, useRef, useState } from "react";
+import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu, ChevronRight, ChevronDown, CornerDownLeft, ListChecks } from "lucide-react";
+import { useControl, useRunStream } from "./ControlProvider";
 import type { RunEvent } from "@/lib/control";
 import { Card } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
@@ -14,16 +14,56 @@ const toneClass: Record<string, string> = {
   muted: "text-muted",
 };
 
-function EventIcon({ kind }: { kind: RunEvent["kind"] }) {
-  if (kind === "tool") return <ArrowRight size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
+function EventIcon({ kind, tone }: { kind: RunEvent["kind"]; tone?: RunEvent["tone"] }) {
+  if (kind === "dispatch") return <ArrowRight size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
+  if (kind === "return") return <CornerDownLeft size={13} className={cx("mt-0.5 shrink-0", tone === "warn" ? "text-amber-400" : "text-emerald-400")} />;
+  if (kind === "step") return <ListChecks size={13} className={cx("mt-0.5 shrink-0", tone === "ok" ? "text-emerald-400" : tone === "warn" ? "text-amber-400" : "text-cyan-400")} />;
+  if (kind === "tool") return <ChevronRight size={13} className="mt-0.5 shrink-0 text-muted" />;
   if (kind === "system") return <Cpu size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
   if (kind === "result") return <CircleCheck size={13} className="mt-0.5 shrink-0" />;
   if (kind === "error") return <CircleAlert size={13} className="mt-0.5 shrink-0 text-amber-400" />;
   return <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-muted/50" />;
 }
 
+// Events are immutable once parsed (stable `key`), so a memoized row re-renders only when
+// it's new — a flush appending 5 lines to a 500-line log renders 5 rows, not 500.
+const EventRow = memo(function EventRow({ ev, billed }: { ev: RunEvent; billed: boolean }) {
+  return (
+    <li className={cx("row-in flex items-start gap-2", ev.kind === "run" && "mt-2 border-t border-line pt-2")}>
+      <EventIcon kind={ev.kind} tone={ev.tone} />
+      <div className="min-w-0 flex-1">
+        <div className={cx("flex flex-wrap items-baseline gap-x-2", toneClass[ev.tone ?? "muted"])}>
+          <span className={cx((ev.kind === "tool" || ev.kind === "dispatch") && "text-fg", ev.kind === "dispatch" && "font-medium")}>
+            {ev.text}
+            {ev.kind === "return" && ev.tone !== "warn" ? " returned" : ""}
+          </span>
+          {ev.detail && <span className="truncate text-muted">{ev.detail}</span>}
+          {ev.kind === "result" && ev.costUsd != null && (
+            <span
+              className="text-muted"
+              title={
+                billed
+                  ? "Actual per-token cost (Claude connected via API key)."
+                  : "List-price API-equivalent — not billed on your subscription; this usage counts against your plan limits."
+              }
+            >
+              {billed ? `· $${ev.costUsd.toFixed(4)}` : `· ~$${ev.costUsd.toFixed(2)} est · plan usage`}
+            </span>
+          )}
+        </div>
+        {ev.kind === "result" && !!ev.deferred && (
+          <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-400">
+            <CircleAlert size={12} /> {ev.deferred} action{ev.deferred === 1 ? "" : "s"} deferred — approve below, then resume.
+          </div>
+        )}
+      </div>
+    </li>
+  );
+});
+
 export function RunStream() {
-  const { events, running, clearEvents, auth } = useControl();
+  const { running, clearEvents, auth } = useControl();
+  const { events } = useRunStream();
   const [open, setOpen] = useState(false); // raw log is secondary to the orchestration view
   // a run is only actually billed per-token when Claude is connected via a raw API key;
   // a login/OAuth connection is subscription usage, so total_cost_usd is notional there.
@@ -81,32 +121,7 @@ export function RunStream() {
         ) : (
           <ul className="space-y-0.5">
             {events.map((ev) => (
-              <li key={ev.key} className={cx("flex items-start gap-2", ev.kind === "run" && "mt-2 border-t border-line pt-2")}>
-                <EventIcon kind={ev.kind} />
-                <div className="min-w-0 flex-1">
-                  <div className={cx("flex flex-wrap items-baseline gap-x-2", toneClass[ev.tone ?? "muted"])}>
-                    <span className={cx(ev.kind === "tool" && "text-fg")}>{ev.text}</span>
-                    {ev.detail && <span className="truncate text-muted">{ev.detail}</span>}
-                    {ev.kind === "result" && ev.costUsd != null && (
-                      <span
-                        className="text-muted"
-                        title={
-                          billed
-                            ? "Actual per-token cost (Claude connected via API key)."
-                            : "List-price API-equivalent — not billed on your subscription; this usage counts against your plan limits."
-                        }
-                      >
-                        {billed ? `· $${ev.costUsd.toFixed(4)}` : `· ~$${ev.costUsd.toFixed(2)} est · plan usage`}
-                      </span>
-                    )}
-                  </div>
-                  {ev.kind === "result" && !!ev.deferred && (
-                    <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-400">
-                      <CircleAlert size={12} /> {ev.deferred} action{ev.deferred === 1 ? "" : "s"} deferred — approve below, then resume.
-                    </div>
-                  )}
-                </div>
-              </li>
+              <EventRow key={ev.key} ev={ev} billed={billed} />
             ))}
           </ul>
         )}

@@ -21,6 +21,7 @@ serves them under per-engagement routes the console fetches on open:
   host_discovery.json         (host-discovery)          -> /e/<id>/host_discovery.json
   content.json                (content-discovery)       -> /e/<id>/content.json
   http_history.json           (proxy-context)           -> /e/<id>/http_history.json
+  notebook.json               (notebook)                -> /e/<id>/notebook.json
   chains.json                 (attack-chain-discovery)  -> /e/<id>/attack_chains.json
   scope.yaml / scope.json     (engagement root)         -> /e/<id>/scope.json
 
@@ -28,6 +29,7 @@ plus a js-analysis manifest + the analyzed JS files themselves (so the console's
 asset detail can list and open what recon pulled per host):
 
   js-analysis/**             (js-analysis)             -> /e/<id>/js_analysis.json  (computed listing)
+                                                       -> /e/<id>/js_recon.json     (computed: parsed findings/*.jsonl + site summary)
                                                        -> /e/<id>/js/<rel>          (raw file, correct Content-Type)
 
 plus a `/engagements.json` manifest (one entry per engagement, with parsed scope
@@ -40,6 +42,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,6 +58,7 @@ WANTED = {
     "cve_intel.json": ["cve_intel.json"],
     "content.json": ["content.json"],
     "http_history.json": ["http_history.json"],
+    "notebook.json": ["notebook.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -105,6 +109,75 @@ def js_analysis_manifest(engagement: Path) -> dict:
                 "bytes": size,
             })
     return {"files": files}
+
+
+def _read_jsonl(path: Path, cap: int = 4000):
+    """Parse a findings/*.jsonl file tolerantly — one JSON object per line.
+
+    Returns (rows up to `cap`, total valid rows seen). Blank/garbage lines are
+    skipped so a half-written stream never breaks the view."""
+    rows, total = [], 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                total += 1
+                if len(rows) < cap:
+                    rows.append(obj)
+    except OSError:
+        return [], 0
+    return rows, total
+
+
+_JS_STREAMS = ("endpoints", "params", "apis", "secrets", "gadgets", "libraries")
+
+
+def js_recon_report(engagement: Path) -> dict:
+    """Aggregate the js-analysis FINDINGS into one payload for the JS Recon view.
+
+    The js-analysis skill writes one out/<site>/ tree per in-scope site, each with
+    findings/{endpoints,params,apis,secrets,gadgets,libraries}.jsonl +
+    analysis/site-summary.md + report.md. We locate each site by its findings/ dir
+    (robust to the out/ wrapper), parse the JSONL line-by-line, and fold in the
+    per-site summary. Secrets are already redacted at the source (match_redacted);
+    this only relays what the skill wrote."""
+    base = _js_dir(engagement)
+    sites = []
+    if base:
+        seen = set()
+        for findings_dir in sorted(base.rglob("findings")):
+            if not findings_dir.is_dir():
+                continue
+            site_root = findings_dir.parent
+            key = str(site_root.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            site = {"site": site_root.name, "counts": {}, "truncated": {}}
+            for name in _JS_STREAMS:
+                rows, total = _read_jsonl(findings_dir / f"{name}.jsonl")
+                site[name] = rows
+                site["counts"][name] = total
+                if total > len(rows):
+                    site["truncated"][name] = True
+            summary = site_root / "analysis" / "site-summary.md"
+            try:
+                if summary.is_file():
+                    site["summary_md"] = summary.read_text(encoding="utf-8", errors="replace")[:200_000]
+            except OSError:
+                pass
+            site["has_report"] = (site_root / "report.md").is_file()
+            if any(site["counts"].get(n) for n in _JS_STREAMS) or site.get("summary_md") or site["has_report"]:
+                sites.append(site)
+    sites.sort(key=lambda s: s["site"])
+    totals = {n: sum(s["counts"].get(n, 0) for s in sites) for n in _JS_STREAMS}
+    return {"sites": sites, "totals": totals, "site_count": len(sites)}
 
 
 def _ctype_for(p: Path) -> str:
@@ -344,6 +417,31 @@ def _minimal_scope_read(path: Path) -> dict:
     return doc
 
 
+def run_info(eng: Path) -> dict:
+    """Whether this engagement has an autonomous-run log, and when it was last written.
+    The console reads "written moments ago" as a run still going — the one liveness signal
+    that also covers runs this server didn't launch (e.g. from a terminal)."""
+    log = eng / "runtime" / "autorun.jsonl"
+    if not log.is_file():
+        return {"log": False, "updated": None}
+    ts = datetime.fromtimestamp(log.stat().st_mtime, timezone.utc)
+    return {"log": True, "updated": ts.isoformat().replace("+00:00", "Z")}
+
+
+def coverage_progress(files: dict):
+    """Phase progress from the coverage ledger: of the categories in phase (not n/a), how many
+    are no longer pending (attempted / skipped-with-reason / blocked / pipeline)."""
+    led = _read_json(files.get("coverage_ledger.json"))
+    cats = led.get("categories") if isinstance(led, dict) else None
+    if not isinstance(cats, list):
+        return None
+    in_phase = [c for c in cats if isinstance(c, dict) and c.get("status") != "n/a"]
+    if not in_phase:
+        return None
+    pending = sum(1 for c in in_phase if c.get("status") == "pending")
+    return {"done": len(in_phase) - pending, "total": len(in_phase)}
+
+
 def manifest_entries(target: Path) -> list:
     """One entry per discovered engagement — rebuilt live on each request, so a
     console left running reflects a scan that finished after launch."""
@@ -360,6 +458,8 @@ def manifest_entries(target: Path) -> list:
             "summary": summarize(eng, files),
             "generated": (cons.get("generated") if isinstance(cons, dict) else None),
             "has": has,
+            "run": run_info(eng),
+            "progress": coverage_progress(files),
         })
     return entries
 
@@ -383,6 +483,8 @@ def make_handler(target: Path):
                 return ("json", json.dumps(scope, default=str).encode("utf-8")) if scope else None
             if name == "js_analysis.json":
                 return ("json", json.dumps(js_analysis_manifest(eng), default=str).encode("utf-8"))
+            if name == "js_recon.json":
+                return ("json", json.dumps(js_recon_report(eng), default=str).encode("utf-8"))
             if name.startswith("js/"):
                 base = _js_dir(eng)
                 if not base:

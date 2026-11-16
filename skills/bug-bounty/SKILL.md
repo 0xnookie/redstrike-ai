@@ -20,16 +20,17 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (scope parsed, plan + accepted
 ## Orchestration
 1. **Program scope + rules** → `program_scope.json` + fill `scope.yaml` (in/out scope, allowed classes, NO-DoS / no-social-eng / rate limits per the program). Nothing runs out of program scope.
 2. **Recon** — `redstrike-js-analysis` (+ discovery). **Prioritize** targets/classes with `redstrike-cve-intelligence` + the program's focus → `hunt_plan.md`.
+   - **Notebook** (`_contract/notebook.md`) — after recon, `python scripts/notebook.py --plan --engagement <engagement>` aggregates the recon intel + seeds leads; write the RoE + test accounts at scope time. This is what makes a **zero-finding program legible** — the recon it gathered and the leads it chased still show in the console even when nothing reaches the submission bar.
 3. **Hunt** — run the applicable `redstrike-<vuln>` skills, each gated (mechanical → its reviewer subagent). Only `accepted` findings advance.
 4. **Chain** — `redstrike-attack-chain-discovery` for higher-impact composites.
-5. **Triage/de-dupe** — drop duplicates (program's known issues / internal dupes); keep only `accepted`, in-scope, non-dup findings.
+5. **Triage/de-dupe** — drop duplicates (program's known issues / internal dupes); keep only `accepted`, in-scope, non-dup findings. Mark each notebook lead to its outcome — `notebook.py --mark L-<n> --status promoted --finding RS-…` (became a finding) or `--status dead --verdict <reason>` (killed) — so the notebook records the full investigative trail, not just the wins.
 6. **Package** — `redstrike-reporting` + per-finding submission drafts in `submissions/`, each meeting the submission-quality bar (`refs/report_quality.md`: specific title, complete reproduction, expected-vs-actual, earned impact/severity, proof, signal-only formatting). Program's format: title, severity, steps, impact, remediation.
 
 ## Inputs
 - program scope/rules (link/text), `scope.yaml`, `js-analysis` + vuln-agent outputs
 
 ## Outputs
-`program_scope.json` · `hunt_plan.md` · `submissions/` · `summary.md` · `logs/`
+`program_scope.json` · `hunt_plan.md` · `notebook.json` (leads + recon intel + evidence + RoE + accounts) · `submissions/` · `summary.md` · `logs/`
 
 ## Phases
 - **Phase 1:** scope parse + recon + prioritization.
