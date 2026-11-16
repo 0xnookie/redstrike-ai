@@ -353,6 +353,23 @@ if raup.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"recall_audit.py selftest failed: {e}")
 
+# 8g — dedup self-test (deterministic cross-agent de-duplication: canonical key + merge selection)
+ddup = ROOT / "scripts" / "dedup.py"
+if ddup.is_file():
+    try:
+        import importlib.util
+        _dspec = importlib.util.spec_from_file_location("rs_dedup_lint", ddup)
+        _ded = importlib.util.module_from_spec(_dspec)
+        sys.modules["rs_dedup_lint"] = _ded
+        _dspec.loader.exec_module(_ded)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _ded.selftest()
+        checked["dedup"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"dedup.py selftest failed: {e}")
+
 # 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():
