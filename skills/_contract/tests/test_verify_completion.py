@@ -1059,5 +1059,96 @@ class TestRecallAuditGate(unittest.TestCase):
             self.assertEqual(vc._recall_hard_errors(eng), [])
 
 
+# --------------------------------------------------------------------------- #
+# P2-1: cleanup/reversion gate — a post-ex/persistence finding must prove
+# verified reversion with a structured `cleanup` object, not prose.
+# --------------------------------------------------------------------------- #
+class TestCleanupReversionGate(unittest.TestCase):
+    def _eng(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        return pathlib.Path(self._tmp.name)
+
+    def _persistence_finding(self, eng, *, cleanup="valid"):
+        f = valid_finding(category={"cwe": "CWE-507"})
+        f["_rs_source_skill"] = "persistence"
+        write_evidence(eng, f)
+        if cleanup == "valid":
+            ref = "findings/evidence/cleanup.md"
+            (eng / ref).parent.mkdir(parents=True, exist_ok=True)
+            (eng / ref).write_text("removed the scheduled task; schtasks /query confirms gone\n", encoding="utf-8")
+            f["cleanup"] = {"mechanism": "scheduled task benign marker", "removed": True,
+                            "verified_by": "schtasks /query shows the task is gone", "ref": ref}
+        elif cleanup == "not-removed":
+            ref = "findings/evidence/cleanup.md"
+            (eng / ref).parent.mkdir(parents=True, exist_ok=True)
+            (eng / ref).write_text("left in place\n", encoding="utf-8")
+            f["cleanup"] = {"mechanism": "run key", "removed": False,
+                            "verified_by": "n/a", "ref": ref}
+        elif cleanup == "missing-ref":
+            f["cleanup"] = {"mechanism": "run key", "removed": True,
+                            "verified_by": "reg query", "ref": "findings/evidence/nope.md"}
+        # cleanup == "absent" -> no cleanup object
+        return f
+
+    def test_persistence_without_cleanup_fails(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="absent")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+        self.assertIn("cleanup", detail)
+
+    def test_persistence_with_verified_cleanup_passes(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="valid")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok, detail)
+
+    def test_persistence_removed_false_fails(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="not-removed")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+        self.assertIn("removed", detail)
+
+    def test_persistence_missing_cleanup_ref_fails(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="missing-ref")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+        self.assertIn("cleanup ref not found", detail)
+
+    def test_web_finding_needs_no_cleanup(self):
+        eng = self._eng()
+        f = valid_finding()  # no _rs_source_skill -> not a post-ex class
+        write_evidence(eng, f)
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok, detail)
+
+    def test_credential_access_also_requires_cleanup(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="absent")
+        f["_rs_source_skill"] = "credential-access"
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+
+    def test_engagement_per_skill_persistence_without_cleanup_hard_fails(self):
+        """A persistence finding discovered via the per-skill layout (tagged by dir) without a verified
+        cleanup object must FAIL the engagement gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding(category={"cwe": "CWE-507"})
+            write_evidence(eng, f)  # evidence resolves from eng root
+            (eng / "persistence").mkdir()
+            (eng / "persistence" / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["pass"], buf.getvalue())
+            self.assertTrue(any("cleanup" in r["detail"] for r in payload["results"] if not r["passed"]))
+
+
 if __name__ == "__main__":
     unittest.main()

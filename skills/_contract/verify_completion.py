@@ -130,6 +130,23 @@ _REQUIRED_FINDING_FIELDS = ("id", "title", "asset", "category", "severity",
 # axis; `status` is derived from it (see verify-base.md "Two axes").
 _REVIEWED_STATUSES = {"verified", "rejected", "remediated"}
 
+# Post-exploitation / persistence classes that PLANT or MODIFY state and must prove benign reversion.
+# Conservative on purpose (the task's scope): persistence + the AD/credential post-ex classes. A finding
+# from one of these REQUIRES a verified `cleanup` object (see finding.schema.json). Detected by the
+# producing skill (per-skill layout tags it); a consolidated report loses the tag, and the per-skill
+# mechanical gate + verify.md already enforce cleanup.md upstream there.
+_CLEANUP_REQUIRED_SKILLS = {
+    "persistence", "credential-access",
+    "ad-initial-access", "ad-kerberos", "ad-acl-abuse", "ad-adcs", "ad-lateral-movement",
+    "sccm-exploitation",
+}
+
+
+def _requires_cleanup(f: dict) -> bool:
+    """True iff this finding came from a post-ex/persistence class that plants/modifies state and so must
+    carry a verified reversion record. Keyed on the producing skill (zero false positives on web findings)."""
+    return f.get("_rs_source_skill") in _CLEANUP_REQUIRED_SKILLS
+
 
 def _repo_root() -> Path:
     # skills/_contract/verify_completion.py -> repo root is two levels up.
@@ -678,15 +695,17 @@ def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: se
     # (stray keys, bad confidence/verdict/rubric enums) the per-skill gate can't see.
     fdef, froot = _finding_schema_def()
     if fdef:
+        # Validate a copy without the transient `_rs_*` discovery tags (the schema is additionalProperties:false).
+        f_schema = {k: v for k, v in f.items() if not k.startswith("_rs_")}
         try:
             import jsonschema  # type: ignore
             try:
-                jsonschema.validate(f, {**froot, **fdef})  # validate as a finding object
+                jsonschema.validate(f_schema, {**froot, **fdef})  # validate as a finding object
                 serrs = []
             except jsonschema.ValidationError as e:  # type: ignore
                 serrs = [f"{'/'.join(str(x) for x in e.absolute_path) or '<finding>'}: {e.message}"]
         except ImportError:
-            serrs = _stdlib_schema_errors(f, fdef, froot, path=fid)
+            serrs = _stdlib_schema_errors(f_schema, fdef, froot, path=fid)
         if serrs:
             return False, "schema violation: " + "; ".join(serrs[:4]) + (" …" if len(serrs) > 4 else ""), warns
 
@@ -706,6 +725,25 @@ def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: se
     repro = f.get("reproduction") or []
     if not isinstance(repro, list) or not repro:
         return False, "reproduction steps missing", warns
+
+    # Cleanup/reversion gate (post-ex/persistence): a class that plants or modifies state must PROVE benign
+    # reversion with a verified `cleanup` object, not prose. HARD for the conservative post-ex set.
+    if _requires_cleanup(f):
+        cu = f.get("cleanup")
+        if not isinstance(cu, dict) or not cu:
+            return False, (f"post-ex/persistence finding (source: {f.get('_rs_source_skill')}) lacks a verified "
+                           "`cleanup` object (mechanism/removed/verified_by/ref) proving reversion"), warns
+        miss = [k for k in ("mechanism", "removed", "verified_by", "ref") if k not in cu]
+        empty = [k for k in ("mechanism", "verified_by", "ref") if k in cu and str(cu.get(k)).strip() == ""]
+        if miss or empty:
+            return False, f"cleanup object incomplete (missing: {miss or '—'}, empty: {empty or '—'})", warns
+        if cu.get("removed") is not True:
+            return False, "cleanup.removed is not true — reversion not verified (post-ex/persistence)", warns
+        cp = eng / cu["ref"]
+        if not cp.is_file():
+            return False, f"cleanup ref not found: {cu['ref']}", warns
+        if cp.stat().st_size == 0:
+            return False, f"cleanup ref is 0 bytes: {cu['ref']}", warns
 
     # --- soft checks (warnings only) ---
     if cvss_mod and f.get("cvss_vector"):
@@ -767,6 +805,12 @@ def _discover_engagement_findings(eng: Path):
             if arr is None:
                 bad.append(str(p.relative_to(eng)))
             else:
+                # Tag each finding with its producing skill (the dir name) so the cleanup/reversion gate can
+                # tell a post-ex/persistence finding from a web finding. Transient (`_rs_*`): stripped before
+                # schema validation. Only present in the per-skill layout; a consolidated report loses it.
+                for f in arr:
+                    if isinstance(f, dict):
+                        f.setdefault("_rs_source_skill", p.parent.name)
                 findings.extend(arr)
         if bad:
             return None, "invalid JSON in: " + ", ".join(bad)

@@ -19,6 +19,14 @@ its own blind spots — independence is the whole point). It consumes `findings.
 6. **Scope & safety compliance** — `asset` ∈ engagement scope: read `scope.yaml` (typically `OUT/../scope.yaml`); the action that produced it was within RoE; no destructive action occurred without approval. Out-of-scope ⇒ hard fail + flag. If `scope.yaml` is absent, mark scope `n/a` and flag it — never silently assume in-scope.
 7. **Verdict + rework** — write a structured decision per finding.
 
+### Reversion is structured, not prose (post-ex/persistence)
+A finding from a class that PLANTS or MODIFIES state — **persistence and the AD/credential post-exploitation
+classes** (`persistence`, `credential-access`, `ad-initial-access`, `ad-kerberos`, `ad-acl-abuse`, `ad-adcs`,
+`ad-lateral-movement`, `sccm-exploitation`) — must carry a `cleanup` object in `finding.schema.json`
+(`mechanism`, `removed:true`, `verified_by`, `ref` to the proof), not just a `cleanup.md` note. The mechanical
+gate HARD-FAILS such a finding when `cleanup` is absent, `removed` is not `true`, or the `ref` proof is
+missing — so "we reverted it" is verifiable, not asserted. Ordinary web findings change nothing and omit it.
+
 ## Verdict
 
 A review emits a `review{}` object per finding, conforming to `finding.schema.json` → `review{}`.
