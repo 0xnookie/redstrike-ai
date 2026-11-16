@@ -552,6 +552,63 @@ if agents_dir.is_dir():
             if ref not in atext:
                 err(f".claude/agents/{a.name}: reviewer must load skills/_contract/{ref}")
 
+# 17 — strategist / hunt_plan registration: the Tier-3 `strategist` planning skill is review-only (it
+# emits hunt_plan.json, NOT findings, so it must NOT grow a verify.md), and its hunt_plan.schema.json
+# must be a valid, versioned schema whose ranking-only INVARIANT holds in the shape itself — no `skipped`
+# queue-state (only coverage.py may skip) and a depth-budget whose lowest tier is the escalation `floor`
+# (so the strategist can never encode a below-floor budget). Mirrors how coverage/surface ledgers are
+# guarded, and keeps the agentic-upgrade wiring from silently rotting.
+strat_dir = skills_dir / "strategist"
+if strat_dir.is_dir():
+    checked["strategist"] = 1
+    for req in ("SKILL.md", "checklist.md", "review.md"):
+        if not (strat_dir / req).is_file():
+            err(f"strategist: missing {req} (the planning skill contract)")
+    if (strat_dir / "verify.md").is_file():
+        err("strategist: must be review-only (emits hunt_plan.json, not findings) — remove verify.md")
+    sreview = strat_dir / "review.md"
+    if sreview.is_file():
+        sobj, sproblem = load_manifest(sreview)
+        if sproblem:
+            err(f"strategist/review.md: {sproblem}")
+        elif not any(a.get("path") == "hunt_plan.json"
+                     and a.get("schema") == "skills/_contract/hunt_plan.schema.json"
+                     for a in sobj.get("artifacts", [])):
+            err("strategist/review.md: manifest must declare hunt_plan.json with "
+                "schema skills/_contract/hunt_plan.schema.json")
+
+hp_path = skills_dir / "_contract" / "hunt_plan.schema.json"
+if not hp_path.is_file():
+    err("skills/_contract/hunt_plan.schema.json missing (the strategist's output schema)")
+else:
+    checked["hunt_plan_schema"] = 1
+    try:
+        hp = json.loads(hp_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        hp = None
+        err(f"hunt_plan.schema.json: invalid JSON: {e}")
+    if hp is not None:
+        props = hp.get("properties") or {}
+        if "version" not in props:
+            err("hunt_plan.schema.json: must declare a root 'version' property (schema-versioning drift)")
+        if hp.get("additionalProperties") is not False:
+            err("hunt_plan.schema.json: root must be additionalProperties:false (closed ranking artifact)")
+        defs = hp.get("$defs") or {}
+        entry = defs.get("entry") or {}
+        qstate = ((entry.get("properties") or {}).get("queue_state") or {}).get("enum") or []
+        if "skipped" in qstate:
+            err("hunt_plan.schema.json: queue_state enum must NOT include 'skipped' — the strategist "
+                "can never skip a class (only coverage.py records a skip, with a reason)")
+        if not qstate:
+            err("hunt_plan.schema.json: $defs/entry/queue_state must declare an enum")
+        budget = defs.get("depth_budget") or {}
+        tiers = ((budget.get("properties") or {}).get("tier") or {}).get("enum") or []
+        if tiers and tiers[0] != "floor":
+            err("hunt_plan.schema.json: depth_budget.tier enum must start at 'floor' (the lowest budget "
+                "is still the full escalation floor — a budget can never go below it)")
+        if not tiers:
+            err("hunt_plan.schema.json: $defs/depth_budget/tier must declare an enum (floor/standard/deep)")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
