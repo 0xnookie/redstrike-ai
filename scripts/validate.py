@@ -370,6 +370,23 @@ if ddup.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"dedup.py selftest failed: {e}")
 
+# 8h — chain_validate self-test (attack-chain integrity: step->accepted finding + composite flag)
+chvp = ROOT / "scripts" / "chain_validate.py"
+if chvp.is_file():
+    try:
+        import importlib.util
+        _chspec = importlib.util.spec_from_file_location("rs_chainvalidate_lint", chvp)
+        _chv = importlib.util.module_from_spec(_chspec)
+        sys.modules["rs_chainvalidate_lint"] = _chv
+        _chspec.loader.exec_module(_chv)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _chv.selftest()
+        checked["chain_validate"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"chain_validate.py selftest failed: {e}")
+
 # 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():

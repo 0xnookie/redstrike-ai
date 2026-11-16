@@ -650,6 +650,35 @@ def _recall_hard_errors(eng: Path) -> list:
     return _recall_check(eng)[0]
 
 
+def _try_import_chain_validate():
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "chain_validate.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_chain_validate", p)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rs_chain_validate"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _chain_hard_errors(eng: Path) -> list:
+    """HARD attack-chain gate (fix: no attack-chain validator) — active only once a report exists. Every
+    chain step must resolve to an accepted/blocked finding, and every chain finding must be composite."""
+    if not _report_present(eng):
+        return []
+    cv = _try_import_chain_validate()
+    if not cv:
+        return []
+    try:
+        return cv.chain_hard_errors(eng)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _duplicate_id_errors(eng: Path, findings: list) -> list:
     """HARD duplicate finding-id gate — active only once a consolidated report exists.
 
@@ -994,6 +1023,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # was advisory only, so a report shipped over ~10 HIGH shallow-clear gaps).
     recall_errors, recall_warns = _recall_check(eng)
     top_warnings.extend(recall_warns)
+    # Attack-chain integrity: HARD once a report exists — every chain step resolves to an accepted/blocked
+    # finding and every chain finding is composite (fix: there was no attack-chain validator).
+    chain_errors = _chain_hard_errors(eng)
     if not any(eng.rglob("host_discovery.json")):
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
@@ -1060,7 +1092,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
     gate_ok = ((not failed) and (not coverage_errors) and (not review_errors)
-               and (not dup_errors) and (not integrity_errors) and (not recall_errors))
+               and (not dup_errors) and (not integrity_errors) and (not recall_errors)
+               and (not chain_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -1070,6 +1103,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "duplicate_id_errors": dup_errors,
                           "integrity_errors": integrity_errors,
                           "recall_errors": recall_errors,
+                          "chain_errors": chain_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -1098,6 +1132,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "skipped-but-signalled/never-run gap):")
             for rce in recall_errors:
                 print(f"  - {rce}")
+        if chain_errors:
+            print("\n✗ attack-chain gate FAILED (a chain step is unresolved/non-reportable, or a chain "
+                  "finding is not composite):")
+            for che in chain_errors:
+                print(f"  - {che}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -1112,7 +1151,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
               f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
               f"{len(review_errors)} independent-review error(s), {len(dup_errors)} duplicate-id error(s), "
               f"{len(integrity_errors)} coordination-integrity error(s), {len(recall_errors)} recall-audit "
-              f"error(s), {len(all_warnings)} warning(s).")
+              f"error(s), {len(chain_errors)} attack-chain error(s), {len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -1131,6 +1170,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("A clean-looking class ran shallow (signalled surface, ladder unexhausted) or a routed "
                   "class never ran => escalate + re-run it, or record an explicit, reasoned accept in "
                   "reviews/recall_audit_accepts.json before reporting.")
+        if chain_errors:
+            print("An attack chain references a non-accepted/unknown finding, or a chain finding isn't "
+                  "composite:true => fix the chain's step ids / set composite:true before reporting.")
     return gate_ok
 
 

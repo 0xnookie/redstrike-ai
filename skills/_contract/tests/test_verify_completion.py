@@ -1150,5 +1150,66 @@ class TestCleanupReversionGate(unittest.TestCase):
             self.assertTrue(any("cleanup" in r["detail"] for r in payload["results"] if not r["passed"]))
 
 
+# --------------------------------------------------------------------------- #
+# P2-2: attack-chain integrity gate — chain steps resolve to accepted/blocked
+# findings; chain findings are composite.
+# --------------------------------------------------------------------------- #
+class TestAttackChainGate(unittest.TestCase):
+    def _clean_report_eng(self, d):
+        eng = pathlib.Path(d)
+        f = valid_finding()  # id RS-2026-001, accepted by an independent reviewer
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def _write_chains(self, eng, steps):
+        (eng / "attack-chain-discovery").mkdir(parents=True, exist_ok=True)
+        (eng / "attack-chain-discovery" / "chains.json").write_text(json.dumps(
+            {"target": "app.acme.com", "generated_at": "2026-01-01T00:00:00Z",
+             "chains": [{"id": "chain-001", "title": "demo", "steps": steps}]}), encoding="utf-8")
+
+    def test_chain_on_known_accepted_finding_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._clean_report_eng(d)
+            self._write_chains(eng, [{"finding_id": "RS-2026-001", "role": "entry"},
+                                     {"finding_id": "RS-2026-001", "role": "exfil"}])
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["chain_errors"], [])
+
+    def test_chain_on_unknown_finding_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._clean_report_eng(d)
+            self._write_chains(eng, [{"finding_id": "RS-2026-001", "role": "entry"},
+                                     {"finding_id": "RS-2026-999", "role": "exfil"}])
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("RS-2026-999" in e for e in payload["chain_errors"]))
+
+
 if __name__ == "__main__":
     unittest.main()
