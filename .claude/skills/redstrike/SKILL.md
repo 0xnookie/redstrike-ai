@@ -136,6 +136,32 @@ that names the reviewer to backfill. See `_contract/verify-base.md` → "Indepen
 (internal host, new identity, API base-url, subdomain, new params), append it to the re-convergence inbox
 (§2e) so it gets routed — a finding is also a recon signal.**
 
+## 2.5 Hunt ordering — the strategist  (ORDER + DEPTH-BUDGET only; never a gate)
+After `coverage.py --plan` and `surface.py --plan` build the ledgers (§2a), run **`redstrike-strategist`**
+once more before the §2b pending-class loop. It reads the post-recon state (`coverage_ledger.json`,
+`surface_ledger.json`, the `*_context.json` feeders, `notebook.json`, `cve_intel.json`) and emits
+**`<engagement>/hunt_plan.json`** (schema `skills/_contract/hunt_plan.schema.json`): a **ranked hunt
+queue** over the `pending` classes plus a **per-class depth budget** (`floor`/`standard`/`deep`) and a
+rationale.
+
+**CONSUME it for ORDERING the §2b loop:** iterate "run every `pending` category" in ascending
+`hunt_plan.json` `rank` (highest-value, best-evidenced classes first) instead of map order, and let each
+class's `depth_budget` tune how much breadth beyond the escalation floor its executor spends — a
+`standard`/`deep` budget is the cue to invoke `parameter-optimization` proactively on high-value sinks
+and (for `deep`) run a diversity pass. **Re-invoke the strategist after each wave of findings** to
+re-rank the REMAINING (not-yet-`done`) queue — a confirmed finding can raise a related class for chaining
+or let an exhausted one fall.
+
+**ABSOLUTE INVARIANT — the strategist changes ONLY the order and depth of work, never the scope of it:**
+it never marks a class `skipped` (`hunt_plan.json` has no such state) and **never writes any ledger** —
+`coverage.py` stays the SOLE ledger owner. Ordering and budget are an **optimization on top of a
+recall-safe floor, not a replacement for it**: every `pending` class in the coverage ledger must still
+run (the §2c coverage gate is unchanged) and every high-prior surface still owes the full escalation
+ladder (the §2d recall audit + `verify-base.md` check #5 are unchanged), whatever rank or budget it got.
+A class the strategist mis-ranks low or under-budgets therefore still surfaces as a **shallow-clear** and
+is caught before reporting. If `hunt_plan.json` is missing or stale, fall back to map order — hunt
+ordering is an efficiency aid, **never a gate**, so its absence can never block or shrink the hunt.
+
 ## 3. Chain + exploit  (approval-gated)
 `redstrike-attack-chain-discovery` composes accepted findings into kill chains. For high-value accepted
 findings, `redstrike-exploit-generator` produces a benign working PoC (**approval + kill switch**).

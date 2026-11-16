@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/hunt_plan.schema.json",
+  "title": "Redstrike Hunt Plan",
+  "description": "A per-engagement ORDERING + DEPTH-BUDGET plan for the orchestrator's pending-class loop, produced by the Tier-3 `strategist` capability skill from the post-recon state (coverage_ledger.json + surface_ledger.json + the *_context.json feeders + notebook.json + cve_intel.json). It is a RANKING ARTIFACT, not a ledger: it says in which ORDER the already-routed `pending` classes should be hunted and how much DEPTH (beyond the mandatory escalation floor) each is worth, with a rationale. ABSOLUTE INVARIANT — the strategist controls ONLY order and depth-budget: it never marks a class skipped, never writes coverage_ledger.json / surface_ledger.json / any ledger, and can never LOWER the deterministic recall floor. Every class a strategist under-budgets still owes the full escalation ladder (escalation.py), so an under-hunted class still surfaces as a shallow-clear and is caught by the existing recall gate. `coverage.py` remains the SOLE ledger owner. Re-invokable: a later pass re-ranks the REMAINING (not-yet-done) queue as findings arrive.",
+  "type": "object",
+  "required": ["version", "engagement", "generated_at", "iteration", "queue"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "description": "hunt_plan schema version (drift guard; bump on a breaking shape change)." },
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string", "description": "ISO-8601 timestamp of this (re-)ranking pass." },
+    "iteration": { "type": "integer", "minimum": 0, "description": "0 = initial post-recon ranking; incremented each re-invocation that re-ranks the remaining queue." },
+    "inputs_seen": {
+      "type": "array", "items": { "type": "string" },
+      "description": "which inputs this pass actually read (e.g. coverage_ledger.json, surface_ledger.json, xss_context.json, notebook.json, cve_intel.json) — an audit trail of what the ranking was based on."
+    },
+    "ledger_owner": {
+      "type": "string",
+      "const": "coverage.py",
+      "description": "MUST remain 'coverage.py' — a constant assertion that the strategist is NOT the ledger owner and wrote no ledger. Informational; the strategist never touches a ledger regardless of this field."
+    },
+    "queue": { "type": "array", "items": { "$ref": "#/$defs/entry" }, "description": "the ranked hunt queue — one entry per routed class the strategist is ordering." },
+    "notes": { "type": "string", "description": "free-form strategy rationale for this pass as a whole." }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["rank", "class", "queue_state", "depth_budget", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "rank": { "type": "integer", "minimum": 1, "description": "1 = hunt first; the orchestrator iterates its pending-class loop in ascending rank." },
+        "class": { "type": "string", "description": "category id, matching routing-map.json / coverage_ledger.json (e.g. xss, sqli, idor)." },
+        "phase": { "type": "string", "description": "the category's phase (web, ai-llm, ...), copied from the coverage ledger for readability." },
+        "queue_state": {
+          "enum": ["queued", "in-progress", "done", "deferred"],
+          "description": "the PLAN's view of this class's position only — NOT a coverage status. queued=not started; in-progress=being hunted; done=hunted (so a re-rank leaves it out of the remaining queue); deferred=ranked last for now (e.g. awaiting a prerequisite finding), still owed in full. 'skipped' is deliberately NOT a value: the strategist can never skip a class — only coverage.py may record a skip, with a reason."
+        },
+        "prior": {
+          "enum": ["high", "unknown", "low"],
+          "description": "the recon prior for this class's surface (feeds escalation.assess). Informational here; it does not change the mandatory floor."
+        },
+        "signals": { "type": "array", "items": { "type": "string" }, "description": "the routing signals / evidence that drove this class up or down the ranking." },
+        "surface_count": { "type": "integer", "minimum": 0, "description": "how many surface_ledger elements route to this class (a breadth input to the ranking)." },
+        "severity_ceiling": {
+          "enum": ["critical", "high", "medium", "low", "info"],
+          "description": "the worst plausible impact if this class lands — a ranking input, never a cap on what is reported."
+        },
+        "depth_budget": { "$ref": "#/$defs/depth_budget" },
+        "rationale": { "type": "string", "description": "why this class sits at this rank and budget — the reviewable reasoning." }
+      }
+    },
+    "depth_budget": {
+      "type": "object",
+      "required": ["tier"],
+      "additionalProperties": false,
+      "description": "How much DEPTH, BEYOND the mandatory escalation floor, this class is worth. It can only ADD effort, never remove it: even the lowest tier ('floor') means 'run the full deterministic escalation ladder and no more' — it does NOT mean 'do less than the ladder'. The deterministic recall floor (escalation.py + verify-base.md check #5) is unconditional and outside the strategist's control.",
+      "properties": {
+        "tier": {
+          "enum": ["floor", "standard", "deep"],
+          "description": "floor = exhaust the escalation ladder, nothing extra (the minimum; still the full floor); standard = the ladder + proactive parameter-optimization on high-value sinks; deep = the ladder + a diversity pass (different payload set / model) + cross-finding chaining focus. Never below the ladder floor."
+        },
+        "min_ladder_steps": {
+          "type": "integer", "minimum": 0,
+          "description": "a hint for the number of escalation-ladder rungs worth trying for this class; a floor-or-above hint only — it can never justify stopping SHORT of the ladder the deterministic recall gate requires."
+        },
+        "diversity_pass": { "type": "boolean", "description": "true (typical for 'deep') = spend budget on a second, differently-seeded pass over the same sinks to raise recall." },
+        "rationale": { "type": "string", "description": "why this depth tier (e.g. 'confirmed reflection + CVE-matched component => deep')." }
+      }
+    }
+  }
+}
