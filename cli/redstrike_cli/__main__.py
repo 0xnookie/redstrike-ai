@@ -15,6 +15,7 @@ from . import __version__, engagement, gate, launch, preflight, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
+from . import settings as settingsmod
 
 
 def _is_repo(p: Path) -> bool:
@@ -351,6 +352,10 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
 
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
+    # Flag --allow globs broad enough to run active-exploit commands with no per-command deferral,
+    # i.e. that would bypass the autonomous approval gate for the highest-impact classes.
+    for w in settingsmod.broad_allow_warnings(extra_allow):
+        print(ui.warn(w))
     problems = engine.gate(prep)
     if problems:
         print()

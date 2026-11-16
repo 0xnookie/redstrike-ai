@@ -103,6 +103,51 @@ def build_sandbox(scope: dict | None) -> dict | None:
     return {"network": {"allowedHosts": allowed, "allowUnixSockets": []}}
 
 
+# Shell-command tokens that perform ACTIVE exploitation (not just recon). A pre-allow glob that
+# covers one of these lets the autonomous agent run exploit-class commands WITHOUT the per-command
+# deferral — i.e. with no operator sign-off — defeating the approval gate for the highest-impact
+# work. These are ordinary tool names (already named across the skills), not source attributions.
+_ACTIVE_EXPLOIT_TOKENS = frozenset({
+    "sqlmap", "hydra", "medusa", "ncrack", "patator", "crackmapexec", "cme", "netexec", "nxc",
+    "commix", "msfconsole", "msfvenom", "metasploit", "ysoserial", "evil-winrm", "responder",
+})
+
+
+def _glob_head(glob: str) -> str:
+    """Leading command token of an --allow glob (drop quotes, leading wildcards and any path)."""
+    g = glob.strip().strip("'\"").lstrip("*/ ").strip()
+    toks = g.split()
+    return (toks[0].rsplit("/", 1)[-1].lower()) if toks else ""
+
+
+def broad_allow_warnings(extra_allow: list[str] | None) -> list[str]:
+    """Warnings for `--allow` entries broad enough to run active-exploit commands with no deferral.
+
+    `--allow Bash` / `Bash(*)` pre-allow ANY shell command; a glob like `Bash(sqlmap *)` pre-allows a
+    named active-exploit tool; a leading-wildcard glob (`Bash(* --dump)`) can cover exploit commands.
+    Each bypasses the autonomous defer gate for a class the approval gate is meant to hold, so the
+    launcher surfaces them before launch. Returns human-readable strings (empty when nothing is broad).
+    """
+    out: list[str] = []
+    for a in extra_allow or []:
+        a = a.strip()
+        if a in ("Bash", "PowerShell"):
+            out.append(f"--allow {a}: pre-allows ANY shell command (no per-command deferral) — "
+                       f"active-exploit classes would run without operator sign-off")
+            continue
+        if (a.startswith("Bash(") or a.startswith("PowerShell(")) and a.endswith(")"):
+            glob = a[a.index("(") + 1:-1].strip()
+            if glob in ("", "*"):
+                out.append(f"--allow {a}: wildcard pre-allow runs any shell command without deferral")
+                continue
+            head = _glob_head(glob)
+            if head in _ACTIVE_EXPLOIT_TOKENS:
+                out.append(f"--allow {a}: pre-allows '{head}' (an active-exploit tool) to run without deferral")
+            elif glob.startswith("*"):
+                out.append(f"--allow {a}: leading-wildcard glob is broad enough to cover active-exploit commands")
+    return out
+
+
 def build_hook_command(
     python_exe: str, hook_script: Path, scope_json: Path, extra_args: list[str] | None = None
 ) -> str:

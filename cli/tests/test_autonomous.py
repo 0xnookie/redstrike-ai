@@ -20,6 +20,20 @@ class TestAutonomousSettings(unittest.TestCase):
         self.assertEqual(settings.bash_allow_globs(["Bash"]), ["*"])
         self.assertEqual(settings.bash_allow_globs([]), [])
 
+    def test_broad_allow_warnings(self):
+        # bare Bash / wildcard glob → runs anything with no deferral
+        self.assertTrue(settings.broad_allow_warnings(["Bash"]))
+        self.assertTrue(settings.broad_allow_warnings(["Bash(*)"]))
+        # an active-exploit tool pre-allow is flagged
+        w = settings.broad_allow_warnings(["Bash(sqlmap --dump *)"])
+        self.assertEqual(len(w), 1)
+        self.assertIn("sqlmap", w[0])
+        # a leading-wildcard glob is broad
+        self.assertTrue(settings.broad_allow_warnings(["Bash(* --batch)"]))
+        # a narrow recon pre-allow is NOT flagged
+        self.assertEqual(settings.broad_allow_warnings(["Bash(nmap *)", "WebFetch"]), [])
+        self.assertEqual(settings.broad_allow_warnings([]), [])
+
     def test_render_settings_mode_wires_defer(self):
         s = settings.render_settings(
             python_exe="py", hook_script=pathlib.Path("/h.py"), scope_json=pathlib.Path("/s.json"),
