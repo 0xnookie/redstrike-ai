@@ -19,7 +19,7 @@
   "manifest_version": 1,
   "skill": "reporting",
   "artifacts": [
-    { "id": "A.1", "path": "findings_consolidated.json", "type": "json", "allow_empty_array": true },
+    { "id": "A.1", "path": "findings_consolidated.json", "type": "json", "allow_empty_array": true, "schema": "skills/_contract/findings_consolidated.schema.json" },
     { "id": "B.1", "path": "report.md", "type": "text" },
     { "id": "C.1", "path": "summary.md", "type": "text" },
     { "id": "D.1", "path": "logs", "type": "dir" }

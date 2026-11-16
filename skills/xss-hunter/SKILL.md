@@ -39,7 +39,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (scope parsed, plan + accepted
   DOM-on-OAuth-callback → token capture → ATO; SVG/upload → same-origin cookie theft; postMessage →
   cross-origin exfil; stored → privileged viewer → cross-priv. Compose via `redstrike-attack-chain-discovery`.
 
-## Pipeline
+## Orchestration
 Runs the `_contract/hunter-base.md` pipeline with the class block above: scope → XSS recon →
 `xss-context` → the four variants (gated + reviewed, depth-first) → escalate/chain (`hunt_flow.md`
 catalog + `attack-chain-discovery`) → triage/de-dupe → package (`reporting` + per-finding drafts in

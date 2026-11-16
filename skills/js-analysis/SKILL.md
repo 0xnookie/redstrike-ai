@@ -112,3 +112,9 @@ object matching the shape commented beside it above; keep them consistent.
 ## Phases
 - **Phase 1 (generic):** passive enumerate + historical + fetch + store + deobfuscate + parse AST + build symbol table.
 - **Phase 2 (target-specific):** findings (endpoints/params/APIs/secrets/gadgets/libraries) + per-file notes + site-summary + report/curl.
+
+## Safety
+Read-only recon: fetch and analyze in-scope JS only, honoring `_contract/roe-gate.md` on every fetch
+(scope + rate limits); never modify the target. Prefer passive/historical sources. Any secret found is
+stored REDACTED (`findings/secrets.jsonl` keeps `match_redacted`, never the raw value). No exploitation
+here — every lead is handed to the per-vuln skills, which do their own gating.

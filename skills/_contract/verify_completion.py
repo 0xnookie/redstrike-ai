@@ -815,6 +815,12 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
 
 
 def main() -> None:
+    # A real run may land on a console/pipe using a legacy codepage (Windows cp1252) that can't encode
+    # the status glyphs this gate prints (⚠/✗/ℹ); make stdout UTF-8 so it never dies on a UnicodeEncodeError.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001 — older/replaced streams may lack reconfigure; printing stays best-effort
+        pass
     ap = argparse.ArgumentParser(description="Redstrike mechanical completion gate.")
     ap.add_argument("--skill", help="skill dir containing review.md")
     ap.add_argument("--review", help="path to review.md (overrides --skill)")
