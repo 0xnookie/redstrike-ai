@@ -40,7 +40,7 @@ A dev-image default-cred that grants full admin → Critical. Justify from the e
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "shopware-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "shopware-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["Shopware 6.7.16.0 from sw-* headers + /api/_info/openapi3.json body + composer.lock; /mailcatcher 200 <title>MailCatcher</title> + /messages JSON (2 msgs), soft-404 is 404/~429KB; unauth; no mail dumped; exposure not a dup of secrets (owns values)"],
   "scope_ok": true, "notes": "version from ≥2 target signals; one benign OAuth default-cred probe; exploitation deferred to exploit-generator" }

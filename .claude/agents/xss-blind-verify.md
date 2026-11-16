@@ -15,6 +15,6 @@ You are the **independent semantic reviewer** for the Redstrike `xss-blind` skil
 3. Read `OUT/findings.json`, `callbacks.jsonl`, `injections.jsonl`, and every evidence/poc file.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: an **attributable OOB callback** whose unique token maps to exactly one injection, and the callback **proves JS execution** (HTTP beacon carrying JS-derived data like `document.domain`) — NOT a bare DNS hit, AV, or link-preview. No callback ⇒ not a finding. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `xss-blind-verify`) and set `status`.
-6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
+6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` and `blocked` findings proceed to reporting (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; verify injected artifacts are in `cleanup.md`; do not edit the executor's non-findings artifacts; stay within scope.

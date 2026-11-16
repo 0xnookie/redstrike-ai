@@ -18,6 +18,6 @@ You are the **independent semantic reviewer** for the Redstrike `llm-output-hand
    string containing a payload, and not inert reflected text. The LLM output is the vector, reproducibly.
    Benign payload; in scope.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `llm-output-handling-verify`) + set `status`.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; execution at the sink is the proof; don't edit non-findings artifacts; stay in scope.

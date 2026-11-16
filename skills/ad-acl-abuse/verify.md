@@ -22,7 +22,7 @@ Justify from the demonstrated abuse + where the edge leads (BloodHound path).
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ad-acl-abuse-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-acl-abuse-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["help-desk group has ForceChangePassword over a test user; reset it + logged in; reverted; path leads to Server Admins"],
   "scope_ok": true, "notes": "test principal; all changes reverted (cleanup.md); DCSync not used" }

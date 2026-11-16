@@ -21,7 +21,7 @@ Rate from the reachable blast radius of the identity/exposure, not merely that I
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "cloud-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "cloud-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["SSRF IMDSv2 token->role creds; sts:GetCallerIdentity returned arn ...:role/app (redacted acct); role can read S3 bucket X; no bulk pull; in-scope account"],
   "scope_ok": true, "notes": "creds redacted to fingerprint; benign proof only; approved" }

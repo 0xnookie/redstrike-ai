@@ -23,7 +23,7 @@ Justify from the demonstrated privileged action.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "privesc-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "privesc-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["low-priv A POST /admin/users/role succeeded (200, role changed); matrix reserves it for admin; verified read-back; test account"],
   "scope_ok": true, "notes": "benign reversible action; approved" }

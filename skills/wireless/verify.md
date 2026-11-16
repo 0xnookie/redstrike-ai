@@ -25,7 +25,7 @@ preconditions (RF proximity, a willing/approved test client), not merely that a 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "wireless-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "wireless-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["hcxdumptool captured the 4-way handshake for TEST-SSID; hashcat -m 22000 recovered the PSK offline (redacted); no deauth against prod; in-scope SSID"],
   "scope_ok": true, "notes": "offline crack; PSK redacted to fingerprint; no production disruption; approved" }

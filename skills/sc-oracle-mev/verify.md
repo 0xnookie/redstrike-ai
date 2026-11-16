@@ -32,7 +32,7 @@ single-block move).
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sc-oracle-mev-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-oracle-mev-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["forge fork PoC @ pinned block: flash-loaned X, skewed the AMM spot getReserves() the vault prices against, redeemed at the bad rate for +Y profit, repaid; no TWAP/deviation guard; before/after balances read back; no live tx"],
   "scope_ok": true, "notes": "local fork only; no real funds moved" }

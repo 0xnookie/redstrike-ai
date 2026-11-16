@@ -23,7 +23,7 @@ Critical. Rate by what A could actually do to B's data.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "idor-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "idor-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["A's token + GET /api/orders/{B_id} returned B's order (B-only address); 200 not 403; both test accounts"],
   "scope_ok": true, "notes": "test accounts A/B; no real-user data accessed" }

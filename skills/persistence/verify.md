@@ -23,7 +23,7 @@ re-trigger proof + the detectability note; reject inflation.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "persistence-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "persistence-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["benign marker re-fired after reboot; mechanism removed + removal verified in cleanup.md; EDR did not alert; one mechanism; in scope + approved"],
   "scope_ok": true, "notes": "control/monitoring gap proven benignly; nothing left behind" }

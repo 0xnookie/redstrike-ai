@@ -23,7 +23,7 @@ the confirmed action.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "excessive-agency-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "excessive-agency-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["prompt drove the 'browse' tool to fetch http://t1.oob/ -> HTTP callback from app egress (token t1); unauthorized SSRF; benign"],
   "scope_ok": true, "notes": "benign OOB only; approved; no real action performed" }

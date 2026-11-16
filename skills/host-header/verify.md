@@ -24,7 +24,7 @@ A benign absolute-URL reflection with no exploit path → Low/Info. Justify from
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "host-header-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "host-header-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["X-Forwarded-Host honored; reset email link host = attacker.example; token would leak on click"],
   "scope_ok": true, "notes": "test account; reset not sent to any real user" }

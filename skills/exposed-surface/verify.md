@@ -35,7 +35,7 @@ Info, not High).
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "exposed-surface-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "exposed-surface-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["/.git/HEAD body 'ref: refs/heads/'; random control path 404; repo walkable; in scope; not a secrets/privesc dupe"],
   "scope_ok": true, "notes": "signature-confirmed exposure; no bulk dump; secret validation deferred to secrets" }

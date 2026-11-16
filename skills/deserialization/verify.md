@@ -21,7 +21,7 @@ proof → High (note feasibility). Justify from the benign evidence; don't assum
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "deserialization-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "deserialization-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["java ser cookie; URLDNS gadget -> DNS callback token t1 from target egress; commons-collections present -> RCE feasible; no exec gadget run"],
   "scope_ok": true, "notes": "benign URLDNS only; RCE feasibility noted, not executed (approval pending)" }

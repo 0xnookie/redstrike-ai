@@ -23,7 +23,7 @@ Rate from the demonstrated business impact of the broken invariant, not the mere
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "race-condition-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "race-condition-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["single-use coupon redeemed 4x via a 20-request single-packet burst; serial redemption is blocked (409); reproduced twice; test account; balance refunded"],
   "scope_ok": true, "notes": "bounded concurrency; state reverted; approved" }

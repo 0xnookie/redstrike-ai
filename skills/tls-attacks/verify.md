@@ -27,7 +27,7 @@ merely enabled → Medium/Low; cosmetic cert hygiene → Low/Info. Don't inflate
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "tls-attacks-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "tls-attacks-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["testssl.sh negotiates TLS1.0 + TLS_RSA_WITH_RC4_128_SHA on 203.0.113.10:443 (handshake completed); weak cipher actually enabled, not an info line; in-scope host"],
   "scope_ok": true, "notes": "read-only scanner evidence; no DoS; HSTS depth deferred to security-headers; approved" }

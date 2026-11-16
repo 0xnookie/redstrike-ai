@@ -23,7 +23,7 @@ notes the assumption; `theoretical` is informational. Justify from the chain + e
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "attack-chain-discovery-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "attack-chain-discovery-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["steps RS-2026-003 (open-redirect, accepted) + RS-2026-007 (oauth state missing, accepted); redirect carries code to attacker -> ATO; demonstrated end-to-end on test accounts"],
   "scope_ok": true, "notes": "all steps accepted; demonstrated benignly; approved" }

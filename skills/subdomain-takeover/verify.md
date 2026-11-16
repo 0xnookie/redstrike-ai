@@ -24,7 +24,7 @@ scope, phishing, OAuth). Justify from the confirmed claimable state.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "subdomain-takeover-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "subdomain-takeover-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["cname -> unclaimed S3; NoSuchBucket fingerprint; bucket name registrable; subdomain in scope"],
   "scope_ok": true, "notes": "claimability documented; no hostile claim performed (not authorized)" }

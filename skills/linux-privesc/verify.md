@@ -20,7 +20,7 @@ enables (e.g. toward domain/other hosts). Justify from the root proof.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "linux-privesc-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "linux-privesc-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["sudo -l allowed /usr/bin/find NOPASSWD; GTFOBins find -exec /bin/sh -> id=uid=0(root); reproduced; benign; no persistence"],
   "scope_ok": true, "notes": "in-scope host; root proven with id only; cleanup.md: none created" }

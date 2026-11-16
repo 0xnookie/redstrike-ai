@@ -23,7 +23,7 @@ or protocol-smuggling to an internal service → Critical. Justify from what was
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ssrf-inband-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ssrf-inband-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["webhook param fetched http://169.254... blocked; reached http://10.0.0.5/ (in scope); internal title reflected; egress IP = target"],
   "scope_ok": true, "notes": "read-only; approved; no internal pivot" }

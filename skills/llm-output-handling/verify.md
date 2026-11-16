@@ -20,7 +20,7 @@ reachable by any user whose output is rendered — note the blast radius. Justif
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "llm-output-handling-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "llm-output-handling-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["prompt made the model output <img src=x onerror=print()>; chat UI rendered it as HTML; print() fired (headless capture); not inert text"],
   "scope_ok": true, "notes": "benign payload; downstream = stored-XSS via LLM output; cross-ref xss-stored" }

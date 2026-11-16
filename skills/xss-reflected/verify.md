@@ -25,7 +25,7 @@ Recompute the vector from evidence. Reflected XSS is typically `AV:N/AC:L/PR:N/U
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {
-  "verdict": "accepted | rejected | needs-evidence",
+  "verdict": "accepted | blocked | rejected | needs-evidence",
   "reviewer": "xss-reflected-verify",
   "reviewed_at": "<ISO-8601>",
   "rubric": { "evidence": "pass", "reproducibility": "pass", "fp_gauntlet": "pass",

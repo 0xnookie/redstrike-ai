@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `privesc` skill 
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: a low-priv identity SUCCESSFULLY invoked a function the matrix reserves for a higher role — the action EXECUTED (state changed / privileged data), cross-checked against the intended role. Reclassify object-scoping to `idor`. Confirm effect via read-back, test account, approval.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `privesc-verify`) + set `status`.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; benign/reversible admin action; don't edit non-findings artifacts; stay in scope.

@@ -22,7 +22,7 @@ non-executing upload is not RCE (maybe stored-XSS/other — reclassify).
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "upload-rce-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "upload-rce-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["shell.php.jpg bypass; stored /uploads/shell.php; GET returned 'RS7F3Q' executed (not source); removed after"],
   "scope_ok": true, "notes": "benign marker-webshell only; cleanup.md records removal; approved" }

@@ -17,7 +17,7 @@ container, benignly, reproducibly. Re-run the benign proof.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "container-escape-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "container-escape-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["mounted /var/run/docker.sock -> ran a container with -v /:/host -> read /host/etc/hostname = the NODE hostname (not the container); reproduced; cleanup removed the helper container"],
   "scope_ok": true, "notes": "benign host read; no persistence; approved" }

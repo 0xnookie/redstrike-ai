@@ -23,7 +23,7 @@ Exploitability is assessed honestly (potential ≠ proven) — a weaponized PoC 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "fuzzing-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "fuzzing-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["minimized 48-byte input reproduces heap-buffer-overflow READ in parse_tag() over 3/3 runs; ASAN trace attached; unique stack-hash; authorized test instance"],
   "scope_ok": true, "notes": "minimized repro + ASAN trace; benign crash only; exploitability potential noted, not weaponized; approved" }

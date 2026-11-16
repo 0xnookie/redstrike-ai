@@ -27,7 +27,7 @@ accepted-token evidence.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "jwt-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "jwt-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["alg:none token (sig stripped) accepted -> GET /me returned admin profile; server 200 not 401; test account"],
   "scope_ok": true, "notes": "offline only; benign privilege on test account; approved" }

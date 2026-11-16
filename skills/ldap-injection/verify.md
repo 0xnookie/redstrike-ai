@@ -20,7 +20,7 @@ Auth bypass → High/Critical; directory enumeration (users/roles) → Medium/Hi
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ldap-injection-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ldap-injection-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["login user=*)(uid=*))(|(uid=* returned a valid session without a password; filter breakout confirmed; reproduced"],
   "scope_ok": true, "notes": "auth bypass proven once; no bulk enumeration; approved" }

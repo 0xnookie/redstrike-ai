@@ -31,7 +31,7 @@ Info/Low with `potential_severity` carrying the version-matched ceiling. Justify
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "wordpress-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "wordpress-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["core 6.4.2 from generator + wp-emoji ?ver= + /wp-json; CVE-2024-xxxx affected range includes 6.4.2; plugin 'contact-form-x' 1.2.0 from readme.txt, active (form renders); not exploited here; xmlrpc multicall feasibility-only"],
   "scope_ok": true, "notes": "version from ≥2 target signals; exploitation deferred to exploit-generator" }

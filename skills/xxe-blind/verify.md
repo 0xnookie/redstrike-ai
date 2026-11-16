@@ -20,7 +20,7 @@ Blind XXE with OOB file exfil → High (`C:H`). External-DTD resolution without 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "xxe-blind-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "xxe-blind-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["param-entity DTD fetched http://t1.oob/x.dtd (callback token t1, target egress); exfil callback carried hostname 'web-01'"],
   "scope_ok": true, "notes": "benign /etc/hostname only; approved" }

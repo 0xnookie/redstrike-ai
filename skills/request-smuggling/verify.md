@@ -23,7 +23,7 @@ confirmed class + plausible impact; don't rate a non-reproducible timing blip.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "request-smuggling-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "request-smuggling-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["CL.TE repeatable x5; self-canary prefixed operator's own next request; no user traffic captured; approved"],
   "scope_ok": true, "notes": "no persistent desync left; kill switch tested" }

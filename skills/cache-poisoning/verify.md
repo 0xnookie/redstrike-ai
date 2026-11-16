@@ -22,7 +22,7 @@ deception of private data → per sensitivity. Justify from the confirmed hit + 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "cache-poisoning-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "cache-poisoning-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["X-Forwarded-Host unkeyed; clean request got cached redirect (X-Cache:hit, Age:40); buster-scoped; approved"],
   "scope_ok": true, "notes": "poison limited to /?cb=rs7f3q; purged after confirm" }

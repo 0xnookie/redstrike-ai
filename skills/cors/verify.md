@@ -23,7 +23,7 @@ Impact = sensitivity of the readable data (session tokens / PII → high). Justi
 
 ## Verdict
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "cors-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "cors-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["ACAO reflects evil.example + ACAC:true; /api/me returns email+token; read cross-origin"],
   "scope_ok": true, "notes": "test account; data read not retained" }

@@ -42,7 +42,7 @@ drop `UI:R` — justify from the trace.
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {
-  "verdict": "accepted | rejected | needs-evidence",
+  "verdict": "accepted | blocked | rejected | needs-evidence",
   "reviewer": "xss-dom-verify",
   "reviewed_at": "<ISO-8601>",
   "rubric": { "evidence": "pass", "reproducibility": "pass", "fp_gauntlet": "pass",

@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `ad-adcs` skill 
 3. Read `OUT/findings.json`, `cleanup.md` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: a certificate was ISSUED exploiting the specific ESC AND used to AUTHENTICATE (PKINIT → TGT/NT hash) as a TEST privileged principal — not just `certipy find` flagging the template; the named ESC matches the actual misconfig; the issued cert was revoked per cleanup.md; ESC8 coercion (if any) was approved + non-disruptive. In scope; approved.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ad-adcs-verify`) + set `status`.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; reject flagged-but-unexploited templates (down-rate to config finding) and un-revoked certs; don't edit non-findings artifacts; stay in scope.

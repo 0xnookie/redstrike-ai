@@ -21,7 +21,7 @@ frameable info page as a vuln.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "clickjacking-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "clickjacking-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["no XFO/frame-ancestors on /account/delete; renders in iframe; overlay routes click to Delete"],
   "scope_ok": true, "notes": "test account; action not actually triggered" }

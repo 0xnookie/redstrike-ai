@@ -32,7 +32,7 @@ High/Medium. Recompute from the demonstrated before/after effect + $ impact; fla
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sc-reentrancy-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-reentrancy-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["forge fork PoC: attacker contract's receive() re-entered withdraw(); balance zeroed AFTER .call{value:}; no nonReentrant on path; attacker drained 10x deposit, read back before/after; no live tx"],
   "scope_ok": true, "notes": "local fork only; no real funds moved" }

@@ -26,7 +26,7 @@ click. Keep it process-level.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "social-engineering-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "social-engineering-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["approved campaign to the named population (written auth on file); 28% submitted to the benign harvest page, 4% reported; no passwords stored; aggregate only; no individual named"],
   "scope_ok": true, "notes": "written authorization naming the population; no real malware; aggregate metrics; campaign torn down; approved" }

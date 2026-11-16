@@ -40,7 +40,7 @@ elevation with the cross-user evidence**. Same-session-only ⇒ do not rate as s
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {
-  "verdict": "accepted | rejected | needs-evidence",
+  "verdict": "accepted | blocked | rejected | needs-evidence",
   "reviewer": "xss-stored-verify",
   "reviewed_at": "<ISO-8601>",
   "rubric": { "evidence": "pass", "reproducibility": "pass", "fp_gauntlet": "pass",

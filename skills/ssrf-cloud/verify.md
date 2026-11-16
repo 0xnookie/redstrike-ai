@@ -23,7 +23,7 @@ but no creds (IMDSv2) → Medium/High per what's exposed. Justify from what was 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ssrf-cloud-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ssrf-cloud-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["sink reached IMDSv1 169.254.169.254; retrieved role creds (redacted); IMDSv2 not enforced; identity check only"],
   "scope_ok": true, "notes": "creds redacted; not used; recommend IMDSv2 + egress block" }

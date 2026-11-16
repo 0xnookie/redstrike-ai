@@ -24,7 +24,7 @@ CVSS — state the business impact explicitly alongside any vector. Justify from
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "business-logic-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "business-logic-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["invariant 'price server-side' violated: negative quantity credited balance; reproduced x3; test account"],
   "scope_ok": true, "notes": "no real funds moved; order voided after confirm" }

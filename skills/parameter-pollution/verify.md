@@ -23,7 +23,7 @@ High; rate-limit/validation bypass → Medium. Rate from the decision that chang
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "parameter-pollution-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "parameter-pollution-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["POST admin=false&admin=true -> backend (last-wins) granted admin while the validator read the first value; reproduced; test account"],
   "scope_ok": true, "notes": "parser discrepancy named (gateway first-wins vs PHP last-wins); benign" }

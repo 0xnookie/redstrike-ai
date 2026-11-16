@@ -18,7 +18,7 @@ Re-run the benign proof.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "k8s-attacks-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "k8s-attacks-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["pod SA: kubectl auth can-i create pods -> yes; created a test pod mounting the node fs, read /host/etc/hostname, deleted the pod; token redacted"],
   "scope_ok": true, "notes": "benign; test pod removed; approved" }

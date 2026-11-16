@@ -19,7 +19,7 @@ Rate from what the first credential enables (domain reach), and whether it was t
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ad-initial-access-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-initial-access-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["LLMNR poisoning captured a NetNTLMv2 for a test user; cracked offline to a weak password (fingerprint stored); authenticated once; no lockouts; poisoning stopped"],
   "scope_ok": true, "notes": "passive capture, offline crack, redacted; approved" }
