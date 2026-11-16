@@ -134,6 +134,9 @@ export interface ActivityEvent {
 export type AssetKind = "domain" | "subdomain" | "ip" | "cidr" | "service" | "endpoint";
 export type AssetScope = "in" | "out";
 export type AssetCoverage = "tested" | "in-progress" | "untested";
+// Transport reliability of the run reaching this host, from runtime/diagnostics.json. DISTINCT from the
+// finding-verdict "blocked" (demonstration-limited): this is whether testing could reach the host AT ALL.
+export type TransportClass = "healthy" | "degraded" | "blocked";
 export interface Asset {
   id: string;
   value: string;
@@ -149,6 +152,11 @@ export interface Asset {
   title?: string;       // page / portal title
   tier?: number;        // recon priority tier (1 = highest-value)
   note?: string;        // recon note, e.g. "health-sensitive: liveness-only, no scan"
+  // Phase-2 reliability (runtime/diagnostics.json transport_health): when a gateway blocked the run, a
+  // clean / asset-only render here is UNRELIABLE, not "no issues" — drives the per-host transport badge.
+  transport?: TransportClass;
+  transportBlockRate?: number;  // 0..1 share of requests blocked
+  transportWaf?: string | null; // detected gateway/WAF label, when known
 }
 
 // Open port + service, built from host-discovery's host_discovery.json
@@ -270,6 +278,49 @@ export interface CoverageLedger {
   map_version?: number;
   active_phases?: string[];
   categories: CoverageCategory[];
+}
+
+// runtime/diagnostics.json — the run engine's per-engagement health log (schema owned by the producer:
+// skills/_contract/diagnostics.schema.json). Phase-2 reliability: makes "we were blocked / produced
+// nothing" visible so the console never shows a degraded/blocked run as a green 100%. The console reads
+// the LATEST runs[] entry. Loose by design — every field but the shape below is optional.
+export type RunOutcome = "produced-findings" | "clean-tested" | "degraded-empty" | "failed";
+export type RunMode = "interactive" | "autonomous";
+export interface TransportHost {
+  host: string;
+  requests?: number;
+  blocks?: number;
+  block_rate?: number;            // 0..1
+  statuses?: Record<string, number>;
+  challenges?: number;
+  waf?: string | null;
+  classification: TransportClass; // healthy | degraded | blocked
+}
+export interface TransportOverall {
+  block_rate?: number;
+  worst_host?: string | null;
+  status: TransportClass;
+}
+export interface TransportHealth {
+  hosts?: TransportHost[];
+  overall?: TransportOverall;
+}
+export interface DiagnosticsRun {
+  session?: string;
+  mode?: RunMode;
+  started?: string;
+  ended?: string;
+  engine_rc?: number;
+  gate_rc?: number | null;
+  outcome?: RunOutcome;
+  degraded_reason?: string | null;
+  findings_count?: number;
+  transport_health?: TransportHealth;
+}
+export interface Diagnostics {
+  engagement?: string;
+  generated_at?: string;
+  runs?: DiagnosticsRun[];
 }
 
 // Per-engagement CVE intelligence (cve_intel.json from the cve-intelligence capability):
@@ -440,4 +491,5 @@ export interface ConsoleData {
   content?: ContentMap;
   history?: HttpHistory;
   notebook?: Notebook;
+  diagnostics?: Diagnostics;
 }

@@ -15,7 +15,7 @@
 //                       and derive activity + agent stats from the real findings.
 
 import type {
-  ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service,
+  ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service, Diagnostics, TransportClass,
 } from "./types";
 import { assetHosts, isReportable, verdictOf } from "./format";
 
@@ -224,7 +224,10 @@ export function buildServices(o: Record<string, any>): Service[] {
       } else if (typeof httpMeta.status === "number" || h?.scheme || h?.port) {
         // no explicit ports[] but the host answered HTTP (or carries a scheme/port):
         // synthesize one service so the Ports table + asset map populate. A host with
-        // neither ports nor an http probe (e.g. gateway-blocked) stays asset-only.
+        // neither ports nor an http probe (e.g. gateway-blocked) stays asset-only — and when
+        // runtime/diagnostics.json flags it transport-`blocked`, overlayAssetTransport() tags that
+        // asset so the console explains the gap ("WAF-blocked — coverage unreliable") instead of
+        // leaving it an unexplained asset-only row.
         const scheme = h?.scheme || httpMeta.scheme || "https";
         out.push({
           id: `svc-${i}`,
@@ -368,6 +371,39 @@ export function overlayAssetFindings(assets: Asset[], findings: Finding[], servi
     const coverage: Asset["coverage"] =
       n > 0 ? "tested" : a.kind !== "endpoint" && examined.has(a.value) ? "in-progress" : "untested";
     return n === a.findings && coverage === a.coverage ? a : { ...a, findings: n, coverage };
+  });
+}
+
+/**
+ * The transport-health map from the LATEST diagnostics run: host → {classification, block_rate, waf}.
+ * Empty when diagnostics / transport health is absent. Phase-2 reliability: lets the asset views explain
+ * WHY a gateway-blocked host is asset-only ("WAF-blocked — coverage unreliable") rather than silently.
+ */
+export function transportHostMap(diag?: Diagnostics): Map<string, { classification: TransportClass; block_rate?: number; waf?: string | null }> {
+  const map = new Map<string, { classification: TransportClass; block_rate?: number; waf?: string | null }>();
+  const runs = diag?.runs;
+  if (!Array.isArray(runs) || !runs.length) return map;
+  const hosts = runs[runs.length - 1]?.transport_health?.hosts;
+  if (!Array.isArray(hosts)) return map;
+  for (const h of hosts) {
+    if (h && h.host && h.classification) {
+      map.set(h.host, { classification: h.classification, block_rate: h.block_rate, waf: h.waf ?? null });
+    }
+  }
+  return map;
+}
+
+/**
+ * Overlay transport reliability from runtime/diagnostics.json onto assets, matched by host value.
+ * A no-op without diagnostics. A `blocked` host becomes a distinct state (not a verdict), so the asset
+ * drawer can show it was WAF-blocked and its clean/asset-only render is UNRELIABLE, not "no issues".
+ */
+export function overlayAssetTransport(assets: Asset[], diag?: Diagnostics): Asset[] {
+  const map = transportHostMap(diag);
+  if (!map.size) return assets;
+  return assets.map((a) => {
+    const t = map.get(a.value);
+    return t ? { ...a, transport: t.classification, transportBlockRate: t.block_rate, transportWaf: t.waf } : a;
   });
 }
 

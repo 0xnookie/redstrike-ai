@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck } from "lucide-react";
+import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck, ShieldAlert } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { reportable, severityCounts, severityChartData, groupByCategory, groupByAsset, verificationStats, maxCvss } from "@/lib/stats";
-import { SEVERITY, VERDICT, sevMeta } from "@/lib/theme";
+import { SEVERITY, VERDICT, TRANSPORT, sevMeta, hexA } from "@/lib/theme";
 import { fmtDate, relTime, cx } from "@/lib/format";
 import { cvssScore } from "@/lib/cvss";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, LivePill, SeverityBadge, Pill } from "@/components/ui/primitives";
@@ -13,7 +13,7 @@ import { AreaLine, Donut, Legend, Progress } from "@/components/ui/charts";
 import { CyberFeed } from "@/components/dashboard/CyberFeed";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds } = useConsole();
+  const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds, diagnostics } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
   const [sevHover, setSevHover] = useState<string | null>(null); // shared by the donut + its legend
 
@@ -46,6 +46,27 @@ export default function DashboardPage() {
   const cats = useMemo(() => groupByCategory(rep).slice(0, 5), [rep]);
   const feed = useMemo(() => activity.slice().reverse().slice(0, 7), [activity]);
 
+  // Reliability banner (runtime/diagnostics.json): a degraded/blocked run must NOT read as a green 100%.
+  // Shown only when the latest run produced nothing for an environmental reason — empty ≠ clean.
+  const reliability = useMemo(() => {
+    const runs = diagnostics?.runs;
+    const run = runs && runs.length ? runs[runs.length - 1] : undefined;
+    if (!run) return null;
+    const overall = run.transport_health?.overall;
+    const transportBlocked = overall?.status === "blocked";
+    const outcome = run.outcome;
+    if (!(transportBlocked || outcome === "degraded-empty" || outcome === "failed")) return null;
+    const color = transportBlocked ? TRANSPORT.blocked.color : outcome === "failed" ? "#ef4444" : TRANSPORT.degraded.color;
+    const headline = transportBlocked
+      ? "Transport blocked — produced nothing"
+      : outcome === "failed" ? "Run failed — produced nothing" : "Assessment degraded — produced nothing";
+    const reason = run.degraded_reason || "the run produced no findings for an environmental reason";
+    const meta = transportBlocked && overall?.worst_host
+      ? `${overall.worst_host}${overall.block_rate != null ? ` · ${Math.round((overall.block_rate ?? 0) * 100)}% blocked` : ""}`
+      : "";
+    return { color, headline, detail: meta ? `${reason} — ${meta}` : reason };
+  }, [diagnostics]);
+
   return (
     <>
       <ViewHead
@@ -65,6 +86,23 @@ export default function DashboardPage() {
           </>
         }
       />
+
+      {/* Reliability banner — a degraded/blocked run says "produced nothing", never a false green 100% */}
+      {reliability && (
+        <div
+          className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-3"
+          style={{ borderColor: hexA(reliability.color, "66"), background: hexA(reliability.color, "14") }}
+          role="status"
+        >
+          <ShieldAlert size={18} className="mt-0.5 shrink-0" style={{ color: reliability.color }} />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold" style={{ color: reliability.color }}>{reliability.headline}</div>
+            <div className="mt-0.5 text-[13px] text-muted">
+              {reliability.detail} — results are inconclusive, not a clean bill of health.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">

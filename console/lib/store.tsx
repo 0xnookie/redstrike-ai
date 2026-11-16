@@ -1,9 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus, ApiEndpoint, JsFile, JsRecon, ContentMap, HttpHistory, Notebook } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus, ApiEndpoint, JsFile, JsRecon, ContentMap, HttpHistory, Notebook, Diagnostics } from "./types";
 import {
-  emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
+  emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings, overlayAssetTransport,
   deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
 } from "./data";
 import { fetchLiveCveFeed, CVE_FEED } from "./cveFeed";
@@ -14,7 +14,7 @@ import { resolveStatus, type ControlRuns } from "./engagementStatus";
 type Mode = "empty" | "live";
 
 // Each engagement's own findings/chains/services/assets, loaded on demand.
-interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; jsRecon?: JsRecon; coverage?: CoverageLedger; cveIntel?: CveIntel; content?: ContentMap; history?: HttpHistory; notebook?: Notebook; hostRaw?: any; }
+interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; jsRecon?: JsRecon; coverage?: CoverageLedger; cveIntel?: CveIntel; content?: ContentMap; history?: HttpHistory; notebook?: Notebook; diagnostics?: Diagnostics; hostRaw?: any; }
 const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [], apiEndpoints: [], jsFiles: [] };
 
 const ACTIVE_KEY = "redstrike.activeEngagement";
@@ -36,6 +36,7 @@ const FRESH_FLASH_MS = 2_600;
 const ENG_FILES = [
   "findings_consolidated.json", "host_discovery.json", "attack_chains.json", "coverage_ledger.json",
   "cve_intel.json", "js_analysis.json", "content.json", "http_history.json", "notebook.json", "js_recon.json",
+  "diagnostics.json",
 ] as const;
 
 /** A response's change signature: status + byte length (the server sends no Last-Modified). */
@@ -87,6 +88,7 @@ interface ConsoleCtx {
   content: ContentMap | undefined;
   history: HttpHistory | undefined;
   notebook: Notebook | undefined;
+  diagnostics: Diagnostics | undefined;
   hostRaw: any;
   cveFeed: CveFeed | undefined;
   cveLive: boolean;
@@ -139,7 +141,7 @@ function apiEndpointsOf(host: any): ApiEndpoint[] {
 }
 
 /** Assemble a dataset from an engagement's parsed canonical files. */
-function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any, contentFile?: any, historyFile?: any, notebookFile?: any, jsReconFile?: any): Dataset {
+function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any, contentFile?: any, historyFile?: any, notebookFile?: any, jsReconFile?: any, diagFile?: any): Dataset {
   let findings: Finding[] = [];
   let chains: AttackChain[] = [];
   if (Array.isArray(cons)) {
@@ -170,15 +172,16 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, in
   const content = isContentMap(contentFile) ? (contentFile as ContentMap) : undefined;
   const history = normHistory(historyFile);
   const notebook = isNotebook(notebookFile) ? (notebookFile as Notebook) : undefined;
+  const diagnostics = isDiagnostics(diagFile) ? (diagFile as Diagnostics) : undefined;
   // keep the raw host_discovery object (hostRaw) too: the Site Map builder reads
   // web_routes_seen + api_endpoints (type/confirmed) + live_hosts, which the derived
   // services/assets above intentionally drop.
-  return { findings, chains, services, assets, apiEndpoints, jsFiles, jsRecon, coverage, cveIntel, content, history, notebook, hostRaw: host };
+  return { findings, chains, services, assets, apiEndpoints, jsFiles, jsRecon, coverage, cveIntel, content, history, notebook, diagnostics, hostRaw: host };
 }
 
 /** Assemble a dataset from the raw files array (ENG_FILES order). */
 function datasetFromRaw(r: any[]): Dataset {
-  return datasetFromFiles(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]);
+  return datasetFromFiles(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]);
 }
 
 /** Does a parsed object look like notebook.json (leads / recon_intel / roe / test_accounts)? */
@@ -192,6 +195,11 @@ function isNotebook(o: any): boolean {
 /** Does a parsed object look like the JS Recon payload (js_recon.json)? */
 function isJsRecon(o: any): boolean {
   return !!o && typeof o === "object" && !Array.isArray(o) && Array.isArray(o.sites);
+}
+
+/** Does a parsed object look like runtime/diagnostics.json (a runs[] health log)? */
+function isDiagnostics(o: any): boolean {
+  return !!o && typeof o === "object" && !Array.isArray(o) && Array.isArray(o.runs);
 }
 
 /** Does a parsed object look like content-discovery's content.json? */
@@ -301,6 +309,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const content = active.content;
   const history = active.history;
   const notebook = active.notebook;
+  const diagnostics = active.diagnostics;
   const hostRaw = active.hostRaw;
   const apiEndpoints = active.apiEndpoints;
   const jsFiles = active.jsFiles;
@@ -309,8 +318,10 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     // Prefer real host-discovery assets; otherwise derive from scope + findings so the
     // Assets views aren't empty when recon didn't emit host_discovery.json.
     const base = active.assets.length ? active.assets : deriveAssetsFromScope(activeEngagement, active.findings);
-    return overlayAssetFindings(base, active.findings, active.services);
-  }, [active.assets, active.findings, active.services, activeEngagement]);
+    const withFindings = overlayAssetFindings(base, active.findings, active.services);
+    // Phase-2: overlay transport reliability so a WAF-blocked host explains its asset-only render.
+    return overlayAssetTransport(withFindings, active.diagnostics);
+  }, [active.assets, active.findings, active.services, active.diagnostics, activeEngagement]);
   const agents = useMemo(() => deriveAgentStats(agentRoster, active.findings), [active.findings]);
   const activity = useMemo(() => deriveActivity(active.findings), [active.findings]);
   const tests: TestRun[] = []; // no per-run source yet; the activity timeline drives the heatmap
@@ -429,6 +440,10 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       if (isJsRecon(o)) {
         patchActive({ jsRecon: o as unknown as JsRecon });
         return "js_recon";
+      }
+      if (isDiagnostics(o)) {
+        patchActive({ diagnostics: o as unknown as Diagnostics });
+        return "diagnostics";
       }
       const hist = normHistory(o);
       if (hist) {
@@ -594,7 +609,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const value: ConsoleCtx = {
     mode, engagements: shownEngagements, activeEngagement, activeId, setActiveId,
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, jsRecon, tests, coverage, cveIntel,
-    content, history, notebook, hostRaw,
+    content, history, notebook, diagnostics, hostRaw,
     cveFeed, cveLive, loadFiles, clearData, reloadEngagements,
     selectedFinding, openFinding, closeFinding,
     selectedHost, openHost, closeHost,

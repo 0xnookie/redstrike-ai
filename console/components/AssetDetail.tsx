@@ -3,11 +3,11 @@
 import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  X, Globe, Server as ServerIcon, Shield, FileCode2, Radio, Link2, Bug, ExternalLink, ListChecks, AlertTriangle,
+  X, Globe, Server as ServerIcon, Shield, FileCode2, Radio, Link2, Bug, ExternalLink, ListChecks, AlertTriangle, ShieldAlert,
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import type { Finding } from "@/lib/types";
-import { SEVERITY, COVERAGE, VERDICT, sevMeta, ink } from "@/lib/theme";
+import { SEVERITY, COVERAGE, VERDICT, TRANSPORT, sevMeta, ink, hexA } from "@/lib/theme";
 import { assetHosts, hostOf, verdictOf, isReportable } from "@/lib/format";
 import { Pill, SeverityBadge, Dot } from "@/components/ui/primitives";
 
@@ -120,6 +120,9 @@ export function AssetDetail({ host, onClose }: { host: string | null; onClose: (
             <div className="flex flex-wrap items-center gap-2">
               <Pill label={asset ? (asset.scope === "in" ? "In scope" : "Out of scope") : "Host"} color={asset?.scope === "out" ? "#ef4444" : "#22c55e"} dot />
               {cov && <Pill label={cov.label} color={cov.color} dot />}
+              {(asset?.transport === "blocked" || asset?.transport === "degraded") && (
+                <Pill label={asset.transport === "blocked" ? "WAF-blocked" : TRANSPORT.degraded.label} color={TRANSPORT[asset.transport].color} dot />
+              )}
               {asset?.tier != null && <Pill label={`Tier ${asset.tier}`} color="#a78bfa" />}
               {asset?.status != null && <Pill label={`HTTP ${asset.status}`} color="#64748b" />}
             </div>
@@ -153,6 +156,23 @@ export function AssetDetail({ host, onClose }: { host: string | null; onClose: (
           <div className="mb-5 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <span>{asset?.note}</span>
+          </div>
+        )}
+
+        {/* Transport-blocked: explain an otherwise-unexplained asset-only host. A WAF/gateway blocked the
+            run, so absence of findings here is inconclusive — NOT the finding-verdict "blocked". */}
+        {asset?.transport === "blocked" && (
+          <div
+            className="mb-5 flex items-start gap-2 rounded-lg border px-3 py-2 text-xs"
+            style={{ borderColor: hexA(TRANSPORT.blocked.color, "66"), background: hexA(TRANSPORT.blocked.color, "14"), color: TRANSPORT.blocked.color }}
+          >
+            <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+            <span>
+              WAF-blocked — coverage unreliable. The gateway blocked{" "}
+              {asset.transportBlockRate != null ? `${Math.round(asset.transportBlockRate * 100)}% of ` : ""}requests
+              {asset.transportWaf ? ` (${asset.transportWaf})` : ""}; absence of findings on this host is
+              inconclusive, not &ldquo;no issues found.&rdquo;
+            </span>
           </div>
         )}
 
