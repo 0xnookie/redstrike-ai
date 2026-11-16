@@ -266,16 +266,28 @@ class ClaudeCodeEngine(Engine):
         return Invocation(argv=argv, allowed=None)
 
     def run(self, prep, eng_dir, inv, *, mode="interactive", audit=None) -> RunResult:
-        from .. import autorun, launch
+        from .. import audit as auditmod, autorun, launch
         eng_dir = Path(eng_dir)
+        if audit is None:
+            audit = eng_dir / "runtime" / "autorun.jsonl"
+        # Tamper-evident head binding the run to sha256(scope.yaml) + the authorizing reference.
+        head = auditmod.run_head(
+            scope_yaml_path=eng_dir / "scope.yaml",
+            authorized_by=(getattr(prep, "scope", None) or {}).get("authorized_by", ""),
+            session_id=getattr(prep, "session_id", ""),
+            mode=mode,
+        )
         if mode == "autonomous":
-            if audit is None:
-                audit = eng_dir / "runtime" / "autorun.jsonl"
             rc, summary = autorun.run_autonomous(
-                self._bin(), inv.argv, eng_dir, audit, pending_path=prep.pending_path  # type: ignore[attr-defined]
+                self._bin(), inv.argv, eng_dir, audit, pending_path=prep.pending_path,  # type: ignore[attr-defined]
+                audit_head=head,
             )
             return RunResult(rc=rc, summary=summary)
+        # Interactive: claude attaches to the terminal (no capturable stream), so the audit trail
+        # records a stamped head + an outcome footer — chain-of-custody for the interactive run too.
+        auditmod.append_line(audit, head)
         rc = launch.exec_claude(inv.argv, cwd=eng_dir)
+        auditmod.append_line(audit, auditmod.run_footer(mode, rc))
         return RunResult(rc=rc)
 
 

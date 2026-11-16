@@ -331,7 +331,8 @@ def cmd_run(args, repo: Path) -> int:
     print()
     print(ui.ok(f"scope gate armed · launching {engine.name} engine (interactive, gated)…"))
     print()
-    res = engine.run(prep, eng_dir, inv, mode="interactive")
+    audit = eng_dir / "runtime" / "autorun.jsonl"  # audit the interactive run too (stamped head + footer)
+    res = engine.run(prep, eng_dir, inv, mode="interactive", audit=audit)
     rc = _post_run_gate(repo, eng_dir, res.rc)
     maybe_launch_console(args, repo)
     return rc
