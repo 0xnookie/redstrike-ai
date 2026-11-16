@@ -17,6 +17,9 @@ services:
         # Build the full roster or named categories by exporting REDSTRIKE_INSTALL_ARGS, e.g.:
         #   REDSTRIKE_INSTALL_ARGS=--all docker compose -f docker/docker-compose.yml build
         REDSTRIKE_INSTALL_ARGS: ${REDSTRIKE_INSTALL_ARGS:---core}
+        # Lab-only extra engines (Codex / Gemini) are OFF by default — Claude is the one live engine.
+        # Opt in (installs + auth-wires them) with: REDSTRIKE_EXTRA_ENGINES=1 docker compose ... build
+        REDSTRIKE_EXTRA_ENGINES: ${REDSTRIKE_EXTRA_ENGINES:-0}
     image: redstrike-ai:latest
     env_file:
       - .env

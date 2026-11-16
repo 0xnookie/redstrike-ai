@@ -28,61 +28,118 @@ const A = (
   approvalGated = false
 ): Agent => ({ slug, name, family, tier, summary, reviewer: `${slug}-verify`, status: "idle", produced: 0, accepted: 0, rejected: 0, approvalGated });
 
+// The full executor fleet. Every executor (a skill that emits findings.json and is gated by
+// an independent `<slug>-verify` reviewer) appears here — one row per executor — plus the four
+// global recon feeders (no reviewer gate; they feed context). This list mirrors the framework
+// catalog 1:1; a CI check keeps it in sync, and deriveAgentStats() still back-fills a row for any
+// reviewer that lands a finding without a matching entry, so a real finding is never dropped.
 export const agentRoster: Agent[] = [
   // Recon feeders (no reviewer gate — feed context)
   A("osint", "OSINT", "Recon", "Feeder", "Passive public intelligence on the org & domain."),
   A("host-discovery", "Host discovery", "Recon", "Feeder", "Subdomains, live hosts, ports, services, host tech."),
   A("content-discovery", "Content discovery", "Recon", "Feeder", "Crawl + historical URLs + custom wordlist brute-force."),
   A("js-analysis", "JS analysis", "Recon", "Feeder", "Endpoints, params, secrets, DOM sinks, libraries."),
+
   // Web vuln agents
   A("sqli-inband", "SQLi (in-band)", "Web", "Tier-1", "Error/union SQL injection returning data in-band."),
   A("sqli-blind", "SQLi (blind)", "Web", "Tier-1", "Boolean/time/OOB blind SQL injection."),
-  A("auth-bypass", "Auth bypass", "Web", "Tier-1", "Forced browsing, response tampering, 2FA skip, reset flaws."),
-  A("ssrf-cloud", "SSRF (cloud)", "Web", "Tier-1", "SSRF → cloud metadata credential theft."),
-  A("xss-stored", "XSS (stored)", "Web", "Tier-1", "Cross-user stored script execution."),
-  A("xss-reflected", "XSS (reflected)", "Web", "Tier-2", "Reflected script execution with context match."),
-  A("xss-dom", "XSS (DOM)", "Web", "Tier-2", "Client-side source→sink taint execution."),
-  A("deserialization", "Deserialization", "Web", "Tier-1", "Benign gadget proves the sink deserializes attacker data."),
+  A("nosql-injection", "NoSQL injection", "Web", "Tier-1", "Operator/syntax injection for auth bypass or query manipulation."),
+  A("ldap-injection", "LDAP injection", "Web", "Tier-1", "Filter-metacharacter breakout for auth bypass or directory enum."),
   A("command-injection", "Command injection", "Web", "Tier-1", "OS command execution confirmed via OOB/timing."),
-  A("csrf", "CSRF", "Web", "Tier-2", "State-changing requests lacking effective anti-CSRF."),
-  A("clickjacking", "Clickjacking", "Web", "Tier-2", "Frameable sensitive actions + UI-redress PoC."),
-  A("security-headers", "Security headers", "Web", "Tier-2", "Missing/weak headers enabling a contextual attack."),
-  A("idor", "IDOR", "Web", "Tier-1", "Object-level access control across two identities."),
-  A("bola-bfla", "BOLA / BFLA", "Web", "Tier-1", "API object/function-level authz across two identities."),
-  A("exposed-surface", "Exposed surface", "Web", "Tier-2", "Unauthenticated reach to a sensitive, unintended resource."),
-  A("secrets", "Secrets", "Web", "Tier-2", "Live, high-impact secrets in responses/bundles."),
   A("ssti", "SSTI", "Web", "Tier-1", "Server-side template expression evaluation."),
-  A("path-traversal-lfi", "Path traversal / LFI", "Web", "Tier-1", "Read a file outside the base dir; assess LFI-RCE."),
-  A("upload-rce", "Upload → RCE", "Web", "Tier-1", "Uploaded file executes server-side."),
+  A("deserialization", "Deserialization", "Web", "Tier-1", "Benign gadget proves the sink deserializes attacker data."),
+  A("xss-reflected", "XSS (reflected)", "Web", "Tier-2", "Reflected script execution with context match."),
+  A("xss-stored", "XSS (stored)", "Web", "Tier-1", "Cross-user stored script execution."),
+  A("xss-dom", "XSS (DOM)", "Web", "Tier-2", "Client-side source→sink taint execution."),
+  A("xss-blind", "XSS (blind)", "Web", "Tier-2", "OOB callback proves stored script executes elsewhere."),
+  A("ssrf-inband", "SSRF (in-band)", "Web", "Tier-1", "Server fetches an attacker-chosen internal target, proven in-band."),
+  A("ssrf-blind", "SSRF (blind)", "Web", "Tier-1", "OOB callback proves a blind server-side fetch."),
+  A("ssrf-cloud", "SSRF (cloud)", "Web", "Tier-1", "SSRF → cloud metadata credential theft."),
   A("xxe-inband", "XXE (in-band)", "Web", "Tier-1", "External entity resolved + reflected in-band."),
   A("xxe-blind", "XXE (blind)", "Web", "Tier-1", "OOB callback proves the parser fetched the attacker DTD."),
+  A("path-traversal-lfi", "Path traversal / LFI", "Web", "Tier-1", "Read a file outside the base dir; assess LFI-RCE."),
+  A("upload-rce", "Upload → RCE", "Web", "Tier-1", "Uploaded file executes server-side."),
+  A("idor", "IDOR", "Web", "Tier-1", "Object-level access control across two identities."),
+  A("privesc", "Privilege escalation", "Web", "Tier-1", "Vertical/horizontal access control + forced browsing."),
+  A("bola-bfla", "BOLA / BFLA", "Web", "Tier-1", "API object/function-level authz across two identities."),
+  A("graphql", "GraphQL", "Web", "Tier-2", "Introspection / field-authz / node-IDOR / arg-injection."),
+  A("auth-bypass", "Auth bypass", "Web", "Tier-1", "Forced browsing, response tampering, 2FA skip, reset flaws."),
   A("jwt", "JWT attacks", "Web", "Tier-2", "alg:none / weak secret / key confusion / claim tamper."),
+  A("oauth", "OAuth", "Web", "Tier-2", "redirect_uri / state / code flaws enabling token leak or ATO."),
+  A("csrf", "CSRF", "Web", "Tier-2", "State-changing requests lacking effective anti-CSRF."),
+  A("cors", "CORS misconfig", "Web", "Tier-2", "Credentialed cross-origin reads of sensitive data."),
+  A("clickjacking", "Clickjacking", "Web", "Tier-2", "Frameable sensitive actions + UI-redress PoC."),
+  A("open-redirect", "Open redirect", "Web", "Tier-2", "External redirect to an attacker destination + chain impact."),
+  A("host-header", "Host header injection", "Web", "Tier-2", "Attacker host into reset links / redirects / cache keys."),
+  A("request-smuggling", "Request smuggling", "Web", "Tier-2", "Front/back-end desync proven safely by timing + self-canary."),
+  A("cache-poisoning", "Cache poisoning", "Web", "Tier-2", "Unkeyed input lands in a shared cache, confirmed cross-user."),
+  A("parameter-pollution", "Parameter pollution", "Web", "Tier-2", "Duplicate/polluted params flip a security decision."),
+  A("prototype-pollution", "Prototype pollution", "Web", "Tier-2", "__proto__ via merge sinks → XSS/RCE/DoS gadget."),
+  A("security-headers", "Security headers", "Web", "Tier-2", "Missing/weak headers enabling a contextual attack."),
+  A("exposed-surface", "Exposed surface", "Web", "Tier-2", "Unauthenticated reach to a sensitive, unintended resource."),
+  A("forbidden-bypass", "Forbidden / 403 bypass", "Web", "Tier-2", "Reach a 401/403 endpoint via path/method/header manipulation."),
+  A("secrets", "Secrets", "Web", "Tier-2", "Live, high-impact secrets in responses/bundles."),
+  A("subdomain-takeover", "Subdomain takeover", "Web", "Tier-2", "Dangling record pointing at a claimable resource."),
   A("business-logic", "Business logic", "Web", "Tier-2", "Model workflows + invariants, break them for impact."),
   A("race-condition", "Race condition", "Web", "Tier-2", "TOCTOU + limit-overrun on single-use actions."),
+  A("crypto-attacks", "Crypto attacks", "Web", "Tier-2", "Padding-oracle / ECB / weak IV / bit-flip / length-extension.", true),
+  A("tls-attacks", "TLS / transport", "Web", "Tier-2", "Weak protocol/cipher/cert via benign read-only checks."),
+  A("supply-chain", "Supply chain", "Web", "Tier-2", "Dependency confusion / typosquat, proven benignly in a lab."),
+  A("wordpress", "WordPress", "Web", "Tier-2", "Core/plugin/theme/xmlrpc/REST version-matched CVE + misconfig."),
+  A("nextjs", "Next.js", "Web", "Tier-2", "Middleware CVE / image-optimizer SSRF / RSC cache / source maps."),
+  A("shopware", "Shopware", "Web", "Tier-2", "Dev-tool/spec/OAuth exposure + version-matched CVE."),
+
   // AI / LLM
   A("prompt-injection", "Prompt injection", "AI / LLM", "Tier-2", "Direct/indirect/role injection past a guardrail (OWASP LLM01)."),
   A("sensitive-disclosure", "Sensitive disclosure", "AI / LLM", "Tier-2", "Real sensitive-data disclosure, corroborated (LLM02/07/08)."),
-  A("excessive-agency", "Excessive agency", "AI / LLM", "Tier-2", "Drive the LLM's tools to a benign unauthorized action (LLM06)."),
+  A("ai-supply-chain", "AI supply chain", "AI / LLM", "Tier-2", "Malicious model-file RCE / unsafe deserialization / hub confusion (LLM03).", true),
+  A("data-poisoning", "Data poisoning", "AI / LLM", "Tier-2", "Training / fine-tune / RAG-embedding poisoning in a test corpus (LLM04).", true),
   A("llm-output-handling", "LLM output handling", "AI / LLM", "Tier-2", "Model output executes at a downstream sink (LLM05)."),
+  A("excessive-agency", "Excessive agency", "AI / LLM", "Tier-2", "Drive the LLM's tools to a benign unauthorized action (LLM06)."),
+
   // Active Directory (approval-gated)
   A("ad-initial-access", "AD initial access", "Active Directory", "Tier-2", "Unauth → first valid domain credential.", true),
   A("ad-kerberos", "AD Kerberos", "Active Directory", "Tier-2", "Kerberoast / AS-REP / delegation abuse.", true),
+  A("ad-acl-abuse", "AD ACL abuse", "Active Directory", "Tier-2", "Exercise an ACL edge on a test principal, always reverting.", true),
   A("ad-adcs", "AD ADCS (ESC1-8)", "Active Directory", "Tier-2", "Abuse a vulnerable template/CA to issue + auth a cert.", true),
+  A("ad-lateral-movement", "AD lateral movement", "Active Directory", "Tier-2", "PtH/PtT/relay to another host with a recovered credential.", true),
+  A("sccm-exploitation", "SCCM exploitation", "Active Directory", "Tier-2", "SCCM secret theft / client-push capture / relay to the provider.", true),
+
   // Post-exploitation (approval-gated)
   A("linux-privesc", "Linux privesc", "Post-Exploitation", "Tier-2", "Enumerate + confirm a vector to root benignly.", true),
   A("windows-privesc", "Windows privesc", "Post-Exploitation", "Tier-2", "Benign SYSTEM/admin via the claimed vector.", true),
-  A("container-escape", "Container escape", "Post-Exploitation", "Tier-2", "Break out to the host benignly via a named misconfig.", true),
-  // Smart contract
-  A("sc-reentrancy", "SC reentrancy", "Smart Contract", "Tier-2", "CEI violation drains funds on a local fork."),
+  A("credential-access", "Credential access", "Post-Exploitation", "Tier-2", "Online guessing (lockout-aware) + offline cracking + store review.", true),
+  A("persistence", "Persistence", "Post-Exploitation", "Tier-2", "Benign reversible marker proves + removes an undetected mechanism.", true),
+
+  // Cloud / Container (approval-gated)
+  A("cloud", "Cloud exploitation", "Cloud / Container", "Tier-2", "Metadata-credential theft, IAM privesc, public-storage exposure.", true),
+  A("container-escape", "Container escape", "Cloud / Container", "Tier-2", "Break out to the host benignly via a named misconfig.", true),
+  A("k8s-attacks", "Kubernetes attacks", "Cloud / Container", "Tier-2", "RBAC abuse, exposed kubelet/API/etcd, privileged pod → node.", true),
+
+  // Smart contract (local-fork-proven)
   A("sc-access-control", "SC access control", "Smart Contract", "Tier-2", "Unauthorized privileged on-chain action."),
-  // Mobile / IoT
+  A("sc-upgradeability", "SC upgradeability", "Smart Contract", "Tier-2", "Unguarded init/upgrade or storage-layout collision on a fork."),
+  A("sc-accounting", "SC accounting", "Smart Contract", "Tier-2", "Broken economic invariant / share-math drift on a fork."),
+  A("sc-oracle-mev", "SC oracle / MEV", "Smart Contract", "Tier-2", "Oracle/price manipulation + value extraction on a fork."),
+  A("sc-reentrancy", "SC reentrancy", "Smart Contract", "Tier-2", "CEI violation drains funds on a local fork."),
+  A("sc-signature", "SC signature", "Smart Contract", "Tier-2", "Forged/replayed signature authorizes an action on a fork."),
+
+  // Mobile / IoT (approval-gated)
   A("mobile", "Mobile app", "Mobile / IoT", "Tier-2", "Android/iOS static+dynamic, mapped to OWASP MASVS.", true),
   A("iot", "IoT / embedded", "Mobile / IoT", "Tier-2", "Firmware extraction, hardcoded creds, update flaws.", true),
+  A("wireless", "Wireless", "Mobile / IoT", "Tier-2", "Cracked test handshake / WPS / evil-twin / Enterprise challenge.", true),
+
+  // Binary / fuzzing (approval-gated)
+  A("fuzzing", "Fuzzing", "Binary / Fuzzing", "Tier-2", "Coverage-guided fuzzing → minimized sanitizer-traced crash PoC.", true),
+  A("exploit-dev", "Exploit dev", "Binary / Fuzzing", "Tier-3", "Triaged crash → benign control-of-execution PoC.", true),
+
+  // Social engineering (approval-gated)
+  A("social-engineering", "Social engineering", "Social Engineering", "Tier-2", "Approved, named-population campaign; aggregate-only metrics.", true),
+
   // Capabilities (Tier-3)
   A("attack-chain-discovery", "Attack-chain discovery", "Capabilities", "Tier-3", "Compose accepted findings into kill chains."),
   A("cve-intelligence", "CVE intelligence", "Capabilities", "Tier-3", "Map components to version-matched reachable CVEs."),
   A("exploit-generator", "Exploit generator", "Capabilities", "Tier-3", "Turn an accepted finding into a scoped benign PoC."),
-  A("exploit-dev", "Exploit dev", "Capabilities", "Tier-3", "Triaged crash → benign control-of-execution PoC.", true),
 ];
 
 /* ------------------------------------------------------------------ *
