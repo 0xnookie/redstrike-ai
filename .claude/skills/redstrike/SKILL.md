@@ -60,12 +60,19 @@ the console). Gate is **soft** — encouraged, never fails. See `skills/_contrac
 Assets/Ports views; a recon pass that only saves pages + `signals.json` leaves them empty, and the
 engagement gate warns when it is missing.
 
-**Provision ≥2 test identities + an authenticated recon pass.** If the app has registration/login, create
-(or have the operator supply) **two test accounts** up front — content-discovery then crawls the
-**authenticated** surface and diffs it against unauth, and `authz-context`/`api-context` get the ≥2 identities
-they require for IDOR/BOLA/BFLA (without them that whole surface is unmapped and those classes are starved).
-Map multi-step workflows (checkout/reset/upload/admin) as state for `business-logic`/`race-condition`. TEST
-accounts only — never authenticate with found or real credentials.
+**Provision ≥2 test identities + an authenticated recon pass.** The multi-identity classes (IDOR/BOLA/BFLA
+via `authz-context`/`api-context`) need **two accounts**; without them that whole surface is unmapped and the
+classes are starved. Do NOT surrender those classes just because accounts weren't handed in:
+- Recon emits **`flow:registration`** (from content-discovery / js-analysis) when a **public self-service
+  signup** exists. When it is present, **self-provision two test accounts** (register them yourself, TEST
+  accounts only) before mapping authz/api — then content-discovery crawls the **authenticated** surface and
+  diffs it against unauth, and the ≥2 identities IDOR/BOLA/BFLA require are available.
+- A **`blocked: needs accounts`** terminal state for authz/api is permitted **ONLY after a registration
+  attempt actually failed** (signup gated/invite-only/CAPTCHA-walled, recorded as the block reason) — never
+  as a first resort when `flow:registration` was signalled. If there is no public signup and the operator
+  supplied no accounts, record the block with that concrete reason.
+- If the operator supplied accounts, use them. Map multi-step workflows (checkout/reset/upload/admin) as
+  state for `business-logic`/`race-condition`. **Never authenticate with found or real credentials.**
 
 ## 2. Vuln categories (Tier 2)  → route DETERMINISTICALLY, then track coverage
 Routing is **deterministic, not improvised.** The authoritative source is

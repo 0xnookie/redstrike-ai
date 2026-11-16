@@ -39,6 +39,7 @@
         "flow:auth",
         "flow:login-form",
         "flow:password-reset",
+        "flow:registration",
         "flow:state-change",
         "flow:multi-step",
         "action:limited-state-change",
