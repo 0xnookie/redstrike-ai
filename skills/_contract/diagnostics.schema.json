@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/diagnostics.schema.json",
+  "title": "Redstrike Engagement Run Diagnostics",
+  "description": "Per-engagement reliability/observability record (runtime/diagnostics.json): one entry in runs[] appended per launch, classifying WHY a run produced what it did. It makes 'the engagement finished and did nothing' a first-class, diagnosable state instead of an invisible one — empty findings are split into clean-tested (surface was tested, nothing found) vs degraded-empty (recon found nothing / everything was skipped / tools failed / the transport was blocked) vs failed (the engine crashed). Transport health is IDENTITY FINGERPRINTING + block-rate RECORDING only (which WAF/CDN, how often requests were blocked/challenged) so an operator can tell unreliable coverage from a genuinely clean target; it carries no evasion/bypass data. Produced by cli/redstrike_cli/diagnostics.py after the post-run gate.",
+  "type": "object",
+  "required": ["engagement", "generated_at", "runs"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "description": "diagnostics schema version (drift guard)." },
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string", "description": "ISO-8601 timestamp of the last append." },
+    "runs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/run" },
+      "description": "one record appended per launch, oldest first."
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "required": [
+        "session", "mode", "started", "ended", "engine_rc", "gate_rc",
+        "outcome", "degraded_reason", "findings_count", "tool_failures",
+        "exceptions", "transport_health", "empty_recon", "phase_tally", "gate_summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session": { "type": "string" },
+        "mode": { "enum": ["interactive", "autonomous"] },
+        "started": { "type": "string" },
+        "ended": { "type": "string" },
+        "engine_rc": { "type": "integer", "description": "the engine process exit code." },
+        "gate_rc": { "type": ["integer", "null"], "description": "the post-run completion/coverage gate exit code." },
+        "outcome": {
+          "enum": ["produced-findings", "clean-tested", "degraded-empty", "failed"],
+          "description": "produced-findings=accepted findings exist; clean-tested=surface tested, nothing found; degraded-empty=zero findings for a recorded reliability reason; failed=the engine did not complete."
+        },
+        "degraded_reason": { "type": ["string", "null"], "description": "the concrete reason for degraded-empty/failed; null otherwise." },
+        "findings_count": { "type": "integer", "minimum": 0 },
+        "tool_failures": { "type": "array", "items": { "$ref": "#/$defs/tool_failure" } },
+        "exceptions": { "type": "array", "items": { "$ref": "#/$defs/exception" } },
+        "transport_health": { "$ref": "#/$defs/transport_health" },
+        "empty_recon": { "$ref": "#/$defs/empty_recon" },
+        "phase_tally": { "type": "array", "items": { "$ref": "#/$defs/phase" } },
+        "gate_summary": { "$ref": "#/$defs/gate_summary" }
+      }
+    },
+    "tool_failure": {
+      "type": "object",
+      "required": ["tool", "exit_code", "phase", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": "string" },
+        "exit_code": { "type": ["integer", "null"] },
+        "phase": { "type": ["string", "null"] },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "exception": {
+      "type": "object",
+      "required": ["where", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "where": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "transport_health": {
+      "type": "object",
+      "required": ["hosts", "overall"],
+      "additionalProperties": false,
+      "properties": {
+        "hosts": { "type": "array", "items": { "$ref": "#/$defs/host_health" } },
+        "overall": {
+          "type": "object",
+          "required": ["block_rate", "worst_host", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "block_rate": { "type": "number", "minimum": 0 },
+            "worst_host": { "type": ["string", "null"] },
+            "status": { "enum": ["healthy", "degraded", "blocked"] }
+          }
+        }
+      }
+    },
+    "host_health": {
+      "type": "object",
+      "required": ["host", "requests", "blocks", "block_rate", "statuses", "challenges", "waf", "classification", "first_block_ts", "last_ok_ts"],
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string" },
+        "requests": { "type": "integer", "minimum": 0 },
+        "blocks": { "type": "integer", "minimum": 0 },
+        "block_rate": { "type": "number", "minimum": 0 },
+        "statuses": {
+          "type": "object",
+          "description": "HTTP status-code histogram (code -> count); a FLOOR, status parse is best-effort.",
+          "patternProperties": { "^[0-9]{3}$": { "type": "integer", "minimum": 0 } },
+          "additionalProperties": false
+        },
+        "challenges": { "type": "integer", "minimum": 0 },
+        "waf": { "type": ["string", "null"], "description": "WAF/CDN IDENTITY fingerprint (name only; no evasion data)." },
+        "classification": { "enum": ["healthy", "degraded", "blocked"] },
+        "first_block_ts": { "type": ["string", "null"] },
+        "last_ok_ts": { "type": ["string", "null"] }
+      }
+    },
+    "empty_recon": {
+      "type": "object",
+      "required": ["flag", "surface_discovered", "signals", "hosts_live"],
+      "additionalProperties": false,
+      "properties": {
+        "flag": { "type": "boolean", "description": "true when recon discovered no surface, no signals and no live hosts." },
+        "surface_discovered": { "type": "integer", "minimum": 0 },
+        "signals": { "type": "integer", "minimum": 0 },
+        "hosts_live": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "phase": {
+      "type": "object",
+      "required": ["class", "attempted", "produced"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "type": "string" },
+        "attempted": { "type": "boolean" },
+        "produced": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gate_summary": {
+      "type": "object",
+      "required": ["coverage", "surface", "recall", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "coverage": { "type": "string" },
+        "surface": { "type": "string" },
+        "recall": { "type": "string" },
+        "findings": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
