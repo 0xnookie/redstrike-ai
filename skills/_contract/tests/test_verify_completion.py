@@ -1276,5 +1276,325 @@ class TestAttackChainGate(unittest.TestCase):
             self.assertTrue(any("RS-2026-999" in e for e in payload["chain_errors"]))
 
 
+# --------------------------------------------------------------------------- #
+# Phase 2 (reliability): runtime/diagnostics.json consumers
+#   (a) transport-blocked coverage AUTO-POPULATE
+#   (b) the zero-finding-report diagnostics HARD gate (empty ≠ clean)
+# Built against the pinned diagnostics.json contract with fixtures (Phase 1 owns
+# the producer + schema; this exercises the CONSUMER only).
+# --------------------------------------------------------------------------- #
+def _diag_doc(*, outcome="clean-tested", degraded_reason=None, blocked_hosts=None):
+    """A minimal runtime/diagnostics.json matching the pinned contract: one run with the given
+    outcome, plus optional transport_health hosts classified 'blocked'."""
+    hosts = []
+    worst = None
+    for host, rate, waf in (blocked_hosts or []):
+        hosts.append({"host": host, "requests": 100, "blocks": int(rate * 100), "block_rate": rate,
+                      "statuses": {"403": int(rate * 100)}, "challenges": 0, "waf": waf,
+                      "classification": "blocked"})
+        if worst is None or rate > worst[1]:
+            worst = (host, rate)
+    run = {"session": "s1", "mode": "autonomous", "started": "2026-01-01T00:00:00Z",
+           "ended": "2026-01-01T01:00:00Z", "engine_rc": 0, "gate_rc": None,
+           "outcome": outcome, "degraded_reason": degraded_reason,
+           "findings_count": 0, "tool_failures": [], "exceptions": [],
+           "transport_health": {"hosts": hosts,
+                                "overall": {"block_rate": (worst[1] if worst else 0.0),
+                                            "worst_host": (worst[0] if worst else None),
+                                            "status": "blocked" if hosts else "healthy"}},
+           "empty_recon": {}, "phase_tally": [], "gate_summary": {}}
+    if outcome is None:
+        del run["outcome"]
+    return {"engagement": "acme-2026", "generated_at": "2026-01-01T01:00:00Z", "runs": [run]}
+
+
+def _write_diag(eng, doc):
+    (eng / "runtime").mkdir(parents=True, exist_ok=True)
+    (eng / "runtime" / "diagnostics.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+class TestDiagnosticsHelpers(unittest.TestCase):
+    """The pure diagnostics readers: latest-run selection + transport-blocked host extraction."""
+
+    def test_latest_run_picks_last(self):
+        doc = {"runs": [{"outcome": "failed"}, {"outcome": "clean-tested"}]}
+        self.assertEqual(vc._latest_run(doc)["outcome"], "clean-tested")
+        self.assertIsNone(vc._latest_run({"runs": []}))
+        self.assertIsNone(vc._latest_run({}))
+        self.assertIsNone(vc._latest_run(None))
+
+    def test_blocked_hosts_worst_first(self):
+        run = _diag_doc(blocked_hosts=[("a.acme.com", 0.4, "cloudflare"),
+                                       ("b.acme.com", 0.9, None)])["runs"][0]
+        got = vc._transport_blocked_hosts(run)
+        self.assertEqual([h[0] for h in got], ["b.acme.com", "a.acme.com"])  # worst (0.9) first
+        self.assertEqual(got[0][2], None)
+
+    def test_blocked_hosts_ignores_healthy(self):
+        run = {"transport_health": {"hosts": [{"host": "x", "classification": "healthy", "block_rate": 0.0}]}}
+        self.assertEqual(vc._transport_blocked_hosts(run), [])
+
+    def test_transport_reason_format(self):
+        r = vc._transport_reason("app.acme.com", 0.82, "cloudflare")
+        self.assertTrue(r.startswith("transport: WAF block_rate "))
+        self.assertIn("82%", r)
+        self.assertIn("app.acme.com", r)
+        self.assertIn("cloudflare", r)
+        # null WAF → a readable placeholder, never "None"
+        self.assertIn("WAF unidentified", vc._transport_reason("h", 0.5, None))
+
+
+class TestTransportBlockedAutoPopulate(unittest.TestCase):
+    """(a) A transport-`blocked` host auto-marks web coverage categories still pending / attempted-empty
+    as `blocked` with a transport-sourced reason — sourced from transport health, not the model."""
+
+    def _ledger(self, eng):
+        led = {"engagement": "acme-2026", "generated_at": "2026-01-01T00:00:00Z",
+               "active_phases": ["web"], "categories": [
+                   {"id": "sqli", "phase": "web", "status": "pending", "reason": "baseline"},
+                   {"id": "xss", "phase": "web", "status": "attempted", "reason": "ran", "findings_count": 0},
+                   {"id": "idor", "phase": "web", "status": "attempted", "reason": "ran", "findings_count": 2},
+                   {"id": "csrf", "phase": "web", "status": "skipped", "reason": "no state-change surface"},
+                   {"id": "ad-kerberos", "phase": "ad", "status": "pending", "reason": "foothold"},
+               ]}
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+
+    def _by_id(self, eng):
+        led = json.loads((eng / "coverage_ledger.json").read_text(encoding="utf-8"))
+        return {c["id"]: c for c in led["categories"]}
+
+    def test_flips_pending_and_empty_web_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._ledger(eng)
+            _write_diag(eng, _diag_doc(blocked_hosts=[("app.acme.com", 0.88, "akamai")]))
+            flipped = vc._auto_populate_blocked_coverage(eng)
+            self.assertEqual(set(flipped), {"sqli", "xss"})
+            by = self._by_id(eng)
+            self.assertEqual(by["sqli"]["status"], "blocked")
+            self.assertTrue(by["sqli"]["reason"].startswith("transport: WAF block_rate"))
+            self.assertIn("app.acme.com", by["xss"]["reason"])
+            self.assertEqual(by["idor"]["status"], "attempted")     # has findings → kept
+            self.assertEqual(by["csrf"]["status"], "skipped")        # deliberate skip → kept
+            self.assertEqual(by["ad-kerberos"]["status"], "pending") # non-web phase → untouched
+
+    def test_no_diagnostics_is_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._ledger(eng)
+            self.assertEqual(vc._auto_populate_blocked_coverage(eng), [])
+            self.assertEqual(self._by_id(eng)["sqli"]["status"], "pending")  # unchanged
+
+    def test_healthy_transport_is_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._ledger(eng)
+            _write_diag(eng, _diag_doc(outcome="clean-tested"))  # no blocked hosts
+            self.assertEqual(vc._auto_populate_blocked_coverage(eng), [])
+            self.assertEqual(self._by_id(eng)["xss"]["status"], "attempted")
+
+    def test_blocked_but_no_ledger_is_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            _write_diag(eng, _diag_doc(blocked_hosts=[("app.acme.com", 0.9, "cloudflare")]))
+            self.assertEqual(vc._auto_populate_blocked_coverage(eng), [])
+
+
+class TestDiagnosticsZeroFindingGate(unittest.TestCase):
+    """(b) A zero-finding report must carry an EXPLAINED diagnostics outcome (empty ≠ clean). HARD once a
+    consolidated report exists and no reportable finding reached it."""
+
+    def _zero_finding_report_eng(self, d):
+        """A report-present engagement with ZERO findings that satisfies every OTHER hard gate
+        (complete coverage ledger + a tested surface ledger), so ONLY the diagnostics gate is under test."""
+        eng = pathlib.Path(d)
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": []}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_missing_diagnostics_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)  # no runtime/diagnostics.json
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["diagnostics_errors"])
+            self.assertIn("empty ≠ clean", " ".join(payload["diagnostics_errors"]))
+
+    def test_clean_tested_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)
+            _write_diag(eng, _diag_doc(outcome="clean-tested"))
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["diagnostics_errors"], [])
+
+    def test_degraded_empty_with_reason_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)
+            _write_diag(eng, _diag_doc(outcome="degraded-empty",
+                                       degraded_reason="target returned 503 for the whole window"))
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["diagnostics_errors"], [])
+
+    def test_failed_with_reason_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)
+            _write_diag(eng, _diag_doc(outcome="failed", degraded_reason="engine crashed mid-run"))
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+
+    def test_degraded_empty_without_reason_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)
+            _write_diag(eng, _diag_doc(outcome="degraded-empty", degraded_reason=None))
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("degraded_reason" in e for e in payload["diagnostics_errors"]))
+
+    def test_missing_outcome_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)
+            _write_diag(eng, _diag_doc(outcome=None))
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["diagnostics_errors"])
+
+    def test_produced_findings_outcome_but_empty_report_fails(self):
+        """A contradiction: diagnostics says 'produced-findings' but the report carries none."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._zero_finding_report_eng(d)
+            _write_diag(eng, _diag_doc(outcome="produced-findings"))
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["diagnostics_errors"])
+
+    def test_report_with_findings_does_not_require_diagnostics(self):
+        """The gate applies ONLY to a zero-finding report; a report WITH a reportable finding and no
+        diagnostics.json must not trip it."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            f = valid_finding()  # accepted by an independent reviewer
+            (eng / "report").mkdir(parents=True, exist_ok=True)
+            for item in f["evidence"]:
+                p = eng / item["ref"]
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+            (eng / "report" / "findings_consolidated.json").write_text(
+                json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            cov = vc._try_import_coverage()
+            led = cov.plan(cov.load_map(), None, {"web"})
+            for c in led["categories"]:
+                if c["status"] == "pending":
+                    c["status"], c["findings_count"] = "attempted", 0
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            sf = vc._try_import_surface()
+            sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+            for s in sled["surfaces"]:
+                if s["status"] == "discovered":
+                    s["status"] = "tested"
+            (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["diagnostics_errors"], [])
+
+    def test_no_report_is_silent(self):
+        """Mid-hunt (no consolidated report): zero findings + no diagnostics must NOT fail."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            (eng / "findings.json").write_text(json.dumps([]), encoding="utf-8")
+            self.assertEqual(vc._diagnostics_hard_errors(eng, []), [])
+
+
+class TestDiagnosticsAutoPopulateIntegration(unittest.TestCase):
+    """End-to-end: a zero-finding report over a WAF-blocked host passes ONLY because auto-populate
+    converts the otherwise-pending web categories to `blocked` (so the coverage gate is satisfied) AND
+    the diagnostics outcome explains the empty — the two reliability surfaces working together."""
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_blocked_run_autopopulates_and_passes_with_explained_outcome(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "report").mkdir(parents=True, exist_ok=True)
+            (eng / "report" / "findings_consolidated.json").write_text(
+                json.dumps({"engagement": "acme-2026", "findings": []}), encoding="utf-8")
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            cov = vc._try_import_coverage()
+            led = cov.plan(cov.load_map(), None, {"web"})  # every web class left `pending`
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            sf = vc._try_import_surface()
+            sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+            for s in sled["surfaces"]:
+                if s["status"] == "discovered":
+                    s["status"] = "tested"
+            (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+            _write_diag(eng, _diag_doc(outcome="degraded-empty",
+                                       degraded_reason="WAF blocked the engagement",
+                                       blocked_hosts=[("app.acme.com", 0.95, "cloudflare")]))
+            payload = self._run(eng)
+            # the ledger was auto-rewritten: no web category left pending (would have been a coverage gap)
+            after = {c["id"]: c for c in json.loads(
+                (eng / "coverage_ledger.json").read_text(encoding="utf-8"))["categories"]}
+            web = [c for c in after.values() if c["phase"] == "web"]
+            self.assertTrue(web, "expected web categories in the ledger")
+            self.assertFalse(any(c["status"] == "pending" for c in web),
+                             "auto-populate should flip every pending web category to blocked")
+            self.assertTrue(any(c["status"] == "blocked" for c in web))
+            self.assertTrue(payload["pass"], payload)
+            self.assertTrue(any("transport-blocked" in w for w in payload["warnings"]))
+
+    def test_blocked_run_without_explained_outcome_still_fails(self):
+        """Auto-populate fixes the coverage gap, but an UNEXPLAINED empty still fails the diagnostics gate
+        — the block being visible on the ledger does not excuse an un-attested empty report."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "report").mkdir(parents=True, exist_ok=True)
+            (eng / "report" / "findings_consolidated.json").write_text(
+                json.dumps({"engagement": "acme-2026", "findings": []}), encoding="utf-8")
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            cov = vc._try_import_coverage()
+            led = cov.plan(cov.load_map(), None, {"web"})
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            sf = vc._try_import_surface()
+            sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+            for s in sled["surfaces"]:
+                if s["status"] == "discovered":
+                    s["status"] = "tested"
+            (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+            _write_diag(eng, _diag_doc(outcome=None,
+                                       blocked_hosts=[("app.acme.com", 0.95, "cloudflare")]))
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["diagnostics_errors"])
+            self.assertFalse(payload["coverage_errors"])  # coverage gap was auto-resolved
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -305,6 +305,162 @@ def _report_present(eng: Path) -> bool:
     return (eng / "report" / "findings_consolidated.json").is_file()
 
 
+# --- engagement diagnostics (Phase-2 consumer of runtime/diagnostics.json) ----------------------- #
+# runtime/diagnostics.json is produced per-engagement by the run engine (its schema lives in
+# skills/_contract/diagnostics.schema.json, owned elsewhere — referenced read-only here). We CONSUME
+# its latest run to make "we were blocked / produced nothing" visible and gated, not left to the model:
+#   (a) AUTO-POPULATE — a transport-`blocked` host flips its web coverage categories to `blocked`, so a
+#       clean-looking clear on a WAF-blocked host is attributed to the block deterministically.
+#   (b) HARD GATE — a zero-finding report must prove it was a real clean test (an explained outcome),
+#       never a silent empty (empty ≠ clean).
+
+def _load_diagnostics(eng: Path):
+    """Parse runtime/diagnostics.json (the per-engagement health log), or None when absent/invalid."""
+    p = eng / "runtime" / "diagnostics.json"
+    if not p.is_file():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — a half-written health log must never crash the gate
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _latest_run(diag):
+    """The latest runs[] entry (the contract says: use the last one), or None."""
+    if not isinstance(diag, dict):
+        return None
+    runs = diag.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return None
+    last = runs[-1]
+    return last if isinstance(last, dict) else None
+
+
+def _transport_blocked_hosts(run):
+    """[(host, block_rate, waf), ...] for every transport_health host classified 'blocked' in this run,
+    worst (highest block_rate) first. [] when transport health is absent/healthy."""
+    if not isinstance(run, dict):
+        return []
+    th = run.get("transport_health")
+    hosts = th.get("hosts") if isinstance(th, dict) else None
+    out = []
+    if isinstance(hosts, list):
+        for h in hosts:
+            if isinstance(h, dict) and h.get("classification") == "blocked":
+                try:
+                    rate = float(h.get("block_rate") or 0)
+                except (TypeError, ValueError):
+                    rate = 0.0
+                out.append((str(h.get("host") or "?"), rate, h.get("waf")))
+    out.sort(key=lambda t: t[1], reverse=True)
+    return out
+
+
+def _transport_reason(host, rate, waf) -> str:
+    """The coverage-ledger reason for a transport-blocked category — sourced from transport health."""
+    waf_s = str(waf).strip() if waf else "WAF unidentified"
+    return f"transport: WAF block_rate {rate:.0%} on {host} ({waf_s})"
+
+
+# Coverage categories eligible for the transport-blocked auto-mark: a routed web class that never ran
+# (`pending`) or ran clean (`attempted`, 0 findings). A class WITH findings got through the block;
+# `skipped`/`n/a`/`pipeline` were a deliberate route decision a transport block doesn't change.
+_TRANSPORT_BLOCK_PHASES = {"web"}
+
+
+def _auto_populate_blocked_coverage(eng: Path) -> list:
+    """AUTO-POPULATE (reliability): when the latest diagnostics run shows a transport-`blocked` host,
+    mark the engagement's web coverage categories still `pending` or `attempted`-empty as `blocked`
+    with a transport-sourced reason — so a clean-looking clear on a WAF-blocked host is attributed to
+    the block deterministically, NOT left to the model to notice. Mutates coverage_ledger.json in place
+    (atomic, via coverage.py's writer so the ledger stays single-owner). Returns the flipped category
+    ids (surfaced as a warning). No-op without diagnostics / a blocked host / the ledger / coverage.py."""
+    blocked = _transport_blocked_hosts(_latest_run(_load_diagnostics(eng)))
+    if not blocked:
+        return []
+    ledger_path = eng / "coverage_ledger.json"
+    if not ledger_path.is_file():
+        return []
+    try:
+        led = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    cats = led.get("categories")
+    if not isinstance(cats, list):
+        return []
+    host, rate, waf = blocked[0]  # worst host for the reason; the mark covers the web surface
+    reason = _transport_reason(host, rate, waf)
+    flipped = []
+    for c in cats:
+        if not isinstance(c, dict) or c.get("phase") not in _TRANSPORT_BLOCK_PHASES:
+            continue
+        st = c.get("status")
+        empty_clear = st == "attempted" and not (c.get("findings_count") or 0)
+        if st == "pending" or empty_clear:
+            c["status"] = "blocked"
+            c["reason"] = reason
+            flipped.append(c.get("id"))
+    if not flipped:
+        return []
+    payload = json.dumps(led, indent=2) + "\n"
+    cov = _try_import_coverage()  # reuse its atomic ledger writer (ledger stays single-owner)
+    try:
+        if cov is not None and hasattr(cov, "atomic_write"):
+            cov.atomic_write(ledger_path, payload)
+        else:
+            ledger_path.write_text(payload, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        return []
+    return flipped
+
+
+def _reportable_findings_count(eng: Path, findings: list) -> int:
+    """Findings that reach the report (effective verdict accepted/blocked, non-composite) — mirrors the
+    reporting skill's `_reportable`, so 'zero-finding' here means exactly what the report means."""
+    n = 0
+    for f in findings:
+        if not isinstance(f, dict) or f.get("composite") or f.get("_composite"):
+            continue
+        verdict, _ = _review_of(f, eng)
+        if verdict in ("accepted", "blocked"):
+            n += 1
+    return n
+
+
+def _diagnostics_hard_errors(eng: Path, findings: list) -> list:
+    """HARD diagnostics gate (reliability) — active once a report exists AND it carries ZERO reportable
+    findings. An empty report must PROVE it was a real clean test, not a silent 'we were blocked /
+    produced nothing'. The latest diagnostics run must carry an EXPLAINED outcome: `clean-tested`, or
+    `degraded-empty`/`failed` WITH a `degraded_reason`. A missing diagnostics file, a missing/contradictory
+    outcome, or an unexplained empty HARD-fails (empty ≠ clean). [] when no report, or the report has
+    reportable findings (then the diagnostics gate does not apply)."""
+    if not _report_present(eng):
+        return []
+    if _reportable_findings_count(eng, findings) > 0:
+        return []
+    run = _latest_run(_load_diagnostics(eng))
+    pre = ("diagnostics gate (zero-finding report → the latest runtime/diagnostics.json run must carry an "
+           "explained outcome): ")
+    if run is None:
+        return [pre + "no runtime/diagnostics.json with a runs[] entry — an empty report cannot prove it was "
+                "a real clean test rather than a silent block/failure (empty ≠ clean). Emit "
+                "runtime/diagnostics.json recording the run's outcome."]
+    outcome = run.get("outcome")
+    reason = str(run.get("degraded_reason") or "").strip()
+    if outcome == "clean-tested":
+        return []
+    if outcome in ("degraded-empty", "failed"):
+        if reason:
+            return []
+        return [pre + f"latest run outcome is '{outcome}' but degraded_reason is empty — an unexplained empty "
+                "is not a clean result (empty ≠ clean). Record why the run produced nothing."]
+    shown = repr(outcome) if outcome is not None else "missing"
+    return [pre + f"latest run outcome is {shown}, which does not explain an empty report — set it to "
+            "'clean-tested' (a genuine clean run), or to 'degraded-empty'/'failed' with a degraded_reason "
+            "(empty ≠ clean)."]
+
+
 def _coverage_warnings(eng: Path) -> list:
     """Soft, non-fatal coverage-ledger check folded into the engagement gate. The hard gate is the
     dedicated `scripts/coverage.py --validate`; here a gap is surfaced as a warning only."""
@@ -1026,6 +1182,16 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     top_warnings = []
     if not scope_text:
         top_warnings.append("scope.yaml absent — scope compliance cannot be auto-checked (flagged, not failed)")
+    # Transport-blocked AUTO-POPULATE (reliability): BEFORE the coverage checks read the ledger, flip any
+    # web category still pending / attempted-empty to `blocked` when the latest diagnostics run shows a
+    # WAF-blocked host — so a clean clear on a blocked host is attributed to the transport block, not read
+    # as a silent gap or a trustworthy clear. Sourced from transport health, not from the model noticing.
+    flipped_cov = _auto_populate_blocked_coverage(eng)
+    if flipped_cov:
+        shown = ", ".join(str(x) for x in flipped_cov[:6]) + ("…" if len(flipped_cov) > 6 else "")
+        top_warnings.append(f"transport-blocked: auto-marked {len(flipped_cov)} web coverage categor"
+                            f"{'y' if len(flipped_cov) == 1 else 'ies'} 'blocked' from diagnostics transport "
+                            f"health ({shown}) — a clear on a WAF-blocked host, attributed to the block (not clean)")
     # Coverage: soft while hunting, HARD once a report exists (fix #2 — no report over silent gaps).
     coverage_errors = _coverage_hard_errors(eng)
     if not coverage_errors:
@@ -1073,6 +1239,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # Duplicate finding-id gate: HARD once a report exists (ids must be engagement-unique); silent before.
     dup_errors = _duplicate_id_errors(eng, findings)
 
+    # Diagnostics gate (reliability): HARD once a report exists AND it has zero reportable findings — the
+    # empty report must carry an EXPLAINED diagnostics outcome (clean-tested, or degraded-empty/failed with
+    # a reason). An unexplained empty is a silent "we produced nothing", not a clean result (empty ≠ clean).
+    diagnostics_errors = _diagnostics_hard_errors(eng, findings)
+
     results = []
     for f in findings:
         ok, detail, warns = check_finding(f, eng, scope_text, cvss_mod, verdict_ids)
@@ -1114,7 +1285,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
     gate_ok = ((not failed) and (not coverage_errors) and (not review_errors)
                and (not dup_errors) and (not integrity_errors) and (not recall_errors)
-               and (not chain_errors))
+               and (not chain_errors) and (not diagnostics_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -1125,6 +1296,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "integrity_errors": integrity_errors,
                           "recall_errors": recall_errors,
                           "chain_errors": chain_errors,
+                          "diagnostics_errors": diagnostics_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -1158,6 +1330,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "finding is not composite):")
             for che in chain_errors:
                 print(f"  - {che}")
+        if diagnostics_errors:
+            print("\n✗ diagnostics gate FAILED (a zero-finding report must carry an explained diagnostics "
+                  "outcome — empty ≠ clean):")
+            for dge in diagnostics_errors:
+                print(f"  - {dge}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -1172,7 +1349,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
               f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
               f"{len(review_errors)} independent-review error(s), {len(dup_errors)} duplicate-id error(s), "
               f"{len(integrity_errors)} coordination-integrity error(s), {len(recall_errors)} recall-audit "
-              f"error(s), {len(chain_errors)} attack-chain error(s), {len(all_warnings)} warning(s).")
+              f"error(s), {len(chain_errors)} attack-chain error(s), {len(diagnostics_errors)} diagnostics "
+              f"error(s), {len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -1194,6 +1372,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         if chain_errors:
             print("An attack chain references a non-accepted/unknown finding, or a chain finding isn't "
                   "composite:true => fix the chain's step ids / set composite:true before reporting.")
+        if diagnostics_errors:
+            print("A zero-finding report can't prove it was a real clean test => emit runtime/diagnostics.json "
+                  "whose latest run outcome is 'clean-tested', or 'degraded-empty'/'failed' with a "
+                  "degraded_reason, before reporting (empty ≠ clean).")
     return gate_ok
 
 
