@@ -108,6 +108,7 @@ def prepare_runtime(
         mode=mode, extra_allow=extra_allow,
         gate_policy=(gate_policy if mode == "autonomous" else None),
         approvals=(approvals_path if mode == "autonomous" else None),
+        scope=proj,  # populates the OS-sandbox network allowlist from the engagement scope
     )
     settingsmod.write_settings(settings_path, settings)
 

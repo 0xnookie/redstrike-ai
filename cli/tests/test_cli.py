@@ -54,6 +54,12 @@ class TestInitAndRunDryRun(unittest.TestCase):
             self.assertTrue((eng / "runtime" / "roe.md").is_file())
             settings = json.loads((eng / "runtime" / "settings.json").read_text(encoding="utf-8"))
             self.assertIn("PreToolUse", settings["hooks"])
+            # the OS-sandbox network boundary is derived from the engagement scope (P0-1)
+            self.assertIn("sandbox", settings)
+            allowed_hosts = settings["sandbox"]["network"]["allowedHosts"]
+            self.assertIn("*.acme.com", allowed_hosts)
+            self.assertIn("api.acme.com", allowed_hosts)
+            self.assertNotIn("admin.acme.com", allowed_hosts)  # explicit exclude dropped
             # dry-run prints the argv with the key flags
             self.assertIn("--append-system-prompt-file", out)
             self.assertIn("--add-dir", out)
