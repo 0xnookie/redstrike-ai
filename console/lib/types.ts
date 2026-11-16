@@ -98,7 +98,8 @@ export interface Engagement {
 
 export type AgentFamily =
   | "Recon" | "Web" | "AI / LLM" | "Active Directory" | "Post-Exploitation"
-  | "Smart Contract" | "Mobile / IoT" | "Capabilities";
+  | "Cloud / Container" | "Smart Contract" | "Mobile / IoT" | "Binary / Fuzzing"
+  | "Social Engineering" | "Capabilities";
 export type AgentTier = "Tier-1" | "Tier-2" | "Tier-3" | "Feeder" | "Capability";
 export type AgentStatus = "idle" | "running" | "done" | "blocked";
 
