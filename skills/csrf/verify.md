@@ -25,7 +25,7 @@ Typically `AV:N/AC:L/PR:N/UI:R/S:U/...`. Justify from the confirmed change.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "csrf-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "csrf-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["cookie-auth; token removal still succeeds; SameSite=None; PoC fired email change cross-origin"],
   "scope_ok": true, "notes": "test account used; change reverted" }

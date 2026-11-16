@@ -25,7 +25,7 @@ flag inflation (e.g. an owner-only function that's actually owner-gated).
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sc-access-control-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-access-control-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["forge fork PoC: attacker EOA called setConfig(); require(msg.sender==owner) absent on path; config changed, read back; no live tx"],
   "scope_ok": true, "notes": "local fork only; no real funds moved" }

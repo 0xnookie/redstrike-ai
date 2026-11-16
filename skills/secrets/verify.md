@@ -23,7 +23,7 @@ unverified-but-likely → cap confidence at `probable`; revoked → Info.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "secrets-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "secrets-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["AKIA... validated via sts get-caller-identity (active, account 1234); not the EXAMPLE key; redacted in artifact"],
   "scope_ok": true, "notes": "read-only identity probe only; no resources touched" }

@@ -43,6 +43,18 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# atomic_write: one shared helper for ledger writes. scripts/ is on sys.path for a direct run and for
+# the validate.py / verify_completion spec-loads; fall back to a path-load when it is not (e.g. the
+# _contract tests load this module by path directly).
+try:
+    from atomicio import atomic_write
+except ImportError:  # pragma: no cover - only hit under path-based loading without scripts/ on sys.path
+    import importlib.util as _ilu
+    _aspec = _ilu.spec_from_file_location("atomicio", str(Path(__file__).resolve().parent / "atomicio.py"))
+    _amod = _ilu.module_from_spec(_aspec)
+    _aspec.loader.exec_module(_amod)
+    atomic_write = _amod.atomic_write
+
 ROOT = Path(__file__).resolve().parent.parent
 COVERAGE_LEDGER = "coverage_ledger.json"
 SURFACE_LEDGER = "surface_ledger.json"
@@ -379,9 +391,9 @@ def main() -> int:
             cov = _read_json(eng / COVERAGE_LEDGER) or {}
             surf = _read_json(eng / SURFACE_LEDGER)
             apply_plan(cov, surf if surf is not None else {"engagement": eng.name, "surfaces": []}, plan)
-            (eng / COVERAGE_LEDGER).write_text(json.dumps(cov, indent=2) + "\n", encoding="utf-8")
+            atomic_write(eng / COVERAGE_LEDGER, json.dumps(cov, indent=2) + "\n")
             if surf is not None:
-                (eng / SURFACE_LEDGER).write_text(json.dumps(surf, indent=2) + "\n", encoding="utf-8")
+                atomic_write(eng / SURFACE_LEDGER, json.dumps(surf, indent=2) + "\n")
         if args.as_json:
             print(json.dumps(plan, indent=2))
         else:

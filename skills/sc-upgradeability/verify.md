@@ -30,7 +30,7 @@ effect + $ impact; flag inflation (e.g. an `_authorizeUpgrade` that's actually o
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sc-upgradeability-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-upgradeability-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["forge fork PoC: attacker EOA called initialize(); no initializer guard, impl missing _disableInitializers(); became owner, read back; no live tx"],
   "scope_ok": true, "notes": "local fork only; no real funds moved" }

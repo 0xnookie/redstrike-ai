@@ -26,7 +26,7 @@ a durable backdoor) — not merely that one TEST doc ranked once. Flag inflation
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "data-poisoning-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "data-poisoning-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["planted TEST doc for query 'refund policy' retrieved at rank 1 (cosine 0.91 vs 0.74 legit); RAG answer returned marker CANARY_RSP; authorized test index only; doc removed + index rebuilt after"],
   "scope_ok": true, "notes": "authorized test corpus; benign marker; cleaned up; approved" }

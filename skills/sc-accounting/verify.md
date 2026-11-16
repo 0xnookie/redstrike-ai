@@ -29,7 +29,7 @@ demonstrated before/after delta + $ impact; flag inflation (e.g. a sub-wei round
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sc-accounting-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-accounting-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["forge fork PoC: invariant totalAssets==Σbalances; first-depositor donation inflated price-per-share; later depositor rounded to 0 shares, assets captured; before/after state read back; no live tx"],
   "scope_ok": true, "notes": "local fork only; no real funds moved" }

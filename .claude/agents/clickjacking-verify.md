@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `clickjacking` s
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the SENSITIVE route is frameable (no XFO/frame-ancestors or bypass) AND a state-changing action is reachable through the frame. Info/read-only pages ⇒ reject.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `clickjacking-verify`) + set `status`.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; don't edit non-findings artifacts; stay in scope.

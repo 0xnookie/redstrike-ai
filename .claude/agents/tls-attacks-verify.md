@@ -21,6 +21,6 @@ You are the **independent semantic reviewer** for the Redstrike `tls-attacks` sk
    approved**. A supported-but-not-negotiated suite or a CVE merely mentioned ⇒ `rejected`/`needs-evidence`; a
    confirmed weak negotiation / positive benign check ⇒ `accepted`.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `tls-attacks-verify`) and set `status`.
-6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
+6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` and `blocked` findings proceed to reporting (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; reject "supported != exploited" inflation and scanner-mention CVEs; any over-read bytes must be redacted; do not edit the executor's non-findings artifacts; stay within scope.

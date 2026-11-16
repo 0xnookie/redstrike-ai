@@ -23,7 +23,7 @@ without demonstrated internal impact.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ssrf-blind-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ssrf-blind-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["token t1 maps to import-url sink; HTTP callback from target egress 203.0.113.9; not a preview bot UA"],
   "scope_ok": true, "notes": "external fetch confirmed; internal reach not demonstrated -> Medium" }

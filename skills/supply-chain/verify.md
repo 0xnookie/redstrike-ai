@@ -25,7 +25,7 @@ many installs it reaches — not merely that a name was registrable. Flag inflat
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "supply-chain-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "supply-chain-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["internal pkg 'acme-internal' absent from private-index precedence; lab resolver pulled tester v9.9.9 from the public index; postinstall fired a DNS callback to the oob id; benign marker only; unpublished after"],
   "scope_ok": true, "notes": "test package only; no usable name left public; approved" }

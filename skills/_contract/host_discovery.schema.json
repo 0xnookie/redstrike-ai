@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/host_discovery.schema.json",
+  "title": "Redstrike Host Discovery",
+  "description": "The host-discovery recon feeder's consolidated host map (host_discovery.json): in-scope live hosts with their ports/services and host-level tech, plus discovery metadata and routing signals. Recon output varies with the target and its CDN/scope posture, so most fields are optional and extra keys are allowed; the host inventory may appear under `live_hosts` or `hosts`.",
+  "type": "object",
+  "properties": {
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "scope": { "type": "string" },
+    "subdomains": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "In-scope resolved subdomains (the full list also lives in subdomains.txt)."
+    },
+    "live_hosts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/host" },
+      "description": "Live hosts discovered (the real sample uses this key)."
+    },
+    "hosts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/host" },
+      "description": "Alternate host-inventory key (the documented consolidated shape)."
+    },
+    "out_of_scope": {
+      "type": "array",
+      "description": "Assets found but outside scope — reported, not probed."
+    },
+    "api_endpoints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/api_endpoint" }
+    },
+    "port_scan_note": { "type": "string" },
+    "tech_signals": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Routing signals emitted for downstream agents (e.g. tech:nextjs, waf:cloudflare)."
+    },
+    "dev_image_marker": { "type": "boolean" }
+  },
+  "$defs": {
+    "host": {
+      "type": "object",
+      "required": ["host"],
+      "properties": {
+        "host": { "type": "string" },
+        "url": { "type": "string" },
+        "ip": { "type": "string" },
+        "live": { "type": "boolean" },
+        "status": { "type": ["integer", "string"] },
+        "title": { "type": "string" },
+        "cdn": { "type": ["string", "boolean"] },
+        "tech": { "type": "array", "items": { "type": "string" } },
+        "security_headers_present": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" },
+        "ports": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/port" }
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "properties": {
+        "port": { "type": "integer" },
+        "service": { "type": "string" },
+        "state": { "type": "string" },
+        "version": { "type": "string" },
+        "note": { "type": "string" },
+        "via": { "type": "string" }
+      }
+    },
+    "api_endpoint": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "type": { "type": "string" }
+      }
+    }
+  }
+}

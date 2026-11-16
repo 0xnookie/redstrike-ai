@@ -26,7 +26,7 @@ Severity MUST match the gadget actually proven, not the theoretical ceiling.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "prototype-pollution-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "prototype-pollution-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["after POST {\"__proto__\":{\"ppmarker\":\"x\"}} to the merge endpoint, a fresh object in the next response carried ppmarker; gadget: polluted 'ppmarker' not consumed -> reported Medium (pollution-only); reproduced"],
   "scope_ok": true, "notes": "marker-only; server-side global effect noted, non-persistent key; approved" }

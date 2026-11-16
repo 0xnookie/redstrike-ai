@@ -23,7 +23,7 @@ demonstrated exposure.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "graphql-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "graphql-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["low-priv query { user(id:B){ ssn } } returned B's ssn; field not authz-checked; two test accounts; no DoS run"],
   "scope_ok": true, "notes": "introspection also on (noted Low separately); no DoS executed" }

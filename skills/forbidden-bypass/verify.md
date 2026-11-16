@@ -31,7 +31,7 @@ action behind it was environment-blocked, record `potential_severity`.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "forbidden-bypass-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "forbidden-bypass-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["baseline GET /admin -> 403 deny body; GET /admin/..;/ -> 200 with admin-panel marker (oracle match); remove ..;/ -> 403 again; distinct from exposed-surface/auth-bypass; read-only; in scope"],
   "scope_ok": true, "notes": "benign loopback header values; no brute-force; approved" }

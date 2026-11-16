@@ -361,6 +361,98 @@ if bench_py.is_file():
     except BaseException as e:  # noqa: BLE001 — selftest asserts / may sys.exit on a bad spec
         err(f"benchmark.py selftest failed: {e}")
 
+# 11 — SKILL.md section-presence lint: every skill carries the load-bearing sections, so the
+# interview/goal/phases/safety + steps-or-orchestration spine can't silently rot out of a SKILL.md.
+_REQUIRED_SECTIONS = ("## Interview", "## Goal", "## Phases", "## Safety")
+_skill_md_dirs = [p for p in sorted(skills_dir.iterdir())
+                  if p.is_dir() and p.name != "_contract" and (p / "SKILL.md").is_file()]
+for sk in _skill_md_dirs:
+    text = (sk / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+    checked["skill_sections"] = checked.get("skill_sections", 0) + 1
+    for h in _REQUIRED_SECTIONS:
+        if h not in text:
+            err(f"{sk.name}/SKILL.md: missing required section '{h}'")
+    if "## Steps" not in text and "## Orchestration" not in text:
+        err(f"{sk.name}/SKILL.md: missing a '## Steps' or '## Orchestration' section")
+
+# 12 — findings-producer lint: a skill with a verify.md is a findings producer, so its contract wiring
+# (RoE gate + verify-base inheritance + FP gauntlet + the full 4-verdict template) must be present.
+for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_contract"):
+    verify_md = sk / "verify.md"
+    if not verify_md.is_file():
+        continue
+    checked["producer_lint"] = checked.get("producer_lint", 0) + 1
+    skill_text = (sk / "SKILL.md").read_text(encoding="utf-8", errors="replace") if (sk / "SKILL.md").is_file() else ""
+    verify_text = verify_md.read_text(encoding="utf-8", errors="replace")
+    if "roe-gate.md" not in skill_text:
+        err(f"{sk.name}/SKILL.md: findings producer must reference roe-gate.md")
+    if "verify-base.md" not in verify_text:
+        err(f"{sk.name}/verify.md: must reference verify-base.md")
+    if not re.search(r"(?mi)^#+ .*gauntlet", verify_text):
+        err(f"{sk.name}/verify.md: missing a false-positive gauntlet heading")
+    for verdict in ("accepted", "blocked", "rejected", "needs-evidence"):
+        if verdict not in verify_text:
+            err(f"{sk.name}/verify.md: verdict template is missing the '{verdict}' verdict")
+
+# 13 — binding symmetry: every executor's verify.md must have a matching .claude/agents/<x>-verify.md
+# reviewer, and every <x>-verify reviewer must have a matching executor — no orphan on either side.
+_exec_names = {p.name for p in skills_dir.iterdir() if p.is_dir() and (p / "verify.md").is_file()}
+_agent_verify = {p.name[:-len("-verify.md")] for p in agents_dir.glob("*-verify.md")} if agents_dir.is_dir() else set()
+checked["verify_bindings"] = len(_exec_names)
+for orphan in sorted(_exec_names - _agent_verify):
+    err(f"binding: skills/{orphan}/verify.md has no matching .claude/agents/{orphan}-verify.md")
+for orphan in sorted(_agent_verify - _exec_names):
+    err(f"binding: .claude/agents/{orphan}-verify.md has no matching skills/{orphan}/verify.md")
+
+# 14 — findings-artifact schema check: any manifest artifact that is a findings file must declare the
+# finding schema, else verify_completion.check_artifact silently skips schema validation for it.
+for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_contract"):
+    review = sk / "review.md"
+    if not review.is_file():
+        continue
+    obj, problem = load_manifest(review)
+    if problem or not obj:
+        continue  # manifest-level problems are already reported by check #1
+    for a in obj.get("artifacts", []):
+        path = a.get("path")
+        if path == "findings.json":
+            checked["findings_schema"] = checked.get("findings_schema", 0) + 1
+            if a.get("schema") != "skills/_contract/finding.schema.json":
+                err(f"{sk.name}/review.md: findings.json artifact must declare "
+                    f"schema: skills/_contract/finding.schema.json (has {a.get('schema')!r})")
+        elif path == "findings_consolidated.json":
+            checked["findings_schema"] = checked.get("findings_schema", 0) + 1
+            if not a.get("schema"):
+                err(f"{sk.name}/review.md: findings_consolidated.json artifact must declare a schema ref")
+
+# 15 — count/drift gate: the README's advertised numbers must match the real repo, computed here, so a
+# new skill/executor/reviewer can't land while the badges + body quietly drift out of date.
+_n_skills = len(_skill_md_dirs)
+_n_executors = sum(1 for p in _skill_md_dirs if (p / "verify.md").is_file())
+_n_reviewers = len(list(agents_dir.glob("*-verify.md"))) if agents_dir.is_dir() else 0
+_n_review_only = _n_skills - _n_executors
+_readme = ROOT / "README.md"
+if not _readme.is_file():
+    err("README.md missing — cannot run the count/drift gate")
+else:
+    _rtext = _readme.read_text(encoding="utf-8", errors="replace")
+    checked["counts"] = 1
+    _count_checks = [
+        ("Skills badge", r"badge/Skills-(\d+)-", _n_skills),
+        ("Vuln Agents badge", r"badge/Vuln%20Agents-(\d+)-", _n_executors),
+        ("Reviewer Agents badge", r"badge/Reviewer%20Agents-(\d+)-", _n_reviewers),
+        ("body skill count", r"\*\*(\d+) skills\*\*", _n_skills),
+        ("body executor count", r"\*\*(\d+) findings-producing executors\*\*", _n_executors),
+        ("body reviewer count", r"\((\d+) `\*-verify` agents\)", _n_reviewers),
+        ("body review-only count", r"\*\*(\d+) review-only\*\*", _n_review_only),
+    ]
+    for _label, _pat, _expected in _count_checks:
+        _m = re.search(_pat, _rtext)
+        if not _m:
+            err(f"README count gate: can't find the '{_label}' number (pattern {_pat!r})")
+        elif int(_m.group(1)) != _expected:
+            err(f"README count gate: {_label} says {_m.group(1)} but the repo has {_expected}")
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))

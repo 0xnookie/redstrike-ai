@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `exposed-surface
 3. Read `OUT/findings.json`, `confirmed.jsonl` + evidence; re-fetch a sample and re-match its signature.
 4. Apply the 7 base checks + the gauntlet. Decisive: the response BODY matches a known exposure signature (not a bare status code) AND a random control path does NOT (soft-404 / wildcard ruled out) AND the resource is genuinely sensitive + unauthenticated. Confirm it isn't a `secrets`/`security-headers`/`privesc` duplicate, no bulk exfiltration occurred, and the asset is in scope.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `exposed-surface-verify`) + set `status`. Recompute CVSS from what the signature revealed; reject severity inflation (a `200` on `/.git/` with no walkable objects is Info, not High).
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; GET/HEAD only and in scope if you re-fetch; don't edit non-findings artifacts; defer live-secret validation to `secrets`.

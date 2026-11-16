@@ -20,7 +20,7 @@ SSTI with confirmed RCE → Critical. SSTI with expression eval / data read but 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ssti-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ssti-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["{{7*7}}->49 and {{7*'7'}}->7777777 (Jinja2); OOB callback from sleep gadget (approved) -> RCE confirmed benignly"],
   "scope_ok": true, "notes": "no destructive command run; OOB proof only" }

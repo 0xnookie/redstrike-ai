@@ -49,7 +49,7 @@ scripts/doctor.sh  --missing         # list only what's absent
 ```
 
 **Categories:** `glue recon web password binary fuzzing ad cloud container mobile iot wireless llm aimodel
-crypto sca intercept wordlists`.
+crypto web3 sca intercept wordlists`.
 
 ## Tools you install by hand (`⚙ manual`)
 

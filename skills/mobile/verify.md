@@ -25,7 +25,7 @@ access, or a malicious co-located app?), not merely that a check was bypassable.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "mobile-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "mobile-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["objection bypassed cert-pinning; Burp captured the /api/login request+response over TLS; token redacted; MASVS-NETWORK; reproduced on test device"],
   "scope_ok": true, "notes": "secrets redacted to fingerprint; benign proof on authorized build; approved" }

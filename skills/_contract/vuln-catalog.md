@@ -84,7 +84,7 @@ Legend: Pattern = family (feeder+variants) or single. Status: ✅ built · ◻ p
 | **AI / LLM** | OWASP LLM Top 10 (2025) | family | `llm-context` ✅ (model/API/guardrails/tools/data/output-sinks) · `agent-recon` ✅ (MCP/A2A/OpenAPI agent-protocol recon → agent_context.json) | `prompt-injection` ✅ (LLM01) · `sensitive-disclosure` ✅ (LLM02/07/08) · `ai-supply-chain` ✅ (LLM03) · `data-poisoning` ✅ (LLM04) · `llm-output-handling` ✅ (LLM05) · `excessive-agency` ✅ (LLM06) | ✅ |
 | **AI agent protocols** | OWASP Agentic Top 10 (ASI01-10) | feeder | `agent-recon` ✅ (MCP/A2A/OpenAPI discovery + enum + posture → agent_context.json) | (feeds the AI/LLM executors) | ✅ |
 | **Web3 / smart contract** | OWASP Smart Contract Top 10 | family | `web3-context` ✅ (contracts/source/proxy/standards/surface + worth-it score → web3_context.json) | `sc-access-control` ✅ · `sc-upgradeability` ✅ · `sc-accounting` ✅ · `sc-oracle-mev` ✅ · `sc-reentrancy` ✅ · `sc-signature` ✅ — findings proven on a local Foundry fork | ✅ |
-| **Active Directory** *(internal / assumed-breach)* | MITRE ATT&CK | family | `ad-context` ✅ (BloodHound + principals/ACL/ADCS/paths) | `ad-initial-access` ✅ · `ad-kerberos` ✅ · `ad-acl-abuse` ✅ · `ad-adcs` ✅ (ESC1-15) · `ad-lateral-movement` ✅ | ✅ |
+| **Active Directory** *(internal / assumed-breach)* | MITRE ATT&CK | family | `ad-context` ✅ (BloodHound + principals/ACL/ADCS/paths) | `ad-initial-access` ✅ · `ad-kerberos` ✅ · `ad-acl-abuse` ✅ · `ad-adcs` ✅ (ESC1-8) · `ad-lateral-movement` ✅ | ✅ |
 | **CSRF** | — | single | — | `csrf` ✅ | ✅ |
 | **CORS misconfig** | A05 | single | — | `cors` ✅ | ✅ |
 | **Open redirect** | — | single | — | `open-redirect` ✅ | ✅ |

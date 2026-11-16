@@ -35,7 +35,7 @@ elevation with the callback's fired-context evidence. No callback ⇒ not a find
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {
-  "verdict": "accepted | rejected | needs-evidence",
+  "verdict": "accepted | blocked | rejected | needs-evidence",
   "reviewer": "xss-blind-verify",
   "reviewed_at": "<ISO-8601>",
   "rubric": { "evidence": "pass", "reproducibility": "pass", "fp_gauntlet": "pass",

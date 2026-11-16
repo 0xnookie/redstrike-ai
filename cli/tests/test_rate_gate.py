@@ -205,6 +205,7 @@ class TestPersistence(unittest.TestCase):
         reloaded = json.loads(state_path.read_text())
         self.assertEqual(reloaded["hosts"]["api.acme.com"]["blocks"], 3)
 
+    @unittest.skipUnless(rg.fcntl is not None, "POSIX advisory lock required")
     def test_concurrent_increments_are_not_lost(self):
         d = pathlib.Path(tempfile.mkdtemp())
         state_path = d / "rate_state.json"

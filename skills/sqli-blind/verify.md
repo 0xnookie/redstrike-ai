@@ -22,7 +22,7 @@ down-rate to Low just because it's blind, nor claim write/RCE without evidence.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sqli-blind-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sqli-blind-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["boolean diff reproduced x5 (1=1 -> 200 len 812, 1=2 -> 200 len 340); SLEEP(5) tracked; inferred version starts '8'"],
   "scope_ok": true, "notes": "no PII; approved; SLEEP<=5s rate-limited" }

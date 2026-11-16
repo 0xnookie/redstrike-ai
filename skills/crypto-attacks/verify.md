@@ -25,7 +25,7 @@ of a weak mode.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "crypto-attacks-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "crypto-attacks-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["CBC padding oracle on the session cookie: valid vs invalid padding distinguishable; decrypted a TEST token and forged role=guest->role=tester, server accepted; single scoped proof, no bulk decrypt"],
   "scope_ok": true, "notes": "benign forge on a test account only; padding loop rate-limited; approved" }

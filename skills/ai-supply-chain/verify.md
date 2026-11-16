@@ -24,7 +24,7 @@ placed in the source — not merely that a dangerous opcode exists. Flag inflati
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ai-supply-chain-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ai-supply-chain-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["TEST .pt with __reduce__ loaded via torch.load in a sandbox fired a DNS callback to the oob id; Fickling flagged REDUCE; serving code torch.loads uploaded models; benign marker only; no egress beyond oob"],
   "scope_ok": true, "notes": "sandboxed load only; tester artifact; approved" }

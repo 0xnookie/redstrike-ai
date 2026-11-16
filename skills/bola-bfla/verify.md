@@ -22,7 +22,7 @@ Justify from the demonstrated access.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "bola-bfla-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "bola-bfla-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["A token GET /api/v2/users/{B}/card returned B's PAN-masked record (B-only); 200 not 403; test accounts"],
   "scope_ok": true, "notes": "test accounts; no real-user data; de-duped vs idor" }

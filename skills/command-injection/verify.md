@@ -23,7 +23,7 @@ Command injection = RCE → Critical (`S:C` likely). Justify from the benign exe
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "command-injection-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "command-injection-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["payload ;curl http://t1.oob/ -> HTTP callback from target egress (token t1); sleep 5 delay reproduced x3; benign only"],
   "scope_ok": true, "notes": "no destructive command; approved; kill switch tested" }

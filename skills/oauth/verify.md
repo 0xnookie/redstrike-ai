@@ -22,7 +22,7 @@ Account takeover via OAuth → Critical; token/code leak → High. Justify from 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "oauth-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "oauth-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["redirect_uri=https://attacker.oob.sub.target accepted; auth code delivered to attacker host; exchanged for token on test account"],
   "scope_ok": true, "notes": "test accounts; code captured at OOB only; approved" }

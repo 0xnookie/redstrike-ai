@@ -21,7 +21,7 @@ compromise if domain-joined → coordinate with `ad-*`). Justify from the SYSTEM
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "windows-privesc-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "windows-privesc-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["SeImpersonatePrivilege held; PrintSpoofer -> benign command as SYSTEM; whoami=nt authority\\system; reproduced; no persistence"],
   "scope_ok": true, "notes": "in-scope host; SYSTEM proven with whoami; cleanup.md: none created" }

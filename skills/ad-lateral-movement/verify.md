@@ -21,7 +21,7 @@ the hosts actually reached + privilege, not the theoretical domain ceiling.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ad-lateral-movement-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-lateral-movement-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["PtH with svc_sql NT hash (from accepted kerberoast) -> wmiexec to FS01 (in scope) -> whoami = nt authority\\system; benign; no persistence"],
   "scope_ok": true, "notes": "in-scope host; benign command; artifacts removed (cleanup.md)" }

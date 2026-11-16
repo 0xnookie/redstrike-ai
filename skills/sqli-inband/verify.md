@@ -22,7 +22,7 @@ was demonstrably extractable — do not claim RCE/write without evidence.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sqli-inband-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sqli-inband-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["string-context breakout; UNION SELECT returned 8.0.32 (version) in body; reproducible; no PII dumped"],
   "scope_ok": true, "notes": "read-only proof only; approved" }

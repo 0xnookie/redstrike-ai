@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `windows-privesc
 3. Read `OUT/findings.json`, `cleanup.md` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: the PoC shows `whoami`=`nt authority\system` (or a new admin context) obtained via the claimed misconfig (unquoted path / weak service ACL / AlwaysInstallElevated / SeImpersonate→potato / DLL hijack / token), reproducibly — not just that the misconfig exists; only a benign proof ran (no persistence/destruction/bulk cred dumping; crash-risky exploits = feasibility-only); anything created/changed is reverted/restored per cleanup.md. In-scope host; approved.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `windows-privesc-verify`) + set `status`.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; the escalation is the proof; reject un-reverted changes / destructive actions; don't edit non-findings artifacts; stay in scope.

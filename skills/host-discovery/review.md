@@ -24,7 +24,7 @@
   "artifacts": [
     { "id": "A.1", "path": "subdomains.txt", "type": "text" },
     { "id": "B.1", "path": "hosts.json", "type": "json" },
-    { "id": "C.1", "path": "host_discovery.json", "type": "json" },
+    { "id": "C.1", "path": "host_discovery.json", "type": "json", "schema": "skills/_contract/host_discovery.schema.json" },
     { "id": "C.2", "path": "dangling_dns.json", "type": "json", "required": false },
     { "id": "D.1", "path": "summary.md", "type": "text" },
     { "id": "E.1", "path": "logs", "type": "dir" }

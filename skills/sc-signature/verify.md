@@ -33,7 +33,7 @@ griefing-only permit front-run → High/Medium. Recompute from the demonstrated 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sc-signature-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-signature-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["forge vm.sign PoC: valid sig crafted then replayed; nonce never incremented; transfer executed twice, balances read back; no live tx; TEST keys only"],
   "scope_ok": true, "notes": "local fork only; no real funds moved; TEST keys" }

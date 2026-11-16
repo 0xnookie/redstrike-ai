@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `ad-kerberos` sk
 3. Read `OUT/findings.json`, `cleanup.md` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: a roast was confirmed by an OFFLINE crack (plaintext for a weak test account) or a delegation path demonstrated end-to-end on a TEST target; any golden/silver ticket was capability-only on a test principal (no persistence / no real DA); created objects (RBCD/tickets) reverted per cleanup.md. Approved; in scope; offline cracking only.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ad-kerberos-verify`) + set `status`.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; reject online brute-force / full-domain compromise / un-reverted changes; don't edit non-findings artifacts; stay in scope.

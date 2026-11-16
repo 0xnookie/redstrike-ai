@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/findings_consolidated.schema.json",
+  "title": "Redstrike Consolidated Findings",
+  "description": "The reporting skill's consolidated findings artifact. Two accepted shapes: a bare array of findings, or a report object wrapping findings[] (plus an optional composite attack_chains[]) alongside header fields. Each entry in findings[]/attack_chains[] follows the single-finding shape in finding.schema.json; this schema validates the top-level envelope only — per-finding conformance is enforced against finding.schema.json by the engagement gate (verify_completion.py).",
+  "anyOf": [
+    {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    {
+      "type": "object",
+      "required": ["findings"],
+      "properties": {
+        "engagement": { "type": "string" },
+        "target": { "type": "string" },
+        "generated": { "type": "string" },
+        "severity_counts": { "type": "object" },
+        "findings": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "attack_chains": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    }
+  ]
+}

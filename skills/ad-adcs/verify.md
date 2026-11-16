@@ -22,7 +22,7 @@ is a lower (configuration) finding.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ad-adcs-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-adcs-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["template 'WebServer' ESC1 (ENROLLEE_SUPPLIES_SUBJECT + client-auth); requested cert w/ SAN=test-da; certipy auth -> TGT; cert revoked"],
   "scope_ok": true, "notes": "test principal; cert revoked (cleanup.md); no persistence" }

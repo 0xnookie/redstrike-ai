@@ -22,7 +22,7 @@ Justify from the corroborated content.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "sensitive-disclosure-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sensitive-disclosure-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["extracted system prompt reproduced identically 3x and matches observed guardrails + planted marker -> real, not hallucinated"],
   "scope_ok": true, "notes": "corroborated; no real user data; tester accounts for cross-tenant test" }

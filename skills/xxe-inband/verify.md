@@ -20,7 +20,7 @@ was actually read/reached.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "xxe-inband-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "xxe-inband-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["SYSTEM file:///etc/hostname entity -> response contained the real hostname 'web-01'; not an echoed internal entity"],
   "scope_ok": true, "notes": "benign file only; no DoS; approved" }

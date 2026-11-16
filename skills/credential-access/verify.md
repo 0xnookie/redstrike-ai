@@ -21,7 +21,7 @@ Rate from what the credential unlocks (its reuse/reach), not merely that a hash 
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "credential-access-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "credential-access-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["a service account hash cracked offline to a dictionary word (stored as fingerprint); authenticated once to confirm; no lockout; hash file deleted"],
   "scope_ok": true, "notes": "secret redacted to fingerprint; offline crack; approved" }

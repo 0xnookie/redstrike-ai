@@ -19,7 +19,7 @@ Arbitrary file read → High (`C:H`); LFI-to-RCE confirmed → Critical. Justify
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "path-traversal-lfi-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "path-traversal-lfi-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["?file=../../../../etc/hostname returned 'web-01' (real host); base dir was /var/www/uploads; reproducible"],
   "scope_ok": true, "notes": "benign marker only; LFI-RCE not attempted (no approval)" }

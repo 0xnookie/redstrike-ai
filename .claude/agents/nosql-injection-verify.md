@@ -15,6 +15,6 @@ You are the **independent semantic reviewer** for the Redstrike `nosql-injection
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: an injected NoSQL **operator or syntax breakout** (`$ne`/`$gt`/`$regex`/`$where`/…) **changed query behaviour** — authenticated without valid creds, or returned data the input shouldn't — proven by a reproduced PoC, NOT a 500/error or app-logic coincidence; the proof is **benign + minimal** (auth bypass once; any extraction a marker, no bulk dump; no DB-hanging `$where`); a blind differential is reproducible. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `nosql-injection-verify`) and set `status`.
-6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
+6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` and `blocked` findings proceed to reporting (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; a test account/benign payload should have been used; do not edit the executor's non-findings artifacts; stay within scope.

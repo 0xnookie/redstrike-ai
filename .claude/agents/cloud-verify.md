@@ -20,6 +20,6 @@ You are the **independent semantic reviewer** for the Redstrike `cloud` skill �
    fingerprint; **in-scope account IDs**. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`;
    proven ⇒ `accepted`.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `cloud-verify`) and set `status`.
-6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` findings proceed to reporting.
+6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` and `blocked` findings proceed to reporting (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; credentials must be redacted; do not edit the executor's non-findings artifacts; stay within scope.

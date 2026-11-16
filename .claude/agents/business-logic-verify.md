@@ -14,6 +14,6 @@ You are the **independent semantic reviewer** for the Redstrike `business-logic`
 3. Read `OUT/workflow_model.md` + `invariants.json` FIRST (understand intended behavior), then `findings.json` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: a specific invariant from `invariants.json` was violated WITH concrete impact (money/access/data/quota), reproducibly (races: across attempts). "Unusual but intended" ⇒ reject. Pure IDOR/injection mislabeled ⇒ defer to the right agent.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `business-logic-verify`) + set `status`; state the business impact explicitly.
-6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` findings proceed.
+6. Return a verdict table: id | verdict | decisive check | reason. Only `accepted` and `blocked` findings proceed (blocked = confirmed-real but environment-prevented → report with a caveat; do NOT bounce to needs-evidence).
 
 **Rules:** evidence only; be adversarial; confirm test accounts + reversibility; don't edit non-findings artifacts; stay in scope.

@@ -21,7 +21,7 @@ Full auth bypass / 2FA bypass → High/Critical. Rate by what the bypass grants.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "auth-bypass-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "auth-bypass-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["POST /verify-2fa skipped; GET /dashboard after step-1 login returned authed content; server-granted; test account"],
   "scope_ok": true, "notes": "no brute-force; test account; approved" }

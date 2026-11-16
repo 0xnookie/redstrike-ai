@@ -21,7 +21,7 @@ Kerberoast of a privileged account → High/Critical (path to DA); delegation/ti
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "ad-kerberos-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-kerberos-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["svc_sql kerberoastable; TGS cracked offline (hashcat 13100) -> weak pw; account is local admin on 3 hosts; no persistence; offline only"],
   "scope_ok": true, "notes": "capability demonstrated on test scope; cleanup.md: none created" }

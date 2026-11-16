@@ -36,7 +36,7 @@ Justify from the evidence.
 
 ## Verdict (write into each finding's review{} block)
 ```json
-"review": { "verdict": "accepted|rejected|needs-evidence", "reviewer": "nextjs-verify",
+"review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "nextjs-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["version 14.1.0 from __NEXT_DATA__ buildId + x-powered-by; CVE-2025-29927 range includes 14.1.0, fixed in 14.2.25 → affected; middleware guards /admin (307→/login without header); header canary shows guard skipped, status-only, no data read; not exploited here"],
   "scope_ok": true, "notes": "version from ≥2 target signals; SSRF handed to ssrf-*; exploitation deferred to exploit-generator" }

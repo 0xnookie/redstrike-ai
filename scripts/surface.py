@@ -30,6 +30,18 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# atomic_write: one shared helper for ledger writes. scripts/ is on sys.path for a direct run and for
+# the validate.py / verify_completion spec-loads; fall back to a path-load when it is not (e.g. the
+# _contract tests load this module by path directly).
+try:
+    from atomicio import atomic_write
+except ImportError:  # pragma: no cover - only hit under path-based loading without scripts/ on sys.path
+    import importlib.util as _ilu
+    _aspec = _ilu.spec_from_file_location("atomicio", str(Path(__file__).resolve().parent / "atomicio.py"))
+    _amod = _ilu.module_from_spec(_aspec)
+    _aspec.loader.exec_module(_amod)
+    atomic_write = _amod.atomic_write
+
 LEDGER_NAME = "surface_ledger.json"
 _OPEN_STATUS = "discovered"            # enumerated but never tested == a gap at close
 _NEED_REASON = {"skipped", "n/a"}
@@ -209,7 +221,7 @@ def mark(eng: Path, sid: str, status: str, by: str, reason: str):
     if reason:
         hit["reason"] = reason
     led["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    p.write_text(json.dumps(led, indent=2), encoding="utf-8")
+    atomic_write(p, json.dumps(led, indent=2))
     print(f"marked {sid} -> {status}")
     return 0
 
@@ -309,12 +321,12 @@ def main() -> int:
             # preserving any tested/skipped progress. --fresh forces a clean rebuild.
             led = merge_plan(json.loads(p.read_text(encoding="utf-8")), items)
             added = led.pop("_last_merge_added", 0)
-            p.write_text(json.dumps(led, indent=2), encoding="utf-8")
+            atomic_write(p, json.dumps(led, indent=2))
             print(f"merged {eng / LEDGER_NAME}: +{added} new element(s), "
                   f"{len(led['surfaces'])} total (progress preserved)")
         else:
             led = plan_from_items(eng.name, items)
-            p.write_text(json.dumps(led, indent=2), encoding="utf-8")
+            atomic_write(p, json.dumps(led, indent=2))
             print(f"wrote {eng / LEDGER_NAME}: {len(led['surfaces'])} surface element(s)")
         return 0
 

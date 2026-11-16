@@ -36,6 +36,18 @@ import os
 import sys
 from pathlib import Path
 
+# atomic_write: one shared helper for ledger writes. scripts/ is on sys.path for a direct run and for
+# the validate.py / verify_completion spec-loads; fall back to a path-load when it is not (e.g. the
+# _contract tests load this module by path directly).
+try:
+    from atomicio import atomic_write
+except ImportError:  # pragma: no cover - only hit under path-based loading without scripts/ on sys.path
+    import importlib.util as _ilu
+    _aspec = _ilu.spec_from_file_location("atomicio", str(Path(__file__).resolve().parent / "atomicio.py"))
+    _amod = _ilu.module_from_spec(_aspec)
+    _aspec.loader.exec_module(_amod)
+    atomic_write = _amod.atomic_write
+
 ROOT = Path(__file__).resolve().parent.parent
 MAP_PATH = ROOT / "skills" / "_contract" / "routing-map.json"
 LEDGER_NAME = "coverage_ledger.json"
@@ -298,7 +310,7 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
         hit["findings_count"] = count
     if note is not None:
         hit["reason"] = note
-    ledger_path.write_text(json.dumps(led, indent=2) + "\n", encoding="utf-8")
+    atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
     if as_json:
         print(json.dumps({"id": cat_id, "status": status,
                           "findings_count": hit.get("findings_count"),
@@ -342,7 +354,7 @@ def main() -> int:
         if args.engagement:
             out = Path(args.engagement)
             out.mkdir(parents=True, exist_ok=True)
-            (out / LEDGER_NAME).write_text(json.dumps(led, indent=2) + "\n", encoding="utf-8")
+            atomic_write(out / LEDGER_NAME, json.dumps(led, indent=2) + "\n")
             if args.as_json:
                 print(json.dumps(led, indent=2))
             else:
