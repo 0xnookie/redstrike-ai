@@ -25,10 +25,18 @@ jobs:
           done
 
   cli:
-    runs-on: ubuntu-latest
+    # The launcher targets Windows/WSL + Linux, so exercise the stdlib CLI on both.
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        # Use bash on every OS (Git Bash ships on the GitHub Windows runners) so the
+        # shell steps below are portable without a second PowerShell transcription.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
