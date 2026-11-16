@@ -57,3 +57,23 @@ jobs:
           redstrike --no-banner --no-color init "CI Test" --authorized-by "ci / auth-ref" \
             --domain '*.ci.test' --i-confirm-authorization
           redstrike --no-banner --no-color run "ci-test-$(date -u +%F)" --dry-run
+
+  console:
+    # Type + lint gate for the web console (TypeScript/Next.js).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Install deps (enforces the lockfile)
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
