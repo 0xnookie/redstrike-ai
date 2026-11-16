@@ -9,8 +9,10 @@ nothing new. The loop must always terminate (monotone work-list).
 
 Stdlib only, runnable as `python test_reconverge.py` (the CI convention).
 """
+import json
 import pathlib
 import sys
+import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve()
@@ -114,6 +116,57 @@ class Fixpoint(unittest.TestCase):
         skeys = {(s["kind"], s["value"]) for s in surf["surfaces"]}
         applied = [{"id": c["id"], "status": c["status"], "triggers": _trig(c["id"])} for c in cov["categories"]]
         self.assertTrue(rc.reconverge(seen, skeys, applied, obs, MAPC, MAPP)["converged"])
+
+
+class IngestValidation(unittest.TestCase):
+    """P0-1: the inbox is validated at ingest — an out-of-vocab signal / out-of-enum surface kind is
+    REJECTED (quarantined), never folded into the ledgers (the sink:dom-backlink / `content` leak)."""
+    VOCAB = {"param:url-fetching", "asset:cloud"}
+    KINDS = {"param", "endpoint"}
+
+    def test_split_keeps_valid_drops_invalid(self):
+        recs = [{"source": "pp", "signals": ["sink:dom-backlink", "param:url-fetching"],
+                 "surface": [{"kind": "param", "value": "from"}, {"kind": "content", "value": "/x.xml"}]}]
+        clean, rej = rc.split_observations(recs, self.VOCAB, self.KINDS)
+        self.assertEqual(clean[0]["signals"], ["param:url-fetching"])
+        self.assertEqual([s["value"] for s in clean[0]["surface"]], ["from"])
+        self.assertIn("sink:dom-backlink", rej[0]["rejected_signals"])
+        self.assertTrue(any(b.get("kind") == "content" for b in rej[0]["rejected_surface"]))
+
+    def test_fail_open_on_empty_vocab(self):
+        recs = [{"signals": ["anything:at-all"]}]
+        clean, rej = rc.split_observations(recs, set(), set())
+        self.assertEqual(rej, [])
+        self.assertEqual(clean[0]["signals"], ["anything:at-all"])
+
+    def test_record_with_only_invalid_parts_yields_no_observation(self):
+        clean, rej = rc.split_observations([{"source": "x", "signals": ["made:up"]}], self.VOCAB, self.KINDS)
+        self.assertEqual(clean, [])
+        self.assertTrue(rej)
+
+    def test_load_observations_cleans_against_real_vocab(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "reconvergence").mkdir(parents=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "pp", "signals": ["sink:dom-backlink", "param:url-fetching"],
+                            "surface": [{"kind": "content", "value": "/x.xml"}]}) + "\n", encoding="utf-8")
+            obs = rc.load_observations(eng)
+            # the real routing vocab contains param:url-fetching but NOT sink:dom-backlink
+            self.assertEqual(obs[0]["signals"], ["param:url-fetching"])
+            self.assertEqual(obs[0]["surface"], [])  # the `content` kind is rejected
+
+    def test_ingest_quarantines_to_sidecar(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "reconvergence").mkdir(parents=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "pp", "signals": ["sink:dom-backlink"]}) + "\n", encoding="utf-8")
+            rc.ingest_inbox(eng)
+            sidecar = eng / "reconvergence" / "inbox.rejected.jsonl"
+            self.assertTrue(sidecar.is_file())
+            rec = json.loads(sidecar.read_text(encoding="utf-8").strip())
+            self.assertIn("sink:dom-backlink", rec["rejected_signals"])
 
 
 class SelfTest(unittest.TestCase):

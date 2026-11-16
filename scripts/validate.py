@@ -196,6 +196,32 @@ else:
                 f"(dead signal — give it a producer or remove it)")
         checked["signal_provenance"] = len(sources)
 
+        # 7c — signal-vocabulary schema sync: skills/_contract/signals.schema.json enumerates the SAME
+        # closed vocabulary routing-map.json declares, so coordination artifacts (the re-convergence inbox,
+        # coverage_ledger.signals_used, the signals feeder) can be validated against one source. Any drift in
+        # either direction is a FAIL — a signal in the vocab but not the schema can't be validated, and a
+        # signal in the schema but not the vocab routes to nothing (the sink:dom-backlink leak shape).
+        sig_schema_path = ROOT / "skills" / "_contract" / "signals.schema.json"
+        if not sig_schema_path.is_file():
+            err("skills/_contract/signals.schema.json missing (the signal-vocabulary schema)")
+        else:
+            try:
+                sig_schema = json.loads(sig_schema_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as e:
+                sig_schema = None
+                err(f"signals.schema.json: invalid JSON: {e}")
+            if sig_schema is not None:
+                checked["signal_vocab"] = 1
+                schema_vocab = set((sig_schema.get("$defs", {}).get("signal", {}) or {}).get("enum", []) or [])
+                if not schema_vocab:
+                    err("signals.schema.json: $defs/signal/enum is empty or missing (no vocabulary)")
+                for extra in sorted(schema_vocab - vocab):
+                    err(f"signals.schema.json: enum has '{extra}' which routing-map.json does not declare "
+                        f"(a signal that routes to nothing)")
+                for missing in sorted(vocab - schema_vocab):
+                    err(f"signals.schema.json: enum is MISSING '{missing}' from the routing-map vocab "
+                        f"(it could not be validated at ingest)")
+
 # 8 — coverage.py routing/ledger self-test
 try:
     import importlib.util

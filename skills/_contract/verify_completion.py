@@ -454,6 +454,93 @@ def _reconverge_hard_errors(eng: Path) -> list:
         return []
 
 
+def _routing_signal_vocab() -> set:
+    """The CLOSED signal vocabulary (routing-map.json `signals` keys). Empty => unreadable (gate skips)."""
+    rm = _repo_root() / "skills" / "_contract" / "routing-map.json"
+    try:
+        return set((json.loads(rm.read_text(encoding="utf-8")).get("signals") or {}).keys())
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _surface_kind_enum() -> set:
+    """The CLOSED surface-kind enum (surface_ledger.schema.json). Empty => unreadable (gate skips)."""
+    sp = _repo_root() / "skills" / "_contract" / "surface_ledger.schema.json"
+    try:
+        s = json.loads(sp.read_text(encoding="utf-8"))
+        kind = (((s.get("$defs") or {}).get("surface") or {}).get("properties") or {}).get("kind") or {}
+        return set(kind.get("enum") or [])
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _coordination_integrity_errors(eng: Path) -> list:
+    """HARD coordination-artifact integrity gate — active only once a report exists.
+
+    The re-convergence inbox, the surface ledger and the coverage ledger are produced by the pipeline
+    ITSELF, yet nothing validated their own vocabulary, so an out-of-vocab signal (`sink:dom-backlink`)
+    and an out-of-enum surface kind (`content`) were silently folded in — where they route to nothing and
+    mask a recall gap (the real false-negative this gate exists to stop). Once a report claims DONE this is
+    a FAIL: inbox signals ⊄ the routing vocab, inbox/surface-ledger kinds ⊄ the enum, or
+    coverage_ledger.signals_used ⊄ the vocab. Reads the RAW artifacts (so a fold-in cannot hide it).
+
+    Returns [] when no report is present, or when the vocab/enum can't be read (surfaced elsewhere)."""
+    if not _report_present(eng):
+        return []
+    vocab = _routing_signal_vocab()
+    kinds = _surface_kind_enum()
+    errs = []
+
+    inbox = eng / "reconvergence" / "inbox.jsonl"
+    if inbox.is_file() and (vocab or kinds):
+        bad_sig, bad_kind = set(), set()
+        for ln in inbox.read_text(encoding="utf-8", errors="replace").splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                rec = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            if vocab:
+                bad_sig |= {str(s) for s in (rec.get("signals") or []) if str(s) not in vocab}
+            if kinds:
+                bad_kind |= {str((it or {}).get("kind")) for it in (rec.get("surface") or [])
+                             if (it or {}).get("kind") and (it or {}).get("kind") not in kinds}
+        if bad_sig:
+            errs.append("coordination-integrity gate (report present): reconvergence/inbox.jsonl carries "
+                        f"out-of-vocab signal(s) {sorted(bad_sig)} not in routing-map.json — quarantine them "
+                        "(scripts/reconverge.py --apply writes reconvergence/inbox.rejected.jsonl), never fold them in")
+        if bad_kind:
+            errs.append("coordination-integrity gate (report present): reconvergence/inbox.jsonl carries "
+                        f"out-of-enum surface kind(s) {sorted(bad_kind)} not in the surface-ledger kind enum")
+
+    sl = eng / "surface_ledger.json"
+    if sl.is_file() and kinds:
+        try:
+            led = json.loads(sl.read_text(encoding="utf-8"))
+            bad = sorted({str(s.get("kind")) for s in (led.get("surfaces") or []) if s.get("kind") not in kinds})
+        except Exception:  # noqa: BLE001
+            bad = []
+        if bad:
+            errs.append("coordination-integrity gate (report present): surface_ledger.json has out-of-enum "
+                        f"kind(s) {bad} — only {sorted(kinds)} are valid surface-ledger kinds")
+
+    cl = eng / "coverage_ledger.json"
+    if cl.is_file() and vocab:
+        try:
+            cov = json.loads(cl.read_text(encoding="utf-8"))
+            bad = sorted({str(s) for s in (cov.get("signals_used") or []) if str(s) not in vocab})
+        except Exception:  # noqa: BLE001
+            bad = []
+        if bad:
+            errs.append("coordination-integrity gate (report present): coverage_ledger.json signals_used has "
+                        f"out-of-vocab signal(s) {bad} not in routing-map.json (a folded-in invalid signal)")
+    return errs
+
+
 def _duplicate_id_errors(eng: Path, findings: list) -> list:
     """HARD duplicate finding-id gate — active only once a consolidated report exists.
 
@@ -763,6 +850,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # Re-convergence (fix #6): HARD once a report + a non-empty inbox exist — no report over un-routed
     # mid-hunt discoveries (the single-pass leak).
     coverage_errors += _reconverge_hard_errors(eng)
+    # Coordination-artifact integrity: HARD once a report exists — the inbox / surface ledger / coverage
+    # ledger must obey their OWN vocabularies (no folded-in out-of-vocab signal or out-of-enum kind).
+    integrity_errors = _coordination_integrity_errors(eng)
     if not any(eng.rglob("host_discovery.json")):
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
@@ -828,7 +918,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
 
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
-    gate_ok = (not failed) and (not coverage_errors) and (not review_errors) and (not dup_errors)
+    gate_ok = ((not failed) and (not coverage_errors) and (not review_errors)
+               and (not dup_errors) and (not integrity_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -836,6 +927,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "coverage_errors": coverage_errors,
                           "review_errors": review_errors,
                           "duplicate_id_errors": dup_errors,
+                          "integrity_errors": integrity_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -855,6 +947,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("\n✗ duplicate finding-id gate FAILED (a report is present, so ids must be engagement-unique):")
             for de in dup_errors:
                 print(f"  - {de}")
+        if integrity_errors:
+            print("\n✗ coordination-integrity gate FAILED (a coordination artifact broke its own vocabulary):")
+            for ie in integrity_errors:
+                print(f"  - {ie}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -868,7 +964,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         print(f"\n{verdict}: {len(results) - len(failed)}/{len(results)} finding(s) pass hard checks; "
               f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
               f"{len(review_errors)} independent-review error(s), {len(dup_errors)} duplicate-id error(s), "
-              f"{len(all_warnings)} warning(s).")
+              f"{len(integrity_errors)} coordination-integrity error(s), {len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -879,6 +975,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "reviewer, or record an explicit operator-accept in reviews/self_verified_accepts.json before reporting.")
         if dup_errors:
             print("Two findings share an id => give each a unique RS-YYYY-NNN before reporting.")
+        if integrity_errors:
+            print("A coordination artifact (inbox / surface ledger / coverage ledger) holds an out-of-vocab "
+                  "signal or out-of-enum surface kind => quarantine it (reconverge --apply) and re-plan, "
+                  "don't fold an invalid token into the ledgers.")
     return gate_ok
 
 

@@ -830,5 +830,127 @@ class TestIndependentReviewGate(unittest.TestCase):
             self.assertTrue(any("not an independent" in w for w in payload["warnings"]))
 
 
+# --------------------------------------------------------------------------- #
+# P0-1: coordination-artifact integrity gate — no report over an artifact that
+# broke its OWN vocabulary (out-of-vocab signal / out-of-enum surface kind).
+# --------------------------------------------------------------------------- #
+class TestSignalsSchema(unittest.TestCase):
+    """The signal-vocabulary schema validates a signals.json feeder document and rejects a token
+    outside the closed vocabulary (the sink:dom-backlink leak shape)."""
+    SCHEMA = "skills/_contract/signals.schema.json"
+
+    def ok(self, doc):
+        return vc._validate_against_schema(doc, self.SCHEMA)[0]
+
+    def test_conformant_signals_doc_passes(self):
+        self.assertTrue(self.ok({"signals": ["param:injectable", "sink:dom", "asset:cloud"]}))
+
+    def test_out_of_vocab_signal_fails(self):
+        self.assertFalse(self.ok({"signals": ["param:injectable", "sink:dom-backlink"]}))
+
+    def test_vocab_matches_routing_map(self):
+        schema = json.loads((REPO / self.SCHEMA).read_text(encoding="utf-8"))
+        rmap = json.loads((REPO / "skills/_contract/routing-map.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(schema["$defs"]["signal"]["enum"]), set(rmap["signals"]))
+
+
+class TestCoordinationIntegrityGate(unittest.TestCase):
+    """Once a report exists, a coordination artifact that broke its own vocabulary — an out-of-vocab
+    signal folded into coverage_ledger.signals_used / the inbox, or an out-of-enum surface kind in the
+    surface ledger / inbox — HARD-fails (the noxframe sink:dom-backlink / `content`-surface leak)."""
+
+    def _clean_report_eng(self, d):
+        eng = pathlib.Path(d)
+        f = valid_finding()  # reviewer xss-reflected-verify (independent), verdict accepted
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng, led, sled
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_clean_engagement_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["integrity_errors"], [])
+
+    def test_inbox_out_of_vocab_signal_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "pp", "signals": ["sink:dom-backlink"]}) + "\n", encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("sink:dom-backlink" in e for e in payload["integrity_errors"]))
+
+    def test_inbox_out_of_enum_kind_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "x", "surface": [{"kind": "content", "value": "/sitemap.xml"}]}) + "\n",
+                encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("content" in e for e in payload["integrity_errors"]))
+
+    def test_surface_ledger_out_of_enum_kind_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, sled = self._clean_report_eng(d)
+            sled["surfaces"].append({"id": "content:abc", "kind": "content",
+                                     "value": "/sitemap.xml", "status": "n/a", "reason": "x"})
+            (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("surface_ledger.json" in e and "content" in e for e in payload["integrity_errors"]))
+
+    def test_coverage_signals_used_out_of_vocab_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, led, _s = self._clean_report_eng(d)
+            led["signals_used"] = ["param:injectable", "sink:dom-backlink"]
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("signals_used" in e for e in payload["integrity_errors"]))
+
+    def test_no_report_integrity_is_silent(self):
+        """Mid-hunt (no consolidated report): a malformed inbox must NOT fail the gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "x", "signals": ["sink:dom-backlink"]}) + "\n", encoding="utf-8")
+            payload = self._run(eng)
+            self.assertEqual(payload["integrity_errors"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
