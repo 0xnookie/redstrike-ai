@@ -21,13 +21,18 @@ def render_roe(scope: dict, engagement_id: str, *, autonomous: bool = False) -> 
     autonomous_note = (
         """
 ## AUTONOMOUS run
-You are running headless. Do recon and non-destructive analysis, drive the recon/context
-skills and their reviewer subagents, and record findings. Shell commands you were not
-pre-allowed to run are **deferred for operator approval** — the run pauses, the operator
-signs off, then resumes. So when you genuinely need an approval-gated / offensive step
-({phases}), attempt it plainly and briefly say why; if it is deferred, that is the intended
-gate, not an error — do not retry it or try to route around the gate. Anything out of scope,
-or outside the window, is a HARD STOP.
+You run the FULL engagement end to end within scope — do NOT stop after recon. Complete recon,
+build the coverage + surface + **notebook** ledgers, then hunt EVERY routed vulnerability class
+(non-destructive detection with a benign PoC — xss, sqli, idor, ssrf, and the rest), each through
+its context feeder and its independent reviewer subagent; re-converge, run the recall-audit, then
+chain accepted findings and assemble the report. Record findings as you go.
+
+For the approval-gated phases ({phases}) and any destructive / RCE step: if a command was not
+pre-allowed it is **deferred for operator approval**. When that happens, record it, SKIP that step
+for now, and CONTINUE other in-scope, non-gated work — the operator approves pending items and the
+run resumes. A deferral is the intended gate, not an error, and is NEVER a reason to stop the whole
+run; do not retry it or route around the gate. Anything out of scope, or outside the window, is a
+HARD STOP.
 """.format(phases=phases)
         if autonomous
         else ""

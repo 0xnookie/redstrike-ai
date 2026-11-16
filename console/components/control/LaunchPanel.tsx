@@ -73,7 +73,7 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
 
   // run settings (shared by both modes → redstrike run)
   const [depth, setDepthState] = useState<Depth>("standard");
-  const [supervise, setSupervise] = useState(false); // default: autonomous — no per-command approvals
+  const [supervise, setSupervise] = useState(false); // default: autonomous — runs unattended; dangerous steps still defer to Approvals
   const [allow, setAllow] = useState("");
   const [maxTurns, setMaxTurns] = useState(String(DEPTH.standard.turns));
   const [maxBudget, setMaxBudget] = useState(String(DEPTH.standard.budget));
@@ -88,9 +88,11 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
 
   const toList = (s: string) => s.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
 
-  // Autonomous (default): hand the gate `Bash`/`PowerShell` — the `*` pass-glob — so every
-  // in-scope shell command runs WITHOUT deferring. The scope gate still DENIES out-of-scope
-  // targets; only per-command sign-off is waived. Supervised: only the operator's patterns pass.
+  // Autonomous (default): hand the gate `Bash`/`PowerShell` — the `*` pass-glob — so routine,
+  // non-destructive shell commands run WITHOUT deferring. The scope gate still DENIES out-of-scope
+  // targets. Even under this blanket allow, active-exploit / post-exploitation / destructive tools
+  // still DEFER to the Approvals panel for operator sign-off, unless the operator pre-allows a
+  // specific one with a narrow rule (e.g. `Bash(sqlmap *)`). Supervised: only the operator's patterns pass.
   const runConfig = () => ({
     allow: supervise ? toList(allow) : ["Bash", "PowerShell"],
     max_turns: parseInt(maxTurns || "200", 10),
@@ -154,7 +156,7 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
         />
         <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted">
           <Gauge size={13} className="shrink-0 text-muted" />
-          {DEPTH[depth].note} — agents stop at the turn or budget ceiling, whichever comes first.
+          {DEPTH[depth].note} — agents resume until the engagement is complete or the turn/budget ceiling is reached, whichever comes first.
         </p>
       </Field>
 
@@ -168,7 +170,7 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
           <ShieldCheck size={13} className="mt-px shrink-0 text-emerald-400" />
           {supervise
             ? "Pauses for your approval on each shell command outside the allowlist below."
-            : "Runs end to end within scope — no per-command approvals. The scope gate still blocks anything out of scope."}
+            : "Runs the full engagement to completion unattended — recon through report, resuming as needed. The scope gate blocks out-of-scope targets, and exploitation, post-exploitation, and destructive steps still pause in the Approvals panel for your sign-off, just like an interactive run."}
         </p>
       </Field>
 
