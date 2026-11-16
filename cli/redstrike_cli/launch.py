@@ -77,6 +77,33 @@ def _seed_coverage_ledger(engagement_dir: Path, repo_root: Path, python_exe: str
         )
 
 
+def _seed_notebook(engagement_dir: Path, repo_root: Path, python_exe: str) -> None:
+    """Create a baseline notebook.json if absent (best-effort, never fatal).
+
+    Defense-in-depth so the console's Notebook view populates — RoE + test accounts (from scope) at
+    minimum — even before recon, and so a run that stops early is never indistinguishable from one that
+    never ran. `notebook.py --plan` is idempotent: it merges and never clobbers executor/human edits, so
+    the orchestrator enriches this post-recon (recon_intel + seeded leads). Skipped when a notebook
+    already exists (don't re-seed a refined one) or notebook.py isn't present. Mirrors
+    `_seed_coverage_ledger` down to the error.log-on-failure pattern."""
+    notebook = engagement_dir / "notebook.json"
+    script = repo_root / "scripts" / "notebook.py"
+    if notebook.is_file() or not script.is_file():
+        return
+    try:
+        subprocess.run(
+            [python_exe, str(script), "--plan", "--engagement", str(engagement_dir)],
+            cwd=str(repo_root), check=False,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+        )
+    except Exception as e:
+        ts = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        auditmod.append_line(
+            engagement_dir / "runtime" / "error.log",
+            auditmod.redact_text(f"[{ts}] _seed_notebook failed: {type(e).__name__}: {e}"),
+        )
+
+
 def prepare_runtime(
     engagement_dir: Path,
     repo_root: Path,
@@ -105,6 +132,9 @@ def prepare_runtime(
 
     # Track category coverage from the start (deterministic routing, not model discretion).
     _seed_coverage_ledger(engagement_dir, repo_root, python_exe)
+    # Seed the engagement notebook so the console's Notebook view (RoE + test accounts) populates even
+    # before recon; the orchestrator enriches it post-recon. Idempotent — notebook.py merges, never clobbers.
+    _seed_notebook(engagement_dir, repo_root, python_exe)
 
     gate_policy = runtime / "gate-policy.json"
     approvals_path = runtime / "approvals.json"
@@ -112,7 +142,14 @@ def prepare_runtime(
     if mode == "autonomous":
         gate_policy.write_text(
             json.dumps(
-                {"mode": "autonomous", "bash_allow": settingsmod.bash_allow_globs(extra_allow)}, indent=2
+                {
+                    "mode": "autonomous",
+                    "bash_allow": settingsmod.bash_allow_globs(extra_allow),
+                    # Active-exploit tokens the scope gate defers even under a broad `Bash`/`*` allow,
+                    # so unattended exploitation still reaches the operator (see scope_gate.evaluate).
+                    "always_defer_tokens": sorted(settingsmod._ACTIVE_EXPLOIT_TOKENS),
+                },
+                indent=2,
             ) + "\n",
             encoding="utf-8",
         )
@@ -232,10 +269,18 @@ def build_argv(
 
 def autonomous_prompt(engagement_id: str) -> str:
     return (
-        f"Autonomously run Redstrike engagement '{engagement_id}'. Authorization and scope are already "
-        f"recorded (RoE appended) — §0 is SATISFIED, do not re-ask. Invoke the redstrike orchestrator "
-        f"skill and work the recon phase and non-destructive analysis end to end, gating per the appended "
-        f"AUTONOMOUS rules: STOP and summarize at any approval-gated / destructive step instead of proceeding."
+        f"Autonomously run Redstrike engagement '{engagement_id}' END TO END within scope. Authorization "
+        f"and scope are recorded (RoE appended) — §0 is SATISFIED, do not re-ask. Invoke the redstrike "
+        f"orchestrator skill and drive the WHOLE pipeline, not just recon: run recon and build the "
+        f"coverage, surface, and notebook ledgers; then hunt EVERY routed/pending vulnerability category "
+        f"with non-destructive detection and a benign PoC (xss, sqli, idor, ssrf, and the rest), each via "
+        f"its context feeder and gated by its independent *-verify reviewer subagent; re-converge and run "
+        f"the recall-audit; then chain accepted findings and assemble the report. Do NOT stop after recon. "
+        f"Only the genuinely approval-gated phases (exploitation / post-exploitation / RCE / destructive) "
+        f"are gated: when such a step is not pre-allowed it DEFERS for operator approval — record it, skip "
+        f"it for now, and CONTINUE other in-scope work; a deferral is the intended gate, never a reason to "
+        f"halt the run. Anything out of scope or outside the window is a HARD STOP. This may be the first "
+        f"pass or a resumed session — pick up from the current ledger / notebook state either way."
     )
 
 
