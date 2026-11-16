@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -105,7 +106,7 @@ class TestConsole(unittest.TestCase):
                 ])
             out = buf.getvalue()
             self.assertEqual(rc, 0, out)
-            self.assertIn("scripts/console.py", out)
+            self.assertIn(os.path.join("scripts", "console.py"), out)
             self.assertIn("--background", out)
             self.assertIn("--open", out)
             self.assertIn(str(repo / "engagements"), out)

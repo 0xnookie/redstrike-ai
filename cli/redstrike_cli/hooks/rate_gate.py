@@ -58,11 +58,17 @@ except ImportError:  # as a plain script (hook run by path, no package context)
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import scope_gate as sg  # type: ignore
 
-# POSIX advisory locking; absent on non-POSIX → degrade to best-effort (no cross-process lock).
+# POSIX advisory locking; absent on non-POSIX (e.g. native Windows) → fall back to msvcrt
+# byte-range locking below, and only if neither is present degrade to best-effort.
 try:
     import fcntl  # type: ignore
 except ImportError:  # pragma: no cover - platform dependent
     fcntl = None  # type: ignore
+
+try:
+    import msvcrt  # type: ignore
+except ImportError:  # pragma: no cover - platform dependent
+    msvcrt = None  # type: ignore
 
 # --- tunables (overridable via CLI / scope rules) ---------------------------
 WINDOW_SEC = 1.0           # sliding window the rps budget is measured over
@@ -251,26 +257,49 @@ def _save_state(fh, state: dict) -> None:
     os.fsync(fh.fileno())
 
 
+# Byte region (at offset 0) the Windows msvcrt lock contends on; one byte is enough — every
+# process locks the same region, so the read-modify-write serializes. Locking past EOF is legal.
+_LOCK_BYTES = 1
+
+
+def _lock(fh) -> None:
+    """Take an exclusive cross-process lock on the open state file (POSIX flock or Windows msvcrt)."""
+    if fcntl is not None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    elif msvcrt is not None:
+        fh.seek(0)
+        # LK_LOCK blocks (retries ~10x/1s) until the region is free, matching flock(LOCK_EX).
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, _LOCK_BYTES)
+
+
+def _unlock(fh) -> None:
+    """Release the lock taken by `_lock` (unlock the same offset-0 region)."""
+    if fcntl is not None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    elif msvcrt is not None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, _LOCK_BYTES)
+
+
 def with_state(state_path: Path, fn):
     """Open state under an exclusive advisory lock, hand the dict to `fn`, persist the result.
 
     `fn(state) -> (return_value, mutated_state)`. The lock serializes the read-modify-write so
-    parallel hook processes can't clobber each other's counters. Degrades to best-effort when
-    `fcntl` is unavailable.
+    parallel hook processes can't clobber each other's counters. Uses POSIX `fcntl` where
+    available and Windows `msvcrt` byte-range locking otherwise; degrades to best-effort only
+    when neither is present.
     """
     state_path.parent.mkdir(parents=True, exist_ok=True)
     # a+ so the file is created if missing and we can read then rewrite
     with open(state_path, "a+", encoding="utf-8") as fh:
-        if fcntl is not None:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        _lock(fh)
         try:
             state = _load_state(fh)
             result, new_state = fn(state)
             _save_state(fh, new_state)
             return result
         finally:
-            if fcntl is not None:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            _unlock(fh)
 
 
 # --- rps resolution ---------------------------------------------------------
