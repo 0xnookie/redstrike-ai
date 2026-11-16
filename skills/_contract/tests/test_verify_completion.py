@@ -948,7 +948,9 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
             self.assertFalse(payload["pass"], payload)
             self.assertTrue(any("sink:dom-backlink" in e for e in payload["integrity_errors"]))
 
-    def test_inbox_out_of_enum_kind_fails(self):
+    def test_inbox_content_kind_is_a_followup_not_an_error(self):
+        # fix #5: a `content` discovery (sitemap/robots/API schema) in the inbox is a legitimate reroute to
+        # content-discovery, NOT corruption — it must not hard-fail the coordination-integrity gate.
         with tempfile.TemporaryDirectory() as d:
             eng, _l, _s = self._clean_report_eng(d)
             (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
@@ -956,8 +958,18 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
                 json.dumps({"source": "x", "surface": [{"kind": "content", "value": "/sitemap.xml"}]}) + "\n",
                 encoding="utf-8")
             payload = self._run(eng)
+            self.assertEqual(payload["integrity_errors"], [], payload)
+
+    def test_inbox_truly_unknown_kind_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "x", "surface": [{"kind": "bogus-kind", "value": "/x"}]}) + "\n",
+                encoding="utf-8")
+            payload = self._run(eng)
             self.assertFalse(payload["pass"], payload)
-            self.assertTrue(any("content" in e for e in payload["integrity_errors"]))
+            self.assertTrue(any("bogus-kind" in e for e in payload["integrity_errors"]))
 
     def test_surface_ledger_out_of_enum_kind_fails(self):
         with tempfile.TemporaryDirectory() as d:

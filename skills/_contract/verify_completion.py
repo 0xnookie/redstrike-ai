@@ -491,6 +491,18 @@ def _surface_kind_enum() -> set:
         return set()
 
 
+def _followup_surface_kinds() -> set:
+    """Recognized NON-testable 'follow-up' surface kinds (surface.FOLLOWUP_ROUTES; e.g. `content`). These are
+    legitimate in the re-convergence inbox — a content sitemap/robots/API-schema discovery routed BACK to
+    content-discovery for URL/object-ref extraction (fix #5) — so the inbox-integrity gate does NOT treat
+    them as corruption. They are still NOT valid surface-LEDGER elements (the ledger stays strict)."""
+    sf = _try_import_surface()
+    try:
+        return set(sf.FOLLOWUP_ROUTES) if sf else set()
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 def _coordination_integrity_errors(eng: Path) -> list:
     """HARD coordination-artifact integrity gate — active only once a report exists.
 
@@ -506,6 +518,7 @@ def _coordination_integrity_errors(eng: Path) -> list:
         return []
     vocab = _routing_signal_vocab()
     kinds = _surface_kind_enum()
+    followups = _followup_surface_kinds()  # content & co. are legitimate inbox reroutes, not corruption (fix #5)
     errs = []
 
     inbox = eng / "reconvergence" / "inbox.jsonl"
@@ -525,7 +538,8 @@ def _coordination_integrity_errors(eng: Path) -> list:
                 bad_sig |= {str(s) for s in (rec.get("signals") or []) if str(s) not in vocab}
             if kinds:
                 bad_kind |= {str((it or {}).get("kind")) for it in (rec.get("surface") or [])
-                             if (it or {}).get("kind") and (it or {}).get("kind") not in kinds}
+                             if (it or {}).get("kind") and (it or {}).get("kind") not in kinds
+                             and (it or {}).get("kind") not in followups}
         if bad_sig:
             errs.append("coordination-integrity gate (report present): reconvergence/inbox.jsonl carries "
                         f"out-of-vocab signal(s) {sorted(bad_sig)} not in routing-map.json — quarantine them "

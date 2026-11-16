@@ -135,6 +135,9 @@ classes that new signal/surface routes to back to `pending` and folds the delta 
 those re-opened classes against the new surface** → repeat until `reconverge.py --validate` passes (the
 fixpoint — a pass that adds nothing new). A new signal that matches an **out-of-phase** class (e.g.
 `asset:smart-contract` ⇒ web3) is a `replan_candidate` for YOU to decide on (scope), never auto-activated.
+A **`content`-kind** discovery (a sitemap/robots/API schema) is NOT a testable surface element and is never
+dropped: `--apply` routes it to `reconvergence/content_followups.jsonl` for **content-discovery** to re-run
+URL/object-ref extraction over it (the extracted endpoints/params then flow back as normal surface).
 Once a report exists over a non-empty inbox that hasn't re-converged, `verify_completion.py` hard-fails.
 See `skills/_contract/reconvergence.md`. This is breadth DISCOVERED DURING the hunt — the symmetric control
 to the escalation ladder (depth) and the surface ledger (recon-time breadth).
