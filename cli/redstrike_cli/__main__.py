@@ -235,6 +235,13 @@ def maybe_launch_console(args, repo: Path) -> None:
         print("  tip: view results in the web console — `redstrike console`")
 
 
+def _warn_scope_integrity(prep) -> None:
+    """Surface a scope.yaml drift (vs the fingerprint acknowledged at init) before launch."""
+    w = getattr(prep, "scope_integrity_warning", "")
+    if w:
+        print(ui.warn(w))
+
+
 def _warn_no_sandbox() -> None:
     """Promote the 'no OS sandbox / network confinement OFF' check to a visible banner on the run
     path (not just buried in `doctor`): without the OS sandbox, the scope gate is the only boundary."""
@@ -311,6 +318,7 @@ def cmd_run(args, repo: Path) -> int:
 
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
+    _warn_scope_integrity(prep)
 
     problems = engine.gate(prep)
     if problems:
@@ -365,6 +373,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
 
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
+    _warn_scope_integrity(prep)
     # Flag --allow globs broad enough to run active-exploit commands with no per-command deferral,
     # i.e. that would bypass the autonomous approval gate for the highest-impact classes.
     for w in settingsmod.broad_allow_warnings(extra_allow):

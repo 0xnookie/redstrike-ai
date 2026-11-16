@@ -7,6 +7,7 @@ which the RoE/skill treats as the §0 go-ahead — and which the agent is denied
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -83,6 +84,9 @@ def scaffold(repo_root: Path, fields: dict, *, operator: str, force: bool = Fals
         "operator": operator,
         "confirmed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "confirmation": "operator asserted written authorization is on file at launcher init",
+        # The operator-acknowledged fingerprint of the canonical scope.yaml at init. The launcher
+        # verifies the live scope.yaml against this at every run (a drift is surfaced, not silent).
+        "scope_sha256": hashlib.sha256((eng_dir / "scope.yaml").read_bytes()).hexdigest(),
         "cli_version": __version__,
     }
     (eng_dir / "runtime" / "authorization.json").write_text(

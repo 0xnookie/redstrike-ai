@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -191,6 +192,50 @@ class TestSandboxBanner(unittest.TestCase):
                  redirect_stdout(buf):
                 main(["--repo", str(repo), "--no-color", "--no-banner", "run", eid, "--dry-run"])
             self.assertNotIn("network confinement", buf.getvalue())
+
+
+class TestScopeIntegrity(unittest.TestCase):
+    def _scaffold(self, repo: pathlib.Path) -> pathlib.Path:
+        (repo / "engagements").mkdir()
+        fields = engagement.build_fields(client="Acme", authorized_by="sec@acme", domains=["*.acme.com"])
+        engagement.scaffold(repo, fields, operator="t")
+        return repo / "engagements" / fields["engagement"]
+
+    def test_scaffold_records_acknowledged_sha(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._scaffold(pathlib.Path(d))
+            auth = json.loads((eng / "runtime" / "authorization.json").read_text(encoding="utf-8"))
+            expected = hashlib.sha256((eng / "scope.yaml").read_bytes()).hexdigest()
+            self.assertEqual(auth["scope_sha256"], expected)
+
+    def test_prepare_no_warning_when_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = self._scaffold(repo)
+            prep = launch.prepare_runtime(eng, repo, sys.executable)
+            self.assertEqual(prep.scope_integrity_warning, "")
+            self.assertTrue(prep.scope_sha256)
+
+    def test_prepare_warns_on_scope_drift(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = self._scaffold(repo)
+            p = eng / "scope.yaml"
+            p.write_text(p.read_text(encoding="utf-8") + "\n# an edit after acknowledgment\n", encoding="utf-8")
+            prep = launch.prepare_runtime(eng, repo, sys.executable)
+            self.assertIn("CHANGED", prep.scope_integrity_warning)
+
+    def test_no_baseline_is_not_flagged(self):
+        # an engagement with no recorded scope_sha256 (pre-integrity) must not be falsely flagged
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = self._scaffold(repo)
+            auth_path = eng / "runtime" / "authorization.json"
+            auth = json.loads(auth_path.read_text(encoding="utf-8"))
+            auth.pop("scope_sha256", None)
+            auth_path.write_text(json.dumps(auth), encoding="utf-8")
+            prep = launch.prepare_runtime(eng, repo, sys.executable)
+            self.assertEqual(prep.scope_integrity_warning, "")
 
 
 class TestCoverageWiring(unittest.TestCase):
