@@ -48,6 +48,40 @@ stays in the Tier-1 skill.)
 7. **Package** — `reporting` + per-finding submission drafts in `submissions/`, each meeting
    `bug-bounty/refs/report_quality.md`. Submitting is outward-facing → DRAFTS a human sends.
 
+## Hypothesis-driven depth (the layer ABOVE the ladder floor)
+The deterministic escalation ladder (`escalation.md`) is the **FLOOR** — every high-prior surface owes
+it **in full**, unchanged. Hypothesis-driven depth is the **layer above** it: the target-specific
+reasoning the generic ladder cannot encode. This section governs only the **STRUCTURE and LOGGING of
+that reasoning** — it adds **no new payloads or techniques** (the probes stay within the class
+executors' existing benign repertoire).
+
+Once the ladder floor is exhausted on a **high-value surface**, form **target-specific hypotheses** from
+what you actually OBSERVED (a timing wobble, a leaked error string, a response differential, a header or
+framework quirk, a stack fingerprint). A hypothesis is a concrete, **falsifiable** claim about how *this*
+target might break — and each one is logged as a structured record in **`hypotheses.jsonl`**
+(**hypothesis → test → outcome**):
+
+```json
+{"id":"H-1","surface":"GET /api/items?sort=","class":"sqli",
+ "observed":"a stray quote in sort= returns a DB error fragment",
+ "hypothesis":"sort= is concatenated into an ORDER BY clause unsanitized",
+ "test":"benign: compare row order for sort=1 vs sort=(select 1) and watch the error",
+ "outcome":"confirmed|refuted|unresolved",
+ "evidence_ref":"findings/evidence/H-1.txt","resulted_in":"RS-2026-014"}
+```
+
+Resolve every record:
+- **confirmed** → drive it to a finding (or back into the ladder) with the cited evidence.
+- **refuted** → a ruled-out-WITH-evidence close (`counterevidence.md`), never a silent drop.
+- **unresolved** (couldn't test, blocked, out of budget) → it is an **open-proof-gap**, NOT a clean
+  negative. A surface that still carries an unresolved hypothesis **cannot be closed as clean** — it is a
+  depth gap the recall altitude will catch (`verify-base.md` check #5). Record the blocker, don't bury it.
+
+This is the depth counterpart to the `strategist` budget: a `standard`/`deep` budget is the invitation
+to spend effort HERE after the floor; a `floor` budget still owes the floor and still logs any
+hypothesis it could not resolve. Budget tunes how much hypothesis work is worth — it never excuses an
+unresolved one reading as a clear.
+
 ## What a per-hunter `SKILL.md` MUST specify (the thin CLASS BLOCK — the only ~20% that differs)
 - **class** — the vuln class this hunter owns.
 - **recon surface** — the Tier-1 recon that matters for the class (XSS → `js-analysis` DOM sinks +
@@ -60,7 +94,8 @@ stays in the Tier-1 skill.)
 Everything else (steps 0–7, outputs, safety) is inherited from here — keep each `*-hunter` thin.
 
 ## Shared outputs (same shape as bug-bounty, so `status` / `verify` tooling is uniform)
-`program_scope.json` · `hunt_plan.md` · `submissions/` · `summary.md` · `logs/`
+`program_scope.json` · `hunt_plan.md` · `hypotheses.jsonl` (hypothesis → test → outcome; an
+unresolved record is an open-proof-gap) · `submissions/` · `summary.md` · `logs/`
 
 ## Safety
 A hunter is as STRICT as bug-bounty: pin to the program's scope + rules absolutely; only submit
