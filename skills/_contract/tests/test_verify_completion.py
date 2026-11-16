@@ -545,6 +545,56 @@ class TestCoverageHardGate(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Duplicate finding-id gate: ids must be engagement-unique once a report exists
+# --------------------------------------------------------------------------- #
+class TestDuplicateIdGate(unittest.TestCase):
+    def _with_report(self, eng):
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": []}), encoding="utf-8")
+
+    def test_helper_silent_without_report(self):
+        """Mid-hunt (no consolidated report): duplicate ids must NOT fail — behavior unchanged."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self.assertEqual(vc._duplicate_id_errors(eng, [valid_finding(), valid_finding()]), [])
+
+    def test_helper_flags_duplicate_with_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._with_report(eng)
+            errs = vc._duplicate_id_errors(eng, [valid_finding(), valid_finding()])
+            self.assertTrue(errs)
+            self.assertIn("RS-2026-001", errs[0])
+
+    def test_helper_unique_ids_ok_with_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._with_report(eng)
+            errs = vc._duplicate_id_errors(
+                eng, [valid_finding(), valid_finding(id="RS-2026-002")])
+            self.assertEqual(errs, [])
+
+    def test_validate_engagement_flags_duplicate_across_skills(self):
+        """Two per-skill findings.json emitting the same id, a report present => HARD fail."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f1, f2 = valid_finding(), valid_finding()  # same default id
+            write_evidence(eng, f1)
+            (eng / "a").mkdir(); (eng / "b").mkdir()
+            (eng / "a" / "findings.json").write_text(json.dumps([f1]), encoding="utf-8")
+            (eng / "b" / "findings.json").write_text(json.dumps([f2]), encoding="utf-8")
+            self._with_report(eng)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["pass"], buf.getvalue())
+            self.assertTrue(payload["duplicate_id_errors"])
+
+
+# --------------------------------------------------------------------------- #
 # E4: cve_intel schema reconciliation (cves|entries drift) + manifest wiring
 # --------------------------------------------------------------------------- #
 class TestCveIntelSchema(unittest.TestCase):

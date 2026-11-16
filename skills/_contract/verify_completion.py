@@ -37,6 +37,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 FENCE_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -419,6 +420,25 @@ def _reconverge_hard_errors(eng: Path) -> list:
         return []
 
 
+def _duplicate_id_errors(eng: Path, findings: list) -> list:
+    """HARD duplicate finding-id gate — active only once a consolidated report exists.
+
+    Finding ids must be engagement-unique (RS-YYYY-NNN). While the hunt is in progress an id can
+    legitimately be in flux, so this stays silent. But once `report/findings_consolidated.json` exists
+    the engagement is claiming DONE, and a report cannot honestly ship with two findings sharing an id —
+    aggregated across the per-skill */findings.json files, a collision silently collapses/confuses the
+    consolidated report. Mirrors the coverage hard-gate: no report → no gate.
+
+    Returns one error per duplicated id (with its occurrence count); [] when no report is present."""
+    if not _report_present(eng):
+        return []
+    counts = Counter(f.get("id") for f in findings
+                     if isinstance(f, dict) and f.get("id"))
+    return [f"duplicate finding id '{fid}' appears {n}x across the engagement's findings "
+            f"(ids must be engagement-unique)"
+            for fid, n in sorted(counts.items()) if n > 1]
+
+
 def _asset_host(asset: str) -> str:
     """Best-effort registrable host from an asset URL/endpoint (for a soft scope check)."""
     s = re.sub(r"^[a-z]+://", "", str(asset)).strip()
@@ -729,6 +749,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     review_errors, review_warns = _independent_review_check(eng, findings)
     top_warnings.extend(review_warns)
 
+    # Duplicate finding-id gate: HARD once a report exists (ids must be engagement-unique); silent before.
+    dup_errors = _duplicate_id_errors(eng, findings)
+
     results = []
     for f in findings:
         ok, detail, warns = check_finding(f, eng, scope_text, cvss_mod, verdict_ids)
@@ -768,13 +791,14 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
 
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
-    gate_ok = (not failed) and (not coverage_errors) and (not review_errors)
+    gate_ok = (not failed) and (not coverage_errors) and (not review_errors) and (not dup_errors)
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
                           "findings_checked": len(results), "failed": len(failed),
                           "coverage_errors": coverage_errors,
                           "review_errors": review_errors,
+                          "duplicate_id_errors": dup_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -790,6 +814,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("\n✗ independent-review gate FAILED (a finding reached reporting without an independent reviewer):")
             for re_ in review_errors:
                 print(f"  - {re_}")
+        if dup_errors:
+            print("\n✗ duplicate finding-id gate FAILED (a report is present, so ids must be engagement-unique):")
+            for de in dup_errors:
+                print(f"  - {de}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -802,7 +830,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         verdict = "PASS" if gate_ok else "FAIL"
         print(f"\n{verdict}: {len(results) - len(failed)}/{len(results)} finding(s) pass hard checks; "
               f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
-              f"{len(review_errors)} independent-review error(s), {len(all_warnings)} warning(s).")
+              f"{len(review_errors)} independent-review error(s), {len(dup_errors)} duplicate-id error(s), "
+              f"{len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -811,6 +840,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         if review_errors:
             print("A reportable finding was self-/orchestrator-verified => route it to its independent <class>-verify "
                   "reviewer, or record an explicit operator-accept in reviews/self_verified_accepts.json before reporting.")
+        if dup_errors:
+            print("Two findings share an id => give each a unique RS-YYYY-NNN before reporting.")
     return gate_ok
 
 
