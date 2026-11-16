@@ -563,12 +563,19 @@ def _coordination_integrity_errors(eng: Path) -> list:
     if cl.is_file() and vocab:
         try:
             cov = json.loads(cl.read_text(encoding="utf-8"))
-            bad = sorted({str(s) for s in (cov.get("signals_used") or []) if str(s) not in vocab})
         except Exception:  # noqa: BLE001
-            bad = []
+            cov = {}
+        bad = sorted({str(s) for s in (cov.get("signals_used") or []) if str(s) not in vocab})
         if bad:
             errs.append("coordination-integrity gate (report present): coverage_ledger.json signals_used has "
                         f"out-of-vocab signal(s) {bad} not in routing-map.json (a folded-in invalid signal)")
+        # triggers_matched is the OTHER place a coverage entry holds signals; a hand-edit / fold-in could slip
+        # an out-of-vocab token in here too (routes to nothing, masks the real reason the category ran).
+        bad_tm = sorted({str(s) for c in (cov.get("categories") or []) if isinstance(c, dict)
+                         for s in (c.get("triggers_matched") or []) if str(s) not in vocab})
+        if bad_tm:
+            errs.append("coordination-integrity gate (report present): coverage_ledger.json triggers_matched has "
+                        f"out-of-vocab signal(s) {bad_tm} not in routing-map.json (a folded-in invalid signal)")
     return errs
 
 

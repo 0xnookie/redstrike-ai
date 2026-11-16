@@ -112,6 +112,14 @@ Human-readable mirror of the map:
 - plus as triggered: `csrf`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `business-logic`, `supply-chain`
 - **AI/LLM** (chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
 
+**Ledger-writer discipline (HARD).** The coverage, surface and re-convergence ledgers are written ONLY by
+their scripts (`scripts/coverage.py`, `scripts/surface.py`, `scripts/reconverge.py`) — **never hand-edit the
+JSON.** The scripts enforce the status/kind enums and the closed signal vocabulary at write time; a
+hand-edit bypasses that and can fold an out-of-vocab signal or non-enum surface kind into a ledger, where it
+routes to nothing and masks a recall gap. Once a report exists, `verify_completion.py`'s
+coordination-integrity gate HARD-fails on exactly that — an out-of-vocab signal in `signals_used` /
+`triggers_matched` / the inbox, or a non-enum surface kind in the ledger/inbox.
+
 **c. Gate on coverage.** `python scripts/coverage.py --validate --engagement <dir>` must pass before
 reporting: every map category is accounted for and **nothing is left `pending`**. Once a consolidated
 report exists, `verify_completion.py --engagement` HARD-FAILS on any unaccounted category.

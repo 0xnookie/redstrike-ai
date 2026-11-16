@@ -990,6 +990,18 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
             self.assertFalse(payload["pass"], payload)
             self.assertTrue(any("signals_used" in e for e in payload["integrity_errors"]))
 
+    def test_coverage_triggers_matched_out_of_vocab_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, led, _s = self._clean_report_eng(d)
+            for c in led["categories"]:
+                if c["id"] == "xss":
+                    c["triggers_matched"] = ["sink:dom-backlink"]  # out-of-vocab folded into a category entry
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("triggers_matched" in e and "sink:dom-backlink" in e
+                                for e in payload["integrity_errors"]))
+
     def test_no_report_integrity_is_silent(self):
         """Mid-hunt (no consolidated report): a malformed inbox must NOT fail the gate."""
         with tempfile.TemporaryDirectory() as d:
