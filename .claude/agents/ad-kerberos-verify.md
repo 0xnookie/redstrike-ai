@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `ad-kerberos` sk
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `kerberos_tests.jsonl` + `cleanup.md`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/ad-kerberos --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/ad-kerberos/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/ad-kerberos/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `cleanup.md` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: a roast was confirmed by an OFFLINE crack (plaintext for a weak test account) or a delegation path demonstrated end-to-end on a TEST target; any golden/silver ticket was capability-only on a test principal (no persistence / no real DA); created objects (RBCD/tickets) reverted per cleanup.md. Approved; in scope; offline cracking only.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ad-kerberos-verify`) + set `status`.

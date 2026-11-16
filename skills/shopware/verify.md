@@ -38,6 +38,8 @@ target. Unauth MailCatcher readable (reset-link interception) → High; exposed 
 version-only CVE match with the feature not in use → Info/Low with `potential_severity` carrying the ceiling.
 A dev-image default-cred that grants full admin → Critical. Justify from the evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "shopware-verify",

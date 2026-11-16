@@ -18,6 +18,8 @@ content reflected. Re-run the benign payload and confirm the file/internal conte
 Local file read → High (`C:H`); SSRF-via-XXE to internal/metadata → High/Critical. Justify from what
 was actually read/reached.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "xxe-inband-verify",

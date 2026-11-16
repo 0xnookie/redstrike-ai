@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `ad-initial-acce
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/ad-initial-access --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/ad-initial-access/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/ad-initial-access/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. Decisive: a **valid credential was actually
    obtained** (NetNTLMv2 cracked offline to a real/test account, or a spray hit confirmed with one benign

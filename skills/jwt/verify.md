@@ -25,6 +25,8 @@ tampered. Re-send the forged token and confirm authed access.
 Signature bypass / privilege forge → High/Critical (auth bypass / account takeover). Justify from the
 accepted-token evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "jwt-verify",

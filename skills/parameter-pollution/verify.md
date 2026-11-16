@@ -21,6 +21,8 @@ security-relevant decision via a parser discrepancy. Re-run the benign payload.
 Authn/authz bypass → High/Critical; payment/price manipulation or WAF bypass enabling a Critical bug →
 High; rate-limit/validation bypass → Medium. Rate from the decision that changed.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "parameter-pollution-verify",

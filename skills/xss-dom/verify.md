@@ -39,6 +39,8 @@ reflected. Raise only with evidence — e.g. a prototype-pollution gadget chain 
 higher-impact sink, or `S:C` on a context jump. No interaction at all (auto-firing source) may
 drop `UI:R` — justify from the trace.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {

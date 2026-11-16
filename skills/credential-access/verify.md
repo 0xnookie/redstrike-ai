@@ -19,6 +19,8 @@ benignly with the secret redacted. Re-run the benign proof.
 ## CVSS integrity
 Rate from what the credential unlocks (its reuse/reach), not merely that a hash was crackable.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "credential-access-verify",

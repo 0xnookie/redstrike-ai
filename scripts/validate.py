@@ -477,6 +477,10 @@ for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_c
     for verdict in ("accepted", "blocked", "rejected", "needs-evidence"):
         if verdict not in verify_text:
             err(f"{sk.name}/verify.md: verdict template is missing the '{verdict}' verdict")
+    # reviewer rigor: the CVSS step must tell the reviewer to COMPUTE Medium+ vectors with scripts/cvss.py
+    # (don't hand-assert the score). A drift guard for the P2-4 sweep.
+    if "scripts/cvss.py" not in verify_text:
+        err(f"{sk.name}/verify.md: CVSS step must reference scripts/cvss.py (compute Medium+ vectors)")
 
 # 13 — binding symmetry: every executor's verify.md must have a matching .claude/agents/<x>-verify.md
 # reviewer, and every <x>-verify reviewer must have a matching executor — no orphan on either side.
@@ -536,6 +540,17 @@ else:
             err(f"README count gate: can't find the '{_label}' number (pattern {_pat!r})")
         elif int(_m.group(1)) != _expected:
             err(f"README count gate: {_label} says {_m.group(1)} but the repo has {_expected}")
+
+# 16 — reviewer-rigor lint: every `*-verify` agent's load list must include the shared counterevidence +
+# severity-calibration rubric files, so the reviewer loads them up front (not just transitively). Drift
+# guard for the P2-4 sweep.
+if agents_dir.is_dir():
+    for a in sorted(agents_dir.glob("*-verify.md")):
+        checked["reviewer_rigor"] = checked.get("reviewer_rigor", 0) + 1
+        atext = a.read_text(encoding="utf-8", errors="replace")
+        for ref in ("counterevidence.md", "severity-calibration.md"):
+            if ref not in atext:
+                err(f".claude/agents/{a.name}: reviewer must load skills/_contract/{ref}")
 
 # report
 print("Redstrike validate.py")

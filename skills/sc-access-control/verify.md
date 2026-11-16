@@ -23,6 +23,8 @@ Rate by what the unauthorized caller can actually do: drain/mint/seize funds or 
 change privileged config / pause / set fees → High/Medium. Recompute from the demonstrated effect + $ impact;
 flag inflation (e.g. an owner-only function that's actually owner-gated).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-access-control-verify",

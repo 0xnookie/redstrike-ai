@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `ai-supply-chain
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/ai-supply-chain --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/ai-supply-chain/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/ai-supply-chain/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. Decisive: **load-time code execution is proven**
    — a TEST model's `__reduce__` / Lambda fired an attributable OOB callback when loaded in a sandbox, OR a

@@ -21,6 +21,8 @@ This is high-risk; the reviewer also guards that confirmation did not harm real 
 Request smuggling is typically High/Critical (`S:C`, affects other users / infra). Justify from the
 confirmed class + plausible impact; don't rate a non-reproducible timing blip.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "request-smuggling-verify",

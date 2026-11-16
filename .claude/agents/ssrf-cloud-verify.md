@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `ssrf-cloud` ski
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `metadata_probes.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/ssrf-cloud --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/ssrf-cloud/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/ssrf-cloud/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `metadata_probes.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: metadata reached THROUGH the sink (server-side) AND sensitive creds/token actually retrieved (REDACTED in artifacts) → Critical. If IMDSv2 was enforced and the sink couldn't PUT-token, metadata is effectively blocked → down-rate / `needs-evidence`. Verify creds were NOT used to touch cloud resources; scope + approval.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ssrf-cloud-verify`) + set `status`.

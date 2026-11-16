@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `sc-reentrancy` 
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `checks.jsonl` + `repro.sh`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/sc-reentrancy --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/sc-reentrancy/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/sc-reentrancy/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/PoC file + the referenced contract source.
 4. Apply the 7 base checks + the gauntlet. Decisive: an external call or controllable hook returned control to the attacker BEFORE the relevant state update (CEI violated / no `nonReentrant` on the FULL reachable path, not a gas-stipend `transfer()`/`send()`), an attacker contract re-entered and the drain/corruption was read back by before/after state on a **local fork** (no live-chain tx, no real funds moved), and it's genuinely reentrancy — reclassify pure accounting math → `sc-accounting`, price/oracle → `sc-oracle-mev`, missing authorization → `sc-access-control`. A read-only-reentrancy claim needs a concrete integrator impact, not a bare stale view. Re-run the Foundry fork PoC when feasible; recompute CVSS from the demonstrated drain + $ impact.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `sc-reentrancy-verify`) + set `status`.

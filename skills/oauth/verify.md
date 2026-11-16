@@ -20,6 +20,8 @@ enabled account takeover/linking. Re-run the flow and confirm the leak at the at
 ## CVSS integrity
 Account takeover via OAuth → Critical; token/code leak → High. Justify from the demonstrated leak/takeover.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "oauth-verify",

@@ -19,6 +19,8 @@ Run the 7 base checks + the clickjacking gauntlet. Confirmed = a SENSITIVE actio
 Usually Low–Medium, `UI:R` (requires victim interaction). Impact = the hijacked action. Don't rate a
 frameable info page as a vuln.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "clickjacking-verify",

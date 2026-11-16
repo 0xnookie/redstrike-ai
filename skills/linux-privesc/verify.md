@@ -18,6 +18,8 @@ in-scope host, cleaned up.
 Local privesc to root → High (`PR:L→`, local). Rate by the demonstrated escalation; note the path it
 enables (e.g. toward domain/other hosts). Justify from the root proof.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "linux-privesc-verify",

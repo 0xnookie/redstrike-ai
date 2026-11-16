@@ -21,6 +21,8 @@ Rate from the demonstrated bug class + reachability: a reachable memory-corrupti
 use-after-free) → High/Critical; a NULL-deref / assert DoS → Medium, unless remote + unauthenticated.
 Exploitability is assessed honestly (potential ≠ proven) — a weaponized PoC is `exploit-dev`'s job.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "fuzzing-verify",

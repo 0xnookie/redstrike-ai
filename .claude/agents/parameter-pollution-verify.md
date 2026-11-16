@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `parameter-pollu
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/parameter-pollution --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/parameter-pollution/verify.md` (the HPP gauntlet) + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/parameter-pollution/verify.md` (the HPP gauntlet) + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: a **security-relevant
    decision actually changed** (authz flag / identity / price / redirect / filter smuggle) because of the

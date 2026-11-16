@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `path-traversal-
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `traversal_tests.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/path-traversal-lfi --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/path-traversal-lfi/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/path-traversal-lfi/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the PoC returned the REAL content of a file OUTSIDE the app base dir (e.g. the host hostname) via a reproducible `../`/encoding bypass — not an intended file or echoed text. LFI-RCE claims need benign OOB/marker proof + approval; else report file-read severity.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `path-traversal-lfi-verify`) + set `status`.

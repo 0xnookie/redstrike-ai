@@ -31,6 +31,8 @@ mint via sig replay or `address(0)` auth bypass → Critical; replay of a lower-
 griefing-only permit front-run → High/Medium. Recompute from the demonstrated effect + $ impact; flag inflation
 (e.g. a sound nonce'd EIP-712 scheme reported as replayable).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-signature-verify",

@@ -19,6 +19,8 @@ with a recovered credential and ran a BENIGN command. Guard the benign + cleanup
 Lateral movement extending access (local admin on N hosts, path toward DA) → High/Critical. Justify from
 the hosts actually reached + privilege, not the theoretical domain ceiling.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-lateral-movement-verify",

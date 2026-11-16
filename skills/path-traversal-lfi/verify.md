@@ -17,6 +17,8 @@ was read. Re-run the benign payload and confirm the marker content.
 ## CVSS integrity
 Arbitrary file read → High (`C:H`); LFI-to-RCE confirmed → Critical. Justify from what was read/executed.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "path-traversal-lfi-verify",

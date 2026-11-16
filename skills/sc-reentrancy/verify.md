@@ -30,6 +30,8 @@ Critical; bounded or griefing-only corruption, or read-only reentrancy with limi
 High/Medium. Recompute from the demonstrated before/after effect + $ impact; flag inflation (e.g. a
 `reentrancy-benign`/`reentrancy-events` detector hit with no exploitable drain).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-reentrancy-verify",

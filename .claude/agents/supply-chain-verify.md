@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `supply-chain` s
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/supply-chain --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/supply-chain/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/supply-chain/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. Decisive: **the exposure is demonstrated**, not
    theoretical — the resolver provably preferred the attacker-named/higher-version TEST package (resolve/

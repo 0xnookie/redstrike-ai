@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `clickjacking` s
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `framing_tests.json`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/clickjacking --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/clickjacking/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/clickjacking/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the SENSITIVE route is frameable (no XFO/frame-ancestors or bypass) AND a state-changing action is reachable through the frame. Info/read-only pages ⇒ reject.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `clickjacking-verify`) + set `status`.

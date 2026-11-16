@@ -21,6 +21,8 @@ Run the 7 base checks + the secrets gauntlet. Confirmed = a REAL, LIVE, IMPACTFU
 Match the secret's real power + liveness. Live cloud/admin credential → High/Critical;
 unverified-but-likely → cap confidence at `probable`; revoked → Info.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "secrets-verify",

@@ -18,6 +18,8 @@ downstream sink. Re-run and confirm the downstream effect.
 Rate as the downstream vuln (LLM-output XSS → XSS severity; → SQLi/RCE → higher). The LLM makes it
 reachable by any user whose output is rendered — note the blast radius. Justify from the sink evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "llm-output-handling-verify",

@@ -17,6 +17,8 @@ benignly, secret redacted, no lockouts. Re-run the benign proof.
 ## CVSS integrity
 Rate from what the first credential enables (domain reach), and whether it was truly unauth→credential.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-initial-access-verify",

@@ -37,6 +37,8 @@ Stored typically outranks reflected: it often drops `UI:R` (fires on normal view
 authenticated app is commonly `AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:N`-ish — but **justify every
 elevation with the cross-user evidence**. Same-session-only ⇒ do not rate as stored.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {

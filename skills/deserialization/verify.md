@@ -19,6 +19,8 @@ attacker-controlled data, proven by a BENIGN gadget's OOB callback. Re-run the b
 Deserialization with confirmed RCE → Critical. Confirmed deserialization + feasible chain but no exec
 proof → High (note feasibility). Justify from the benign evidence; don't assume RCE without it.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "deserialization-verify",

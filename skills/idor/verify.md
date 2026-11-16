@@ -14,12 +14,20 @@ resource because the ownership check is missing. Re-run A's session against B's 
       resource has), not a coincidental same-shaped response.
 - [ ] **Mass-assignment (if claimed) took effect.** The privileged field the client set actually
       changed server state (e.g. `role` became admin) — verified by reading it back.
+- [ ] **Object vs function (reclassify).** If this is really function-level (any low-priv can call an
+      admin op, not a specific user's object), reclassify to `privesc`; an API object/function-authz bug
+      belongs to `bola-bfla`.
+- [ ] **Cross-skill dup (flag, don't merge).** The same authz gap may also be reported by `privesc` or
+      `bola-bfla`. You can't see sibling findings, so DON'T drop it — if it looks like the same bug, note it
+      in `review.notes` for reporting to merge.
 - [ ] **Test accounts; reversible; scope.** Both A and B are tester-controlled; any modification was
       on a test resource and reversible; in scope.
 
 ## CVSS integrity
 Horizontal access to another user's data → High (`C:H`); write/account-takeover via mass-assignment →
 Critical. Rate by what A could actually do to B's data.
+
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
 
 ## Verdict (write into each finding's review{} block)
 ```json

@@ -34,6 +34,8 @@ guarding a real admin area, on an affected version → Critical/High; a version-
 route, or a feature not in use → Info/Low with `potential_severity` carrying the version-matched ceiling.
 Justify from the evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "nextjs-verify",

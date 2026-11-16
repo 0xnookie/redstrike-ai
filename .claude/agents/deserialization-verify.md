@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `deserialization
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `deser_tests.jsonl` + `callbacks.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/deserialization --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/deserialization/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/deserialization/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `callbacks.jsonl`, `deser_tests.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: a BENIGN gadget (URLDNS/DNS-only) produced an attributable OOB callback from the server, proving attacker-controlled data was deserialized (a 500 on malformed input is NOT proof). RCE claims need a BENIGN OOB command gadget (approved) + a plausible chain given the libs; else report "deserialization of untrusted data (RCE-feasible)". Benign only; scope + approval.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `deserialization-verify`) + set `status`.

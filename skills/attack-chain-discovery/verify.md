@@ -21,6 +21,8 @@ Run the 7 base checks + the chain gauntlet on each chain in `findings.json`.
 Rate the end-to-end impact (often Critical — e.g. ATO). `demonstrated` carries full weight; `plausible`
 notes the assumption; `theoretical` is informational. Justify from the chain + evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "attack-chain-discovery-verify",

@@ -21,6 +21,8 @@ Rate the monitoring/control gap, not a hypothetical backdoor. Typically Mediumâ€
 reboot/credential-change undetected would give an attacker and how invisible it was. Justify from the
 re-trigger proof + the detectability note; reject inflation.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "persistence-verify",

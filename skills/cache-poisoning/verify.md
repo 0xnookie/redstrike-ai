@@ -20,6 +20,8 @@ response served to a DIFFERENT request. The cache HIT is the proof — re-fetch 
 Impact scales with blast radius (persistent cached XSS to all visitors → High/Critical). Cache
 deception of private data → per sensitivity. Justify from the confirmed hit + payload effect.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "cache-poisoning-verify",

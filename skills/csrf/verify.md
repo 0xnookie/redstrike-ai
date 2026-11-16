@@ -23,6 +23,8 @@ ambient creds — re-execute the PoC from an attacker origin in a victim session
 Rate by the action's impact (account takeover via email/password change → high; minor setting → low).
 Typically `AV:N/AC:L/PR:N/UI:R/S:U/...`. Justify from the confirmed change.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "csrf-verify",

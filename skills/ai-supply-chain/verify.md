@@ -22,6 +22,8 @@ confusable/typosquatted source. Re-run the benign proof.
 Rate from where the model code executes (inference/serving host, CI, every downstream loader) and the trust
 placed in the source — not merely that a dangerous opcode exists. Flag inflation.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ai-supply-chain-verify",

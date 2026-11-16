@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `linux-privesc` 
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `privesc_tests.jsonl` + `cleanup.md` + `enum.json`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/linux-privesc --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/linux-privesc/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/linux-privesc/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `cleanup.md` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: the PoC shows `id`=`uid=0(root)` obtained via the claimed misconfig (SUID+GTFOBins / sudo rule / writable cron / capability / group), reproducibly — not just that the misconfig exists; only a benign proof ran (no persistence/destruction/data-theft; a crash-risky kernel exploit should be feasibility-only); anything created is reverted per cleanup.md. In-scope host; approved.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `linux-privesc-verify`) + set `status`.

@@ -21,6 +21,8 @@ EXECUTED (OOB callback or controlled timing) — not reflected input. Re-run the
 Command injection = RCE → Critical (`S:C` likely). Justify from the benign execution proof; blind
 (timing-only) is still Critical if execution is reproducible.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "command-injection-verify",

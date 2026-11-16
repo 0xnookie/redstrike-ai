@@ -19,6 +19,8 @@ query (auth bypass or data differential). Re-run the benign payload.
 ## CVSS integrity
 Auth bypass → High/Critical; data extraction → High. Justify from the demonstrated manipulation.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "nosql-injection-verify",

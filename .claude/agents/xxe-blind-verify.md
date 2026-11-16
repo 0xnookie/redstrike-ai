@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `xxe-blind` skil
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `callbacks.jsonl` + `xxe_tests.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/xxe-blind --out OUT` (exit 0); else stop. (Empty `callbacks.jsonl` is a valid liveness pass but yields NO finding.)
-2. Load `skills/_contract/verify-base.md` + `skills/xxe-blind/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/xxe-blind/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `callbacks.jsonl`, `xxe_tests.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: an attributable OOB callback (token → sink, from target egress) proving the parser fetched the attacker external DTD/parameter-entity — a malformed-XML 500 is NOT proof. Any file-exfil claim shows the benign file's real content over OOB. Benign; no DoS; scope + approval.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `xxe-blind-verify`) + set `status`.

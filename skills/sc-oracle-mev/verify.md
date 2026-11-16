@@ -30,6 +30,8 @@ a short-lived mispricing under a deviation cap) → High/Medium. Recompute from 
 + pool depth; flag inflation (e.g. a feed that actually checks `updatedAt`/bounds, or a TWAP that resists a
 single-block move).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-oracle-mev-verify",

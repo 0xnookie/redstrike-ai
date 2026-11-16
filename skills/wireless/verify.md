@@ -23,6 +23,8 @@ benign proof where repeatable.
 Rate from what the recovered secret unlocks (network access, lateral reach, identity reuse) and the attacker
 preconditions (RF proximity, a willing/approved test client), not merely that a handshake was captured.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "wireless-verify",

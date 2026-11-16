@@ -19,6 +19,8 @@ BENIGNLY on an in-scope host, cleaned up.
 Local privesc to SYSTEM → High. Rate by the demonstrated escalation; note the path it enables (domain
 compromise if domain-joined → coordinate with `ad-*`). Justify from the SYSTEM proof.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "windows-privesc-verify",

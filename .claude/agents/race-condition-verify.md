@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `race-condition`
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/race-condition --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/race-condition/verify.md` (the race gauntlet) + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/race-condition/verify.md` (the race gauntlet) + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: an intended invariant
    **actually broke** (a single-use/limited action succeeded N>1, a balance/stock went inconsistent, a

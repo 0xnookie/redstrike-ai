@@ -21,6 +21,8 @@ attacker-controlled EXTERNAL origin — re-run with curl/browser and inspect whe
 Baseline open redirect ~`AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:N` (Low). Any High/Critical requires the
 chained-impact evidence (token theft shown, SSRF reaching internal, XSS executing). Reject inflation.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "open-redirect-verify",

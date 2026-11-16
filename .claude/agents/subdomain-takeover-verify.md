@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `subdomain-takeo
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `takeover_candidates.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files. You may re-resolve DNS / re-fetch the target via Bash to confirm.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/subdomain-takeover --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/subdomain-takeover/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/subdomain-takeover/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `takeover_candidates.jsonl` + evidence; optionally re-resolve the record.
 4. Apply the 7 base checks + the gauntlet. Decisive: the record is actually dangling AND the service fingerprint matches a KNOWN claimable state (not a generic 404/parked page) AND claimability is real. Confirm the subdomain is in scope and any actual claim was authorized.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `subdomain-takeover-verify`) + set `status`.

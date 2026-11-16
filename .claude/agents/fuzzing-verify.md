@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `fuzzing` skill 
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/fuzzing --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/fuzzing/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/fuzzing/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references (minimized input + sanitizer trace).
 4. For EACH finding, apply the 7 base checks + the gauntlet. Decisive: **the minimized input reproduces the
    fault on demand** (≥2 clean runs) with a sanitizer/debugger trace showing the faulting operation in the
