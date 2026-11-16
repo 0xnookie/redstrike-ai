@@ -84,7 +84,7 @@ gMSADumper.py -u <u> -p <p> -d <d>  ;  nxc ldap <dc> -u <u> -p <p> --gmsa       
 ```
 
 ═══════════════════════════════════════════════════════════════════════════
-## ad-adcs — ESC1-15 (issue a cert as a test principal, then REVOKE)
+## ad-adcs — ESC1-8 (issue a cert as a test principal, then REVOKE)
 ═══════════════════════════════════════════════════════════════════════════
 ```
 certipy find -u <u>@<d> -p <p> -dc-ip <dc>                               # enumerate templates + ESC flags

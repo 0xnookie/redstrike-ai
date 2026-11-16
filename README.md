@@ -133,7 +133,7 @@ Build order and the full spec live in [`skills/_contract/README.md`](skills/_con
 
 **Web3 / smart contract** ✅ (OWASP Smart Contract Top 10) — `web3-context` (contracts / proxy / surface + pre-dive worth-it score) → `sc-access-control` · `sc-upgradeability` · `sc-accounting` · `sc-oracle-mev` · `sc-reentrancy` · `sc-signature` — every finding proven on a **local Foundry fork** (no live tx, no real funds)
 
-**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-initial-access` · `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-15) · `ad-lateral-movement`
+**Active Directory** ✅ (internal / assumed-breach) — `ad-context` (BloodHound) → `ad-initial-access` · `ad-kerberos` · `ad-acl-abuse` · `ad-adcs` (ESC1-8) · `ad-lateral-movement`
 
 **Post-exploitation** ✅ — `linux-privesc` (linpeas-first) · `windows-privesc` (winPEAS-first) · `credential-access` · `persistence` · `container-escape` · `k8s-attacks` · `sccm-exploitation` · `cloud` (AWS/Azure/GCP metadata-cred theft · IAM privesc · public storage) — playbook-driven, approval-gated; benign-proof + cleanup
 
