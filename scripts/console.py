@@ -59,6 +59,7 @@ WANTED = {
     "content.json": ["content.json"],
     "http_history.json": ["http_history.json"],
     "notebook.json": ["notebook.json"],
+    "diagnostics.json": ["diagnostics.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -442,6 +443,28 @@ def coverage_progress(files: dict):
     return {"done": len(in_phase) - pending, "total": len(in_phase)}
 
 
+def diagnostics_summary(files: dict):
+    """Reliability summary from the latest diagnostics run (runtime/diagnostics.json): the run's
+    `outcome` + `degraded_reason` + overall transport status, so the console can surface a
+    degraded/blocked engagement ("produced nothing: <reason>") instead of a false green 100%.
+    None when no diagnostics file / no runs — the console then shows no reliability banner."""
+    diag = _read_json(files.get("diagnostics.json"))
+    runs = diag.get("runs") if isinstance(diag, dict) else None
+    if not isinstance(runs, list) or not runs or not isinstance(runs[-1], dict):
+        return None
+    run = runs[-1]
+    th = run.get("transport_health") if isinstance(run.get("transport_health"), dict) else {}
+    overall = th.get("overall") if isinstance(th.get("overall"), dict) else {}
+    return {
+        "outcome": run.get("outcome"),
+        "degraded_reason": run.get("degraded_reason"),
+        "findings_count": run.get("findings_count"),
+        "transport_status": overall.get("status"),
+        "worst_host": overall.get("worst_host"),
+        "block_rate": overall.get("block_rate"),
+    }
+
+
 def manifest_entries(target: Path) -> list:
     """One entry per discovered engagement — rebuilt live on each request, so a
     console left running reflects a scan that finished after launch."""
@@ -452,6 +475,7 @@ def manifest_entries(target: Path) -> list:
         scope = scope_for(eng)
         has = {k: (k in files) for k in WANTED}
         has["scope.json"] = scope is not None
+        diag = diagnostics_summary(files)
         entries.append({
             "id": eng.name,
             "scope": scope,
@@ -460,6 +484,9 @@ def manifest_entries(target: Path) -> list:
             "has": has,
             "run": run_info(eng),
             "progress": coverage_progress(files),
+            "outcome": (diag.get("outcome") if diag else None),
+            "degraded_reason": (diag.get("degraded_reason") if diag else None),
+            "diagnostics": diag,
         })
     return entries
 

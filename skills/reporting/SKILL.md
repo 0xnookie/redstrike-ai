@@ -29,6 +29,31 @@ missing ledger is a hard fail under `--strict` — plan it first (`coverage.py -
 deterministically: once `report/findings_consolidated.json` exists, `verify_completion.py --engagement`
 HARD-FAILS on any unaccounted category, so a report over silent gaps cannot pass the gate.
 
+## 0.5 Coverage & reliability — MANDATORY, drives the risk posture (empty ≠ clean)
+> Engagement-level reliability (did the testing actually reach the target?) — DISTINCT from the
+> finding-level "confirmed — demonstration limited" subsection in **Safety** (which is about one proven
+> bug whose full impact was gated). This section is about whether a CLEAN or empty result can be trusted.
+
+Read `runtime/diagnostics.json` (the run engine's per-engagement health log; use the **latest** `runs[]`
+entry — schema `skills/_contract/diagnostics.schema.json`, referenced read-only). It makes "we were
+blocked / produced nothing" visible, so a report never presents an inconclusive run as a clean bill of health.
+
+- **A clean result on a transport-`blocked` host is NOT "no issues found" — report it as "not assessed /
+  inconclusive."** When `transport_health` shows a host `classification: "blocked"` (a WAF/gateway blocked
+  a large share of requests, `block_rate`), the categories tested against it could not be exercised. The
+  completion gate already auto-marks those coverage categories `blocked` with a `transport:` reason; mirror
+  that in the report: list the affected host(s) and categories under a **"Coverage not achieved"** callout,
+  and state plainly that **absence of findings there is inconclusive, not an assurance.**
+- **This GATES the executive-summary risk posture.** Base the posture on the latest run's `outcome`:
+  - `produced-findings` → report normally (risk reflects the findings).
+  - `clean-tested` → a genuine clean result; "no issues found in the tested surface" is honest.
+  - `degraded-empty` / `failed` (or any transport-`blocked` host) → the headline is **"assessment
+    incomplete / inconclusive"**, quoting `degraded_reason` and the worst host's `block_rate`/`waf`.
+    **Never write "no issues found" / "no vulnerabilities identified" over a degraded or blocked run** —
+    that is the exact empty≠clean failure. Recommend a re-test of the un-reached surface.
+- A zero-finding report with no diagnostics outcome (or an unexplained empty) HARD-fails
+  `verify_completion.py --engagement` — so this is enforced deterministically, not left to prose.
+
 ## What do we want
 - Every `accepted` finding, de-duped (e.g. the same bug found by `idor` and `bola-bfla` = one entry)
 - Risk-ordered list (Critical→Info) with CVSS, affected asset, evidence refs, reproduction, impact, remediation, CWE/WSTG/ATT&CK
@@ -39,7 +64,7 @@ HARD-FAILS on any unaccounted category, so a report over silent gaps cannot pass
 2. Keep `review.verdict in {"accepted","blocked"}` (status `verified`); `blocked` is tagged for the caveat subsection · `jq` filter · (in memory)
 3. De-dupe across agents — run the DETERMINISTIC engine `python scripts/dedup.py --engagement <dir> --json`: it groups findings by canonical key (asset-host + normalized endpoint/param + vuln-class), keeps the strongest as primary, and marks the rest `status:"duplicate"` (excluded from counts). Use its merge map; don't eyeball the merge (same bug from `idor`+`bola-bfla`, `ssrf-inband`+`ssrf-cloud`, `exposed-surface`+`secrets` = one entry) · `scripts/dedup.py` · `findings_consolidated.json`
 4. Normalize severity/CVSS; order Critical→Info. Findings with `composite: true` (kill chains) are listed under an **Attack Chains** section and EXCLUDED from the severity counts — non-additive, they re-state already-counted components · `refs/report_template.md` · `findings_consolidated.json`
-5. Write per-finding sections (template) + executive summary · synth · `report.md`
+5. Write per-finding sections (template) + executive summary — the summary's **risk posture is gated by §0.5** (a degraded/blocked run reports as "assessment incomplete / inconclusive," never "no issues found") · synth · `report.md`
 6. Emit a short stats summary · synth · `summary.md`
 7. /REVIEW SKILL · `review.md`
 

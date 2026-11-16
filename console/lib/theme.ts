@@ -3,7 +3,7 @@
 // severity, verdict, coverage, status — so the console reads like a real pentest
 // console: calm monochrome shell, meaningful color where it carries information.
 
-import type { Severity, Verdict, Confidence, ChainFeasibility, AgentStatus, EngagementStatus } from "./types";
+import type { Severity, Verdict, Confidence, ChainFeasibility, AgentStatus, EngagementStatus, TransportClass } from "./types";
 
 /** foreground at a given alpha — for neutral, theme-adaptive accents. */
 export const ink = (a: number) => `rgb(var(--fg) / ${a})`;
@@ -58,6 +58,19 @@ export const COVERAGE = {
   "in-progress": { label: "In progress", color: "#f59e0b" },
   untested: { label: "Untested", color: "#64748b" },
 } as const;
+
+/** transport health (runtime/diagnostics.json) — could the run REACH the host at all.
+ *  A DISTINCT dimension/token ("transport-blocked"), deliberately NOT the finding-verdict "blocked"
+ *  amber (#f59e0b): a dedicated fuchsia hue so a WAF-blocked host never reads like a demonstration-
+ *  limited finding. Keyed by the transport classification. */
+export const TRANSPORT: Record<TransportClass, { label: string; color: string }> = {
+  healthy: { label: "Reachable", color: "#22c55e" },
+  degraded: { label: "Transport degraded", color: "#c084fc" },
+  blocked: { label: "Transport blocked", color: "#d946ef" },
+};
+export function transportMeta(s?: string) {
+  return TRANSPORT[(s as TransportClass) ?? "healthy"] ?? TRANSPORT.healthy;
+}
 
 /** kill-chain step roles (used by the chain graph). */
 export const ROLE_COLOR: Record<string, string> = {

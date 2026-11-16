@@ -1,20 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck } from "lucide-react";
+import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck, ShieldAlert } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { reportable, severityCounts, severityChartData, groupByCategory, groupByAsset, verificationStats, maxCvss } from "@/lib/stats";
-import { SEVERITY, VERDICT, sevMeta } from "@/lib/theme";
+import { SEVERITY, VERDICT, TRANSPORT, sevMeta, hexA } from "@/lib/theme";
 import { fmtDate, relTime, cx } from "@/lib/format";
 import { cvssScore } from "@/lib/cvss";
+import { fetchDiagnostics, latestRun } from "@/lib/data";
+import type { Diagnostics } from "@/lib/types";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead, LivePill, SeverityBadge, Pill } from "@/components/ui/primitives";
 import { AreaLine, Donut, Legend, Progress } from "@/components/ui/charts";
 import { CyberFeed } from "@/components/dashboard/CyberFeed";
 
 export default function DashboardPage() {
-  const { activeEngagement, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds } = useConsole();
+  const { activeEngagement, activeId, findings, chains, assets, activity, cveFeed, cveLive, openFinding, freshFindingIds } = useConsole();
   const [range, setRange] = useState<"all" | "window">("all");
+  // runtime/diagnostics.json is component-local (not carried by the shared store): fetch it for the
+  // active engagement so the reliability banner reflects the latest run.
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    fetchDiagnostics(activeId).then((d) => { if (live) setDiagnostics(d); });
+    return () => { live = false; };
+  }, [activeId]);
   const [sevHover, setSevHover] = useState<string | null>(null); // shared by the donut + its legend
 
   const rep = reportable(findings);
@@ -46,6 +56,26 @@ export default function DashboardPage() {
   const cats = useMemo(() => groupByCategory(rep).slice(0, 5), [rep]);
   const feed = useMemo(() => activity.slice().reverse().slice(0, 7), [activity]);
 
+  // Reliability banner (runtime/diagnostics.json): a degraded/blocked run must NOT read as a green 100%.
+  // Shown only when the latest run produced nothing for an environmental reason — empty ≠ clean.
+  const reliability = useMemo(() => {
+    const run = latestRun(diagnostics);
+    if (!run) return null;
+    const overall = run.transport_health?.overall;
+    const transportBlocked = overall?.status === "blocked";
+    const outcome = run.outcome;
+    if (!(transportBlocked || outcome === "degraded-empty" || outcome === "failed")) return null;
+    const color = transportBlocked ? TRANSPORT.blocked.color : outcome === "failed" ? "#ef4444" : TRANSPORT.degraded.color;
+    const headline = transportBlocked
+      ? "Transport blocked — produced nothing"
+      : outcome === "failed" ? "Run failed — produced nothing" : "Assessment degraded — produced nothing";
+    const reason = run.degraded_reason || "the run produced no findings for an environmental reason";
+    const meta = transportBlocked && overall?.worst_host
+      ? `${overall.worst_host}${overall.block_rate != null ? ` · ${Math.round((overall.block_rate ?? 0) * 100)}% blocked` : ""}`
+      : "";
+    return { color, headline, detail: meta ? `${reason} — ${meta}` : reason };
+  }, [diagnostics]);
+
   return (
     <>
       <ViewHead
@@ -65,6 +95,23 @@ export default function DashboardPage() {
           </>
         }
       />
+
+      {/* Reliability banner — a degraded/blocked run says "produced nothing", never a false green 100% */}
+      {reliability && (
+        <div
+          className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-3"
+          style={{ borderColor: hexA(reliability.color, "66"), background: hexA(reliability.color, "14") }}
+          role="status"
+        >
+          <ShieldAlert size={18} className="mt-0.5 shrink-0" style={{ color: reliability.color }} />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold" style={{ color: reliability.color }}>{reliability.headline}</div>
+            <div className="mt-0.5 text-[13px] text-muted">
+              {reliability.detail} — results are inconclusive, not a clean bill of health.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
