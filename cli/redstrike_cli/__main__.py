@@ -235,6 +235,17 @@ def maybe_launch_console(args, repo: Path) -> None:
         print("  tip: view results in the web console — `redstrike console`")
 
 
+def _warn_no_sandbox() -> None:
+    """Promote the 'no OS sandbox / network confinement OFF' check to a visible banner on the run
+    path (not just buried in `doctor`): without the OS sandbox, the scope gate is the only boundary."""
+    ok, detail = preflight.sandbox_status()
+    if not ok:
+        print()
+        print(ui.rule("network confinement"))
+        print(ui.warn(detail))
+        print()
+
+
 def _post_run_gate(repo: Path, eng_dir: Path, rc: int) -> int:
     """Run the mechanical completion + coverage gate after an engine run. The engine itself
     can't self-gate between phases, so this is where the gates become mechanical rather than
@@ -286,6 +297,8 @@ def cmd_run(args, repo: Path) -> int:
         if engine.name != enginesmod.DEFAULT_ENGINE:
             suffix += f"  ·  engine: {engine.name}"
         ui.print_banner(f"engagement {eng_dir.name}" + suffix)
+
+    _warn_no_sandbox()
 
     if args.autonomous:
         return _run_autonomous(args, repo, eng_dir, engine)

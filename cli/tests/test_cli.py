@@ -9,7 +9,9 @@ from contextlib import redirect_stdout
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # cli/
 
-from redstrike_cli import engagement, gate, launch  # noqa: E402
+import unittest.mock as mock  # noqa: E402
+
+from redstrike_cli import engagement, gate, launch, preflight  # noqa: E402
 from redstrike_cli.__main__ import main  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -137,6 +139,58 @@ class TestConsole(unittest.TestCase):
             out = buf.getvalue()
             self.assertEqual(rc, 0, out)
             self.assertNotIn("bringing up the web console", out)
+
+
+class TestSandboxBanner(unittest.TestCase):
+    def test_status_windows_is_off(self):
+        with mock.patch.object(preflight, "is_windows", return_value=True):
+            ok, detail = preflight.sandbox_status()
+        self.assertFalse(ok)
+        self.assertIn("NO OS sandbox", detail)
+
+    def test_status_deps_missing_is_limited(self):
+        with mock.patch.object(preflight, "is_windows", return_value=False), \
+             mock.patch.object(preflight, "sandbox_deps", return_value=(False, ["bwrap"])):
+            ok, detail = preflight.sandbox_status()
+        self.assertFalse(ok)
+        self.assertIn("LIMITED", detail)
+
+    def test_status_ok_when_present(self):
+        with mock.patch.object(preflight, "is_windows", return_value=False), \
+             mock.patch.object(preflight, "sandbox_deps", return_value=(True, [])):
+            ok, _ = preflight.sandbox_status()
+        self.assertTrue(ok)
+
+    def test_run_prints_banner_when_confinement_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            (repo / "engagements").mkdir()
+            main(["--repo", str(repo), "--no-color", "--no-banner",
+                  "init", "Acme", "--authorized-by", "x", "--domain", "*.acme.com",
+                  "--i-confirm-authorization"])
+            eid = engagement.engagement_id("Acme")
+            buf = io.StringIO()
+            with mock.patch("redstrike_cli.preflight.sandbox_status",
+                            return_value=(False, "CONFINEMENT-OFF-marker")), redirect_stdout(buf):
+                rc = main(["--repo", str(repo), "--no-color", "--no-banner", "run", eid, "--dry-run"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertIn("CONFINEMENT-OFF-marker", out)
+            self.assertIn("network confinement", out)
+
+    def test_run_no_banner_when_confinement_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            (repo / "engagements").mkdir()
+            main(["--repo", str(repo), "--no-color", "--no-banner",
+                  "init", "Acme", "--authorized-by", "x", "--domain", "*.acme.com",
+                  "--i-confirm-authorization"])
+            eid = engagement.engagement_id("Acme")
+            buf = io.StringIO()
+            with mock.patch("redstrike_cli.preflight.sandbox_status", return_value=(True, "ok")), \
+                 redirect_stdout(buf):
+                main(["--repo", str(repo), "--no-color", "--no-banner", "run", eid, "--dry-run"])
+            self.assertNotIn("network confinement", buf.getvalue())
 
 
 class TestCoverageWiring(unittest.TestCase):
