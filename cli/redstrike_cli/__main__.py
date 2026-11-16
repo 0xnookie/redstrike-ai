@@ -11,7 +11,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, diagnostics, engagement, gate, launch, preflight, ui
+from . import __version__, diagnostics, engagement, gate, launch, preflight, runloop, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
@@ -253,13 +253,18 @@ def _warn_no_sandbox() -> None:
         print()
 
 
-def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "interactive") -> int:
+def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "interactive",
+                   loop=None) -> int:
     """Run the mechanical completion + coverage gate after an engine run, then write the per-run
     diagnostics record and surface the OUTCOME. The engine itself can't self-gate between phases,
     so this is where the gates become mechanical rather than model-discretion. If the engine exited
     clean (rc 0) but the gate flags gaps (malformed findings, missing evidence, a category left
     `pending`), surface it in the exit code so an unattended caller sees the failure; a non-zero
     engine rc is left as-is.
+
+    For an autonomous looped run this runs ONCE after the whole loop: ``res`` reflects the whole run
+    (last leg's summary + cumulative cost + first→last bounds) and ``loop`` carries the loop's stop
+    reason so the diagnostics outcome is honest (completed vs budget-truncated vs blocked).
 
     ``res`` is the engine's ``RunResult`` (an int is still tolerated for back-compat)."""
     rc = getattr(res, "rc", res)
@@ -273,7 +278,7 @@ def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "in
     # Diagnostics (reliability/observability): classify WHY this run produced what it did and record
     # it — for INTERACTIVE runs too (they captured nothing before). Must never alter the exit code.
     try:
-        _emit_diagnostics(eng_dir, res, prep=prep, mode=mode, gate_rc=grc)
+        _emit_diagnostics(eng_dir, res, prep=prep, mode=mode, gate_rc=grc, loop=loop)
     except Exception:
         pass
     if grc != 0 and rc == 0:
@@ -281,7 +286,7 @@ def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "in
     return rc
 
 
-def _emit_diagnostics(eng_dir: Path, res, *, prep, mode: str, gate_rc: int) -> None:
+def _emit_diagnostics(eng_dir: Path, res, *, prep, mode: str, gate_rc: int, loop=None) -> None:
     summary = getattr(res, "summary", None)
     if isinstance(summary, str):  # the empty-string default == no captured summary (interactive)
         summary = None
@@ -295,6 +300,10 @@ def _emit_diagnostics(eng_dir: Path, res, *, prep, mode: str, gate_rc: int) -> N
         gate_rc=gate_rc,
         summary=summary,
     ).to_record()
+    # Overlay the whole-run loop outcome so a budget-truncated / stuck / blocked autonomous run is
+    # recorded as degraded-with-a-reason (coverage partial), never silently "clean".
+    if loop is not None:
+        record = runloop.annotate_record(record, loop)
     diagnostics.write(eng_dir, record)
     _print_outcome(eng_dir, record)
 
@@ -473,11 +482,27 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
         print(ui.err(f"{engine.name} not authenticated: {detail}"))
         return 1
     print()
-    print(ui.ok(f"scope gate armed · autonomous headless run (dontAsk, max_turns={args.max_turns}, budget=${args.max_budget_usd})…"))
+    print(ui.ok(
+        f"scope gate armed · autonomous headless run (dontAsk, per-invocation max_turns="
+        f"{args.max_turns}, total budget=${args.max_budget_usd})…"
+    ))
     print()
+    # The autonomous run is a LOOP: one process spawns many resumed engine invocations until the
+    # engagement is report-ready or a ceiling trips. Running in THIS process keeps the console's
+    # pid-liveness + autorun.jsonl boundary-marker contract intact. The post-run gate + diagnostics
+    # run ONCE, after the loop, over the whole-run result.
     audit = eng_dir / "runtime" / "autorun.jsonl"
-    res = engine.run(prep, eng_dir, inv, mode="autonomous", audit=audit)
-    rc = _post_run_gate(repo, eng_dir, res, prep=prep, mode="autonomous")
+    loop = runloop.drive(
+        engine, prep, repo, eng_dir,
+        first_prompt=prompt,
+        extra_allow=extra_allow,
+        max_turns=args.max_turns,
+        max_budget_usd=args.max_budget_usd,
+        first_resume=bool(args.resume),
+        audit=audit,
+        engagement_id=prep.engagement_id,
+    )
+    rc = _post_run_gate(repo, eng_dir, loop.result, prep=prep, mode="autonomous", loop=loop)
     maybe_launch_console(args, repo)
     return rc
 
