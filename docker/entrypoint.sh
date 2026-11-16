@@ -4,8 +4,8 @@
 #   docker compose up                         -> start the console control plane (UI + API)
 #   docker compose run --rm redstrike <cmd>   -> run <cmd> instead, e.g.:
 #       docker compose run --rm redstrike claude login     # persist a Claude login (volume)
-#       docker compose run --rm redstrike codex login      # persist a Codex login
-#       docker compose run --rm redstrike gemini           # Gemini CLI (first run does OAuth)
+#       docker compose run --rm redstrike codex login      # persist a Codex login  (needs REDSTRIKE_EXTRA_ENGINES=1 build)
+#       docker compose run --rm redstrike gemini           # Gemini CLI (first run does OAuth; needs REDSTRIKE_EXTRA_ENGINES=1 build)
 #       docker compose run --rm redstrike redstrike doctor # engine + auth + tool preflight
 #       docker compose run --rm redstrike bash             # a shell in the image
 #

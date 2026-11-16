@@ -20,11 +20,13 @@ scope, and run.
 | Control plane (init engagement, launch autonomous run, live stream, approvals, stop) | ✅ |
 | Tool roster — `--core` web-pentest set by default (`--all` ~168 tools is opt-in) | ✅ |
 | **Claude** engine | ✅ **live** (authorized runs) |
-| **Codex** CLI | ✅ installed, auth works — **not a live engine yet** (lab-only until parity) |
-| **Gemini** CLI | ✅ installed, auth works — **no redstrike engine yet** |
+| **Codex** CLI | ⬜ opt-in (`REDSTRIKE_EXTRA_ENGINES=1`) — **not a live engine yet** (lab-only until parity) |
+| **Gemini** CLI | ⬜ opt-in (`REDSTRIKE_EXTRA_ENGINES=1`) — **no redstrike engine yet** |
 
-Only the **Claude** engine can drive a live engagement today. Codex and Gemini are auth-wired so
-they are ready the moment their engine adapters land — see `cli/ENGINES.md`.
+Only the **Claude** engine can drive a live engagement today, so the default image ships only it.
+Codex and Gemini stay out of the stock image to keep it lean; build with
+`REDSTRIKE_EXTRA_ENGINES=1` to install + auth-wire them for lab use (see `cli/ENGINES.md`). They are
+ready the moment their engine adapters land.
 
 ---
 
@@ -61,7 +63,8 @@ In `docker/.env`, give Claude **one** of:
 
 Pin the model with `ANTHROPIC_MODEL=claude-opus-5-5` (already set in the example).
 
-Codex / Gemini auth (optional, staged for later): set `OPENAI_API_KEY` / `GEMINI_API_KEY`, or run
+Codex / Gemini auth (optional, staged for later; requires an image built with
+`REDSTRIKE_EXTRA_ENGINES=1`): set `OPENAI_API_KEY` / `GEMINI_API_KEY`, or run
 `... run --rm redstrike codex login` / `... run --rm redstrike gemini`.
 
 ---
@@ -78,6 +81,13 @@ password + interceptors). For the full roster or specific categories, set `REDST
 ```sh
 REDSTRIKE_INSTALL_ARGS=--all docker compose -f docker/docker-compose.yml build          # everything (~168 tools; large, slow)
 REDSTRIKE_INSTALL_ARGS="recon web ad cloud" docker compose -f docker/docker-compose.yml build   # named categories
+```
+
+**Extra engines (lab-only).** The default image ships only the live Claude engine. To also install
+the Codex / Gemini CLIs (auth-wired, not yet live engines), build with `REDSTRIKE_EXTRA_ENGINES=1`:
+
+```sh
+REDSTRIKE_EXTRA_ENGINES=1 docker compose -f docker/docker-compose.yml build
 ```
 
 **Engine version.** The image installs `@anthropic-ai/claude-code@latest`, and the build **fails** if that
