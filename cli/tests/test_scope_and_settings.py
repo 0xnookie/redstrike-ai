@@ -116,13 +116,29 @@ class TestSandbox(unittest.TestCase):
     def test_build_sandbox_from_scope(self):
         sb = settings.build_sandbox(self.SCOPE)
         self.assertIsNotNone(sb)
-        hosts = sb["network"]["allowedHosts"]
+        # the sandbox must actually be turned on — without `enabled` the whole block is inert
+        self.assertIs(sb["enabled"], True)
+        net = sb["network"]
+        # a host outside the allowlist must be a hard DENY, not just a prompt
+        self.assertIs(net["strictAllowlist"], True)
+        # correct schema key is allowedDomains (NOT allowedHosts, which Claude Code drops)
+        self.assertNotIn("allowedHosts", net)
+        domains = net["allowedDomains"]
         # domains + cidrs + the host extracted from in_scope.urls, lowercased + deduped
-        self.assertIn("*.acme.com", hosts)
-        self.assertIn("api.acme.com", hosts)        # normalized to lowercase
-        self.assertIn("203.0.113.0/24", hosts)
-        self.assertIn("portal.acme.com", hosts)     # from the url entry
-        self.assertIn("allowUnixSockets", sb["network"])
+        self.assertIn("*.acme.com", domains)
+        self.assertIn("api.acme.com", domains)        # normalized to lowercase
+        self.assertIn("203.0.113.0/24", domains)
+        self.assertIn("portal.acme.com", domains)     # from the url entry
+        self.assertIn("allowUnixSockets", net)
+
+    def test_engine_hosts_always_allowlisted(self):
+        # the engine's own control-plane host is present regardless of (even minimal) scope
+        minimal = {"in_scope": {"domains": ["acme.com"]}, "out_of_scope": {}}
+        domains = settings.build_sandbox(minimal)["network"]["allowedDomains"]
+        self.assertIn("api.anthropic.com", domains)
+        self.assertIn("acme.com", domains)
+        # engine hosts come first, ahead of the scope-derived entries
+        self.assertLess(domains.index("api.anthropic.com"), domains.index("acme.com"))
 
     def test_explicit_out_of_scope_entries_excluded(self):
         # an entry that is itself explicitly out-of-scope never lands on the allowlist
@@ -130,9 +146,9 @@ class TestSandbox(unittest.TestCase):
             "in_scope": {"domains": ["acme.com", "admin.acme.com"], "cidrs": [], "urls": []},
             "out_of_scope": {"domains": ["admin.acme.com"], "cidrs": []},
         }
-        hosts = settings.build_sandbox(scope)["network"]["allowedHosts"]
-        self.assertIn("acme.com", hosts)
-        self.assertNotIn("admin.acme.com", hosts)
+        domains = settings.build_sandbox(scope)["network"]["allowedDomains"]
+        self.assertIn("acme.com", domains)
+        self.assertNotIn("admin.acme.com", domains)
 
     def test_build_sandbox_none_without_scope(self):
         self.assertIsNone(settings.build_sandbox(None))
@@ -147,8 +163,11 @@ class TestSandbox(unittest.TestCase):
         )
         json.dumps(s)  # serializable
         self.assertIn("sandbox", s)
-        self.assertIn("*.acme.com", s["sandbox"]["network"]["allowedHosts"])
-        self.assertNotIn("admin.acme.com", s["sandbox"]["network"]["allowedHosts"])
+        self.assertIs(s["sandbox"]["enabled"], True)
+        net = s["sandbox"]["network"]
+        self.assertIn("*.acme.com", net["allowedDomains"])
+        self.assertIn("api.anthropic.com", net["allowedDomains"])
+        self.assertNotIn("admin.acme.com", net["allowedDomains"])
 
 
 class TestRoe(unittest.TestCase):
