@@ -230,6 +230,85 @@ def _bump(path):  # module-level so it is picklable for multiprocessing
     rg2.with_state(pathlib.Path(path), _txn)
 
 
+class TestDetectAuth(unittest.TestCase):
+    def test_brute_tool_with_user(self):
+        self.assertEqual(
+            rg.detect_auth("Bash", {"command": "hydra -l admin -P rockyou.txt ssh://api.acme.com"}),
+            (True, "admin"))
+
+    def test_brute_tool_with_user_list_is_unattributed(self):
+        # -L is a username LIST (spray), not a single account → username unknown
+        self.assertEqual(
+            rg.detect_auth("Bash", {"command": "hydra -L users.txt -P pw.txt ssh://api.acme.com"}),
+            (True, None))
+
+    def test_curl_basic_userpass(self):
+        ok, user = rg.detect_auth("Bash", {"command": "curl -u admin:s3cret https://api.acme.com/"})
+        self.assertTrue(ok)
+        self.assertEqual(user, "admin")
+
+    def test_form_login_body(self):
+        self.assertEqual(
+            rg.detect_auth("Bash", {"command": "curl https://api.acme.com/login --data 'username=bob&password=x'"}),
+            (True, "bob"))
+
+    def test_plain_recon_is_not_auth(self):
+        self.assertEqual(rg.detect_auth("Bash", {"command": "nmap -sV api.acme.com"}), (False, None))
+        self.assertEqual(rg.detect_auth("WebFetch", {"url": "https://api.acme.com/about"}), (False, None))
+
+    def test_non_network_tool(self):
+        self.assertEqual(rg.detect_auth("Read", {"file_path": "x"}), (False, None))
+
+
+class TestAuthBudget(unittest.TestCase):
+    def test_per_user_budget_denies_before_lockout(self):
+        hs = rg._blank_host()
+        # budget=4 (threshold 5 minus 1) → 4 attempts pass, the 5th denies
+        for _ in range(4):
+            self.assertEqual(rg.auth_check(hs, "alice", now=1000.0, budget=4)["decision"], "pass")
+        d = rg.auth_check(hs, "alice", now=1000.0, budget=4)
+        self.assertEqual(d["decision"], "deny")
+        self.assertIn("lock", d["reason"].lower())
+
+    def test_other_user_unaffected(self):
+        hs = rg._blank_host()
+        for _ in range(4):
+            rg.auth_check(hs, "alice", now=1000.0, budget=4)
+        self.assertEqual(rg.auth_check(hs, "alice", now=1000.0, budget=4)["decision"], "deny")
+        self.assertEqual(rg.auth_check(hs, "bob", now=1000.0, budget=4)["decision"], "pass")
+
+    def test_window_decays_budget(self):
+        hs = rg._blank_host()
+        for _ in range(4):
+            rg.auth_check(hs, "alice", now=1000.0, budget=4)
+        self.assertEqual(rg.auth_check(hs, "alice", now=1000.0, budget=4)["decision"], "deny")
+        later = 1000.0 + rg.AUTH_WINDOW_SEC + 1
+        self.assertEqual(rg.auth_check(hs, "alice", now=later, budget=4)["decision"], "pass")
+
+    def test_denied_attempt_not_recorded(self):
+        hs = rg._blank_host()
+        for _ in range(4):
+            rg.auth_check(hs, "alice", now=1000.0, budget=4)
+        rg.auth_check(hs, "alice", now=1000.0, budget=4)  # deny
+        self.assertEqual(len(hs["auth"]["alice"]["ts"]), 4)  # denied one not appended
+
+
+class TestResolveLockoutThreshold(unittest.TestCase):
+    def _scope(self, rules):
+        p = pathlib.Path(tempfile.mkdtemp()) / "scope.json"
+        p.write_text(json.dumps({"rules": rules}))
+        return str(p)
+
+    def test_reads_scope_value(self):
+        self.assertEqual(rg.resolve_lockout_threshold(self._scope({"lockout_threshold": 3})), 3)
+
+    def test_default_when_absent(self):
+        self.assertEqual(rg.resolve_lockout_threshold(self._scope({})), rg.DEFAULT_LOCKOUT_THRESHOLD)
+
+    def test_unreadable_falls_back(self):
+        self.assertEqual(rg.resolve_lockout_threshold("/no/such.json"), rg.DEFAULT_LOCKOUT_THRESHOLD)
+
+
 class TestHookIO(unittest.TestCase):
     def setUp(self):
         self.d = pathlib.Path(tempfile.mkdtemp())
@@ -286,6 +365,27 @@ class TestHookIO(unittest.TestCase):
         # no state path derivable + junk stdin → must not raise, must not deny
         rc = rg.main(["--scope", str(self.scope), "--state", str(self.state)])
         self.assertEqual(rc, 0)
+
+    def test_pre_denies_auth_over_lockout_budget(self):
+        import io
+        from contextlib import redirect_stdout
+        scope = self.d / "scope_lockout.json"
+        scope.write_text(json.dumps({"rules": {"rate_limit_rps": 100, "lockout_threshold": 3}}))
+        payload = {"tool_name": "Bash",
+                   "tool_input": {"command": "curl -u admin:pw https://api.acme.com/login"}}
+        # budget = threshold-1 = 2 → first two pass silently
+        for _ in range(2):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rg.run_pre(payload, str(scope), self.state, None, now=1000.0)
+            self.assertEqual(buf.getvalue().strip(), "")
+        # the third would reach the lockout threshold → deny
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rg.run_pre(payload, str(scope), self.state, None, now=1000.0)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("lock", out["hookSpecificOutput"]["permissionDecisionReason"].lower())
 
 
 if __name__ == "__main__":

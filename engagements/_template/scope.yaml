@@ -29,6 +29,7 @@ rules:
   no_dos: true
   no_destructive: true                 # no data deletion/modification w/o per-action approval
   rate_limit_rps: 20
+  lockout_threshold: 5                  # account-lockout threshold: the gate caps auth attempts/account below it
   prod_touch_requires_approval: true
   approval_required_phases:            # human sign-off before first active action
     - exploitation

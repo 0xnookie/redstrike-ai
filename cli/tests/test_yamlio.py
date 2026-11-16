@@ -33,6 +33,7 @@ class TestMiniYaml(unittest.TestCase):
             ("rules", "no_dos"),
             ("rules", "no_destructive"),
             ("rules", "rate_limit_rps"),
+            ("rules", "lockout_threshold"),
             ("rules", "approval_required_phases"),
         ):
             r, g = ref, got
@@ -57,6 +58,7 @@ class TestMiniYaml(unittest.TestCase):
         self.assertEqual(got["out_of_scope"]["domains"], ["admin.acme.com"])
         self.assertEqual(got["rules"]["approval_required_phases"], ["exploitation", "post-exploitation"])
         self.assertEqual(got["rules"]["rate_limit_rps"], 20)
+        self.assertEqual(got["rules"]["lockout_threshold"], 5)
         # also valid for PyYAML, when it's installed
         if HAVE_YAML:
             y = yaml.safe_load(text)

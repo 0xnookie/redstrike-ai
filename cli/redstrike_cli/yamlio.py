@@ -180,6 +180,7 @@ rules:
   no_dos: {str(rules.get('no_dos', True)).lower()}
   no_destructive: {str(rules.get('no_destructive', True)).lower()}
   rate_limit_rps: {rules.get('rate_limit_rps', 20)}
+  lockout_threshold: {rules.get('lockout_threshold', 5)}   # cap auth attempts/account under this to avoid lockout
   prod_touch_requires_approval: {str(rules.get('prod_touch_requires_approval', True)).lower()}
   approval_required_phases:
 {phase_block}
