@@ -151,6 +151,41 @@ class FindingsCrossCheck(unittest.TestCase):
             self.assertFalse(any("no category is marked 'attempted'" in str(x) for x in msgs), msgs)
 
 
+class MarkEscalations(unittest.TestCase):
+    """fix #3: persist escalation-ladder progress on the ledger entry so the recall-audit shallow-clear
+    gate can tell an exhausted, honest clear from an untrustworthy first-payload clear."""
+
+    def _plan(self, eng):
+        m = c.load_map()
+        led = c.plan(m, {"param:injectable"}, {"web"}, eng.name)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return m
+
+    def test_escalations_merge_and_dedupe(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan(eng)
+            c.mark(eng, "sqli", "attempted", count=0, escalations=["derive-not-assume", "encoding-ladder"])
+            c.mark(eng, "sqli", "attempted", count=0, escalations=["encoding-ladder", "waf-bypass"])
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            sqli = next(x for x in led["categories"] if x["id"] == "sqli")
+            self.assertEqual(sqli["escalations"], ["derive-not-assume", "encoding-ladder", "waf-bypass"])
+
+    def test_full_ladder_clears_the_shallow_clear_gap(self):
+        # end-to-end: an empty-but-signalled sqli is a shallow-clear gap UNTIL the ladder is recorded.
+        import escalation as esc
+        import recall_audit as ra
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan(eng)
+            c.mark(eng, "sqli", "attempted", count=0)
+            gaps_before = ra.load_and_audit(eng)["gaps"]
+            self.assertTrue(any(g["type"] == "shallow-clear" and g["category"] == "sqli" for g in gaps_before))
+            c.mark(eng, "sqli", "attempted", count=0, escalations=esc.ladder_for("sqli"))
+            gaps_after = ra.load_and_audit(eng)["gaps"]
+            self.assertFalse(any(g["type"] == "shallow-clear" and g["category"] == "sqli" for g in gaps_after))
+
+
 class SelfTest(unittest.TestCase):
     def test_coverage_selftest_passes(self):
         self.assertEqual(c.selftest(), 0)

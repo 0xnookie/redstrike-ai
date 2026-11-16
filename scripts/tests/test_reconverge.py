@@ -119,28 +119,40 @@ class Fixpoint(unittest.TestCase):
 
 
 class IngestValidation(unittest.TestCase):
-    """P0-1: the inbox is validated at ingest — an out-of-vocab signal / out-of-enum surface kind is
-    REJECTED (quarantined), never folded into the ledgers (the sink:dom-backlink / `content` leak)."""
+    """P0-1: the inbox is validated at ingest — an out-of-vocab signal / unknown surface kind is REJECTED
+    (quarantined), never folded into the ledgers (the sink:dom-backlink leak). A `content` discovery is NOT
+    garbage: it ROUTES to content-discovery for URL/objref extraction (fix #5)."""
     VOCAB = {"param:url-fetching", "asset:cloud"}
     KINDS = {"param", "endpoint"}
+    FROUTES = {"content": "content-discovery"}
 
-    def test_split_keeps_valid_drops_invalid(self):
+    def test_split_keeps_valid_drops_invalid_reroutes_content(self):
         recs = [{"source": "pp", "signals": ["sink:dom-backlink", "param:url-fetching"],
                  "surface": [{"kind": "param", "value": "from"}, {"kind": "content", "value": "/x.xml"}]}]
-        clean, rej = rc.split_observations(recs, self.VOCAB, self.KINDS)
+        clean, rej, fu = rc.split_observations(recs, self.VOCAB, self.KINDS, self.FROUTES)
         self.assertEqual(clean[0]["signals"], ["param:url-fetching"])
         self.assertEqual([s["value"] for s in clean[0]["surface"]], ["from"])
         self.assertIn("sink:dom-backlink", rej[0]["rejected_signals"])
-        self.assertTrue(any(b.get("kind") == "content" for b in rej[0]["rejected_surface"]))
+        # content is a followup, NOT rejected garbage
+        self.assertFalse(rej[0]["rejected_surface"])
+        self.assertEqual([f["value"] for f in fu], ["/x.xml"])
+        self.assertEqual(fu[0]["route_to"], "content-discovery")
+
+    def test_truly_unknown_kind_still_rejected(self):
+        recs = [{"source": "x", "surface": [{"kind": "contnet", "value": "/x"}]}]
+        _c, rej, fu = rc.split_observations(recs, self.VOCAB, self.KINDS, self.FROUTES)
+        self.assertEqual(fu, [])
+        self.assertTrue(any(b.get("kind") == "contnet" for b in rej[0]["rejected_surface"]))
 
     def test_fail_open_on_empty_vocab(self):
         recs = [{"signals": ["anything:at-all"]}]
-        clean, rej = rc.split_observations(recs, set(), set())
+        clean, rej, fu = rc.split_observations(recs, set(), set(), self.FROUTES)
         self.assertEqual(rej, [])
         self.assertEqual(clean[0]["signals"], ["anything:at-all"])
 
     def test_record_with_only_invalid_parts_yields_no_observation(self):
-        clean, rej = rc.split_observations([{"source": "x", "signals": ["made:up"]}], self.VOCAB, self.KINDS)
+        clean, rej, _fu = rc.split_observations([{"source": "x", "signals": ["made:up"]}],
+                                                self.VOCAB, self.KINDS, self.FROUTES)
         self.assertEqual(clean, [])
         self.assertTrue(rej)
 
@@ -154,7 +166,7 @@ class IngestValidation(unittest.TestCase):
             obs = rc.load_observations(eng)
             # the real routing vocab contains param:url-fetching but NOT sink:dom-backlink
             self.assertEqual(obs[0]["signals"], ["param:url-fetching"])
-            self.assertEqual(obs[0]["surface"], [])  # the `content` kind is rejected
+            self.assertEqual(obs[0]["surface"], [])  # `content` is rerouted (a followup), not a ledger surface
 
     def test_ingest_quarantines_to_sidecar(self):
         with tempfile.TemporaryDirectory() as d:
@@ -167,6 +179,22 @@ class IngestValidation(unittest.TestCase):
             self.assertTrue(sidecar.is_file())
             rec = json.loads(sidecar.read_text(encoding="utf-8").strip())
             self.assertIn("sink:dom-backlink", rec["rejected_signals"])
+
+    def test_ingest_routes_content_to_followup_queue(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "reconvergence").mkdir(parents=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "hunt", "surface": [{"kind": "content", "value": "/sitemap.xml"}]}) + "\n",
+                encoding="utf-8")
+            rc.ingest_inbox(eng)
+            fq = eng / "reconvergence" / "content_followups.jsonl"
+            self.assertTrue(fq.is_file())
+            rec = json.loads(fq.read_text(encoding="utf-8").strip())
+            self.assertEqual(rec["value"], "/sitemap.xml")
+            self.assertEqual(rec["route_to"], "content-discovery")
+            # content was NOT quarantined as garbage
+            self.assertFalse((eng / "reconvergence" / "inbox.rejected.jsonl").is_file())
 
 
 class SelfTest(unittest.TestCase):

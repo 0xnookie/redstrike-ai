@@ -40,6 +40,13 @@ def _triggers_by_cat(map_categories) -> dict:
     return {c["id"]: set(c.get("triggers", []) or []) for c in map_categories}
 
 
+# Server-side interpreter-sink signals. A category gated by one of these (the `injection` family:
+# ssti / command-injection / deserialization) can only be ROUTED when a white-box source-audit (or a
+# limited js-analysis pass) emits the signal — black-box recon cannot SEE a template/command/deserializer
+# sink. So a no-signal skip of such a class in a black-box run is recon BLINDNESS, not a proven absence.
+_SINK_SIGNALS = frozenset({"sink:template", "sink:command"})
+
+
 def audit(categories, signals, map_categories, escalations=None) -> dict:
     """Compute recall gaps from already-parsed inputs.
 
@@ -87,6 +94,17 @@ def audit(categories, signals, map_categories, escalations=None) -> dict:
                 gaps.append({"category": cid, "type": "weak-skip-reason", "severity": "medium",
                              "detail": "skipped with a missing/too-terse reason",
                              "suggested_action": "state a concrete, signal-based reason or run the class"})
+            # Black-box sink blindness (fix #4): a server-side-sink class skipped with NO black-box producer
+            # for its sink signal is recon blindness, not a proven negative — a MEDIUM gap to probe behaviorally.
+            sink_trigs = trig.get(cid, set()) & _SINK_SIGNALS
+            if sink_trigs and "source:available" not in sig and not (sink_trigs & sig):
+                gaps.append({"category": cid, "type": "sink-class-skipped-blackbox", "severity": "medium",
+                             "detail": ("server-side-sink class skipped with no black-box producer for its "
+                                        "sink signal(s) " + ", ".join(sorted(sink_trigs))
+                                        + " — black-box recon cannot see a template/command/deserializer sink, "
+                                        "so this skip is recon blindness, not a proven absence"),
+                             "suggested_action": ("probe it black-box on injectable params (behavioural / timing "
+                                                  "/ OOB), or run source-audit (white-box) to emit the sink signal")})
 
     order = {"high": 0, "medium": 1, "low": 2}
     gaps.sort(key=lambda g: (order.get(g["severity"], 9), g["type"], g["category"] or ""))
@@ -154,6 +172,7 @@ def selftest() -> None:
         {"id": "xss", "triggers": ["sink:html-reflect", "sink:dom", "param:any"]},
         {"id": "sqli", "triggers": ["param:injectable"]},
         {"id": "ssrf", "triggers": ["param:url-fetching"]},
+        {"id": "injection", "triggers": ["sink:template", "sink:command", "param:injectable"]},
         {"id": "secrets", "triggers": []},
     ]
 
@@ -186,6 +205,18 @@ def selftest() -> None:
     led4 = [{"id": "xss", "status": "skipped", "reason": "n/a", "findings_count": 0}]
     r = audit(led4, set(), mapc)
     assert r["gaps"][0]["type"] == "weak-skip-reason" and r["gaps"][0]["severity"] == "medium"
+
+    # 6b) sink-class black-box blindness (fix #4): a server-side-sink class (injection) skipped in a
+    #     BLACK-BOX run (no source:available) with no sink signal -> MEDIUM gap (recon can't see the sink).
+    led_sink = [{"id": "injection", "status": "skipped",
+                 "reason": "no template/command/deserialization sink surfaced", "findings_count": 0}]
+    r = audit(led_sink, set(), mapc)
+    assert r["gaps"][0]["type"] == "sink-class-skipped-blackbox" and r["gaps"][0]["severity"] == "medium", r
+    # WHITE-BOX (source:available present): source-audit could emit the sink signal, so a skip is trustworthy.
+    assert audit(led_sink, {"source:available"}, mapc)["summary"]["total"] == 0
+    # a non-sink class skipped with a good reason and no signal stays silent (no false positive).
+    assert audit([{"id": "ssrf", "status": "skipped", "reason": "no URL-fetching parameter surfaced"}],
+                 set(), mapc)["summary"]["total"] == 0
 
     # 7) pending at close -> HIGH gap; a found class -> no gap; ranking puts high first.
     led5 = [{"id": "sqli", "status": "pending"},

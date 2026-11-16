@@ -60,12 +60,19 @@ the console). Gate is **soft** — encouraged, never fails. See `skills/_contrac
 Assets/Ports views; a recon pass that only saves pages + `signals.json` leaves them empty, and the
 engagement gate warns when it is missing.
 
-**Provision ≥2 test identities + an authenticated recon pass.** If the app has registration/login, create
-(or have the operator supply) **two test accounts** up front — content-discovery then crawls the
-**authenticated** surface and diffs it against unauth, and `authz-context`/`api-context` get the ≥2 identities
-they require for IDOR/BOLA/BFLA (without them that whole surface is unmapped and those classes are starved).
-Map multi-step workflows (checkout/reset/upload/admin) as state for `business-logic`/`race-condition`. TEST
-accounts only — never authenticate with found or real credentials.
+**Provision ≥2 test identities + an authenticated recon pass.** The multi-identity classes (IDOR/BOLA/BFLA
+via `authz-context`/`api-context`) need **two accounts**; without them that whole surface is unmapped and the
+classes are starved. Do NOT surrender those classes just because accounts weren't handed in:
+- Recon emits **`flow:registration`** (from content-discovery / js-analysis) when a **public self-service
+  signup** exists. When it is present, **self-provision two test accounts** (register them yourself, TEST
+  accounts only) before mapping authz/api — then content-discovery crawls the **authenticated** surface and
+  diffs it against unauth, and the ≥2 identities IDOR/BOLA/BFLA require are available.
+- A **`blocked: needs accounts`** terminal state for authz/api is permitted **ONLY after a registration
+  attempt actually failed** (signup gated/invite-only/CAPTCHA-walled, recorded as the block reason) — never
+  as a first resort when `flow:registration` was signalled. If there is no public signup and the operator
+  supplied no accounts, record the block with that concrete reason.
+- If the operator supplied accounts, use them. Map multi-step workflows (checkout/reset/upload/admin) as
+  state for `business-logic`/`race-condition`. **Never authenticate with found or real credentials.**
 
 ## 2. Vuln categories (Tier 2)  → route DETERMINISTICALLY, then track coverage
 Routing is **deterministic, not improvised.** The authoritative source is
@@ -85,10 +92,16 @@ with a recorded reason. The formerly un-triggered classes are now wired in: `nos
 
 **b. Run every `pending` category.** For each, run its `<class>-context` feeder (families) then its
 variant/category agents, and flip its ledger entry to `attempted` (set `findings_count`) or `blocked`.
+**When a class returns EMPTY on a recon-signalled surface, climb the `scripts/escalation.py` ladder before
+calling it clean, and RECORD each technique you tried:**
+`python scripts/coverage.py --mark <class> --status attempted --count 0 --escalations derive-not-assume,encoding-ladder`
+— this persists ladder progress on the ledger entry so the recall-audit shallow-clear gate (§2d) can tell an
+exhausted, honest clear from an untrustworthy first-payload clear. An empty high-prior class with an
+UNEXHAUSTED ladder is a HARD recall gap at report time.
 Human-readable mirror of the map:
 - **white-box (ONLY if `scope.yaml` grants authorized source access):** run `redstrike-source-audit` once in recon → `source-audit/source_context.json`, a routed `file:line → vuln class → executor` candidate map. Its per-class dangerous-sink candidates feed the matching `<class>-context` feeder below as higher-confidence leads (a grep hit is a LEAD the executor must still PROVE at runtime); secret candidates → `redstrike-secrets`, dependency candidates → `redstrike-cve-intelligence`. No source access ⇒ skip it (pure black-box run).
 - reflected/stored/dom input + sinks → `redstrike-xss-context` → `xss-*`
-- injectable params → `redstrike-sqli-context` → `sqli-*` **and** `redstrike-nosql-injection` ; interpreter sinks → `redstrike-injection-context` → `ssti`/`command-injection`/`deserialization`
+- injectable params → `redstrike-sqli-context` → `sqli-*` **and** `redstrike-nosql-injection` ; interpreter sinks → `redstrike-injection-context` → `ssti`/`command-injection`/`deserialization`. **Black-box caveat:** `sink:template`/`sink:command` are only emitted by a white-box source-audit (or limited js-analysis), so on a pure black-box run the injection family can SKIP for lack of a sink signal even though a server-side sink may exist. Do not treat that as a proven negative — probe `ssti`/`command-injection`/`deserialization` behaviorally (timing/OOB) on injectable params; recall-audit flags a `sink-class-skipped-blackbox` medium gap for exactly this.
 - URL-fetching params → `redstrike-ssrf-context` → `ssrf-*` ; `redstrike-open-redirect`
 - object ids + roles (≥2 accounts) → `redstrike-authz-context` → `idor`/`privesc` ; APIs → `redstrike-api-context` → `bola-bfla`/`graphql`
 - XML endpoints → `redstrike-xxe-context` → `xxe-*` ; file/upload params → `redstrike-file-context` → `path-traversal-lfi`/`upload-rce`
@@ -99,6 +112,14 @@ Human-readable mirror of the map:
 - plus as triggered: `csrf`, `host-header`, `cache-poisoning`, `request-smuggling`*, `subdomain-takeover`, `business-logic`, `supply-chain`
 - **AI/LLM** (chat/assistant/LLM feature) → `redstrike-llm-context` → `prompt-injection` (LLM01) / `sensitive-disclosure` (LLM02/07/08) / `excessive-agency` (LLM06) / `llm-output-handling` (LLM05)
 
+**Ledger-writer discipline (HARD).** The coverage, surface and re-convergence ledgers are written ONLY by
+their scripts (`scripts/coverage.py`, `scripts/surface.py`, `scripts/reconverge.py`) — **never hand-edit the
+JSON.** The scripts enforce the status/kind enums and the closed signal vocabulary at write time; a
+hand-edit bypasses that and can fold an out-of-vocab signal or non-enum surface kind into a ledger, where it
+routes to nothing and masks a recall gap. Once a report exists, `verify_completion.py`'s
+coordination-integrity gate HARD-fails on exactly that — an out-of-vocab signal in `signals_used` /
+`triggers_matched` / the inbox, or a non-enum surface kind in the ledger/inbox.
+
 **c. Gate on coverage.** `python scripts/coverage.py --validate --engagement <dir>` must pass before
 reporting: every map category is accounted for and **nothing is left `pending`**. Once a consolidated
 report exists, `verify_completion.py --engagement` HARD-FAILS on any unaccounted category.
@@ -106,9 +127,11 @@ report exists, `verify_completion.py --engagement` HARD-FAILS on any unaccounted
 **d. Recall audit — the "what did we miss?" altitude (before reporting).** Coverage proves categories ran;
 this checks the clears are REAL. Launch the independent **`recall-audit`** reviewer subagent
 (`skills/_contract/recall-audit.md`; deterministic engine `scripts/recall_audit.py <dir>`). It flags
-`shallow-clear` (empty on a recon-signalled surface with the `escalation.md` ladder unexhausted),
-`skipped-but-signalled`, and never-run routes. Every **REAL-MISS** it returns must be re-hunted (run the
-next escalation step / un-skip the route) or explicitly operator-accepted with a reason **before reporting**.
+`shallow-clear` (empty on a recon-signalled surface with the `escalation.md` ladder unexhausted — read
+from each category's persisted `escalations` list, §2b), `skipped-but-signalled`, and never-run routes.
+Every **REAL-MISS** it returns must be re-hunted (run the next escalation step — and record it with
+`coverage.py --mark … --escalations …` — / un-skip the route) or explicitly operator-accepted with a
+reason **before reporting**.
 
 **e. Re-convergence — feed findings BACK into recon until a fixpoint (before reporting).** The hunt
 DISCOVERS new surface the initial recon never saw: an SSRF reaching an internal host / cloud metadata, a
@@ -120,6 +143,9 @@ classes that new signal/surface routes to back to `pending` and folds the delta 
 those re-opened classes against the new surface** → repeat until `reconverge.py --validate` passes (the
 fixpoint — a pass that adds nothing new). A new signal that matches an **out-of-phase** class (e.g.
 `asset:smart-contract` ⇒ web3) is a `replan_candidate` for YOU to decide on (scope), never auto-activated.
+A **`content`-kind** discovery (a sitemap/robots/API schema) is NOT a testable surface element and is never
+dropped: `--apply` routes it to `reconvergence/content_followups.jsonl` for **content-discovery** to re-run
+URL/object-ref extraction over it (the extracted endpoints/params then flow back as normal surface).
 Once a report exists over a non-empty inbox that hasn't re-converged, `verify_completion.py` hard-fails.
 See `skills/_contract/reconvergence.md`. This is breadth DISCOVERED DURING the hunt — the symmetric control
 to the escalation ladder (depth) and the surface ledger (recon-time breadth).

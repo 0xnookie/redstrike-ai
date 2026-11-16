@@ -29,6 +29,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit, parse_qsl
 
 # atomic_write: one shared helper for ledger writes. scripts/ is on sys.path for a direct run and for
 # the validate.py / verify_completion spec-loads; fall back to a path-load when it is not (e.g. the
@@ -190,42 +191,197 @@ def _read_json(p: Path):
         return None
 
 
+def _iter_jsonl(p: Path):
+    """Yield each parseable JSON object from a .jsonl file (malformed lines skipped)."""
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except Exception:
+            continue
+
+
+def _path_and_params(url) -> tuple:
+    """(path, [query-param names]) from a URL/endpoint, tolerant of a bare path. The path drops any
+    scheme+host and query string so it is a stable attribution key: '/_next/image?url=x&w=64' and
+    'https://h/_next/image?url=y' both yield ('/_next/image', ['url', ...])."""
+    s = str(url or "").strip()
+    if not s:
+        return "", []
+    parts = urlsplit(s)
+    path = parts.path if (parts.scheme or parts.netloc) else (s.split("?", 1)[0] or s)
+    names, seen = [], set()
+    for k, _v in parse_qsl(parts.query, keep_blank_values=True):
+        if k and k not in seen:
+            seen.add(k)
+            names.append(k)
+    return path, names
+
+
+def _attr_param(name, endpoint) -> str:
+    """A param value carrying its endpoint attribution — 'url@/_next/image' — so the SAME param name
+    on two different endpoints is TWO distinct surface elements (not collapsed into one tested-once row).
+    Falls back to the bare name when no endpoint is known."""
+    nm = str(name or "").strip()
+    if not endpoint:
+        return nm
+    path, _ = _path_and_params(endpoint)
+    return f"{nm}@{path}" if path else nm
+
+
+# A content-kind discovery (sitemap/robots/API schema) is NOT a testable surface element, so it never
+# enters the ledger; instead it ROUTES BACK to content-discovery for URL/object-ref extraction (fix #5).
+FOLLOWUP_ROUTES = {"content": "content-discovery"}
+
+
+def followup_route(kind: str):
+    """The recon FEEDER a non-testable 'follow-up' kind (e.g. `content`) routes to, or None."""
+    return FOLLOWUP_ROUTES.get(kind)
+
+
+def content_reroutes(items) -> list:
+    """Directives for content-kind discoveries (sitemaps/robots/API schemas): route each BACK to
+    content-discovery to extract the URLs + object references it contains, instead of dropping it as an
+    out-of-enum surface (where a sitemap of 200 endpoints would silently vanish). Pure (no I/O)."""
+    out = []
+    for it in items or []:
+        kind = (it or {}).get("kind")
+        value = str((it or {}).get("value", "")).strip()
+        route = followup_route(kind)
+        if route and value:
+            out.append({"kind": kind, "value": value,
+                        "discovered_by": (it or {}).get("discovered_by", "recon"),
+                        "route_to": route,
+                        "action": "extract URLs + object references"})
+    return out
+
+
 def load_recon_surfaces(eng: Path) -> list:
-    """Enumerate surface items from the usual feeder artifacts (best-effort; missing = skipped)."""
+    """Enumerate surface items from the usual feeder artifacts (best-effort; missing = skipped).
+
+    Reads the REAL on-disk layouts the feeders actually write — notably js-analysis'
+    `out/<site>/findings/*.jsonl` tree (NOT a flat `js-analysis/*.jsonl`, which never existed), and
+    content-discovery's `endpoints.txt` as well as `params*.txt` — plus loaders for the surface kinds
+    that were declared but never populated (sink/header/form/upload/auth-flow). Params carry their
+    endpoint attribution (`name@/path`) so the same name on two endpoints is two distinct elements."""
     items = []
+
+    def add(kind, value, by):
+        if value is None:
+            return
+        v = str(value).strip()
+        if v:
+            items.append({"kind": kind, "value": v, "discovered_by": by})
+
+    # --- host-discovery: live hosts (endpoint) + api endpoints (api-operation) ---
     hd = _read_json(eng / "host-discovery" / "host_discovery.json") or {}
     for h in hd.get("live_hosts", []) or []:
         if isinstance(h, dict) and h.get("url"):
-            items.append({"kind": "endpoint", "value": h["url"], "discovered_by": "host-discovery"})
+            add("endpoint", h["url"], "host-discovery")
+        elif isinstance(h, str):
+            add("endpoint", h, "host-discovery")
     for ep in hd.get("api_endpoints", []) or []:
-        v = ep.get("path") if isinstance(ep, dict) else ep
-        if v:
-            items.append({"kind": "api-operation", "value": str(v), "discovered_by": "host-discovery"})
+        add("api-operation", ep.get("path") if isinstance(ep, dict) else ep, "host-discovery")
+
+    # --- authz-context / api-context: test identities ---
     az = _read_json(eng / "authz-context" / "authz_context.json") or {}
     for ident in az.get("identities", []) or []:
-        lbl = ident.get("label") or ident.get("role") or ident.get("email") if isinstance(ident, dict) else ident
-        if lbl:
-            items.append({"kind": "identity", "value": str(lbl), "discovered_by": "authz-context"})
-    # params from content-discovery (one per line in a params file)
-    for pf in (eng / "content-discovery").glob("params*.txt") if (eng / "content-discovery").is_dir() else []:
-        for line in pf.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                items.append({"kind": "param", "value": line, "discovered_by": "content-discovery"})
-    # js-analysis endpoints/params (jsonl)
-    ja = eng / "js-analysis"
-    if ja.is_dir():
-        for name, kind in (("endpoints.jsonl", "endpoint"), ("params.jsonl", "param")):
-            p = ja / name
-            if p.is_file():
-                for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
-                    try:
-                        o = json.loads(line)
-                    except Exception:
-                        continue
-                    v = o.get("url") or o.get("path") or o.get("name") if isinstance(o, dict) else o
-                    if v:
-                        items.append({"kind": kind, "value": str(v), "discovered_by": "js-analysis"})
+        if isinstance(ident, dict):
+            add("identity", ident.get("label") or ident.get("role") or ident.get("email"), "authz-context")
+        else:
+            add("identity", ident, "authz-context")
+
+    # --- content-discovery: endpoints.txt (NEW) + params*.txt + the consolidated content.json ---
+    cd = eng / "content-discovery"
+    if cd.is_dir():
+        epf = cd / "endpoints.txt"
+        if epf.is_file():
+            for line in epf.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                path, qparams = _path_and_params(line)
+                add("endpoint", path or line, "content-discovery")
+                for pn in qparams:
+                    add("param", _attr_param(pn, path or line), "content-discovery")
+        for pf in cd.glob("params*.txt"):
+            for line in pf.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    add("param", line, "content-discovery")
+        cj = _read_json(cd / "content.json") or {}
+        for r in cj.get("routes", []) or []:
+            if not isinstance(r, dict):
+                continue
+            rpath = r.get("path")
+            path, qparams = _path_and_params(rpath or "")
+            add("endpoint", path or rpath, "content-discovery")
+            if str(r.get("type", "")).lower() == "form":
+                add("form", path or rpath, "content-discovery")
+            for pn in list(r.get("params") or []) + qparams:
+                add("param", _attr_param(pn, path or rpath), "content-discovery")
+        for cls, sinks in (cj.get("notable_sinks") or {}).items():
+            for s in sinks or []:
+                add("sink", f"{s} [{cls}]", "content-discovery")
+
+    # --- js-analysis: the REAL out/<site>/findings/*.jsonl tree (endpoints/params/gadgets) ---
+    for base in (eng / "js-analysis", eng):
+        for findings_dir in sorted(base.glob("out/*/findings")):
+            if not findings_dir.is_dir():
+                continue
+            for o in _iter_jsonl(findings_dir / "endpoints.jsonl"):
+                v = (o.get("url") or o.get("path")) if isinstance(o, dict) else o
+                if not v:
+                    continue
+                path, qparams = _path_and_params(v)
+                add("endpoint", path or v, "js-analysis")
+                for pn in qparams:
+                    add("param", _attr_param(pn, path or v), "js-analysis")
+            for o in _iter_jsonl(findings_dir / "params.jsonl"):
+                if isinstance(o, dict):
+                    name = o.get("name") or o.get("param")
+                    carrier = (o.get("kind") or "").lower()
+                    endpoint = o.get("endpoint") or o.get("url") or o.get("path")
+                else:
+                    name, carrier, endpoint = o, "", None
+                if not name:
+                    continue
+                if carrier == "header":
+                    add("header", name, "js-analysis")
+                else:
+                    add("param", _attr_param(name, endpoint), "js-analysis")
+            for o in _iter_jsonl(findings_dir / "gadgets.jsonl"):
+                if isinstance(o, dict):
+                    sink = o.get("sink") or o.get("snippet")
+                    loc, ln = o.get("source_file"), o.get("line")
+                    if sink and loc:
+                        add("sink", f"{sink} @ {loc}:{ln}" if ln is not None else f"{sink} @ {loc}", "js-analysis")
+                    else:
+                        add("sink", sink, "js-analysis")
+                elif o:
+                    add("sink", o, "js-analysis")
+
+    # --- auth-context: auth flows (auth-flow) ---
+    ac = _read_json(eng / "auth-context" / "auth_context.json") or {}
+    for fl in ac.get("flows", []) or []:
+        if isinstance(fl, dict):
+            k, fid = fl.get("kind"), fl.get("id")
+            add("auth-flow", f"{k}:{fid}" if (k and fid and k != fid) else (fid or k), "auth-context")
+        else:
+            add("auth-flow", fl, "auth-context")
+
+    # --- file-context: upload endpoints (upload) ---
+    fc = _read_json(eng / "file-context" / "file_context.json") or {}
+    for t in fc.get("targets", []) or []:
+        if isinstance(t, dict) and (t.get("kind") or "") == "upload":
+            add("upload", t.get("endpoint"), "file-context")
+
     return items
 
 
@@ -313,6 +469,22 @@ def selftest() -> None:
     led2 = plan_from_items("demo", [{"kind": "param", "value": "id"}])
     g = surface_gaps(led2)
     assert g and g[0]["type"] == "untested-surface" and g[0]["severity"] == "high"
+
+    # param->endpoint attribution: the SAME name on two endpoints is two DISTINCT surface elements.
+    _p1, _n1 = _path_and_params("/_next/image?url=x&w=64")
+    assert _p1 == "/_next/image" and _n1 == ["url", "w"], (_p1, _n1)
+    assert _attr_param("url", "/_next/image") == "url@/_next/image"
+    assert _attr_param("url", "https://h/a?x=1") == "url@/a"
+    led_attr = plan_from_items("demo", [{"kind": "param", "value": "url@/_next/image"},
+                                        {"kind": "param", "value": "url@/other"}])
+    assert len({s["id"] for s in led_attr["surfaces"]}) == 2, "attributed params must not collapse"
+
+    # content-kind discoveries route BACK to content-discovery (fix #5), never into the ledger.
+    assert followup_route("content") == "content-discovery" and followup_route("param") is None
+    rr = content_reroutes([{"kind": "content", "value": "/sitemap.xml", "discovered_by": "hunt"},
+                           {"kind": "param", "value": "q"}])
+    assert len(rr) == 1 and rr[0]["route_to"] == "content-discovery" and rr[0]["value"] == "/sitemap.xml"
+    assert "content" not in VALID_KINDS, "content stays out of the testable surface-kind enum"
 
     # empty ledger: lenient normally, a gap under --strict
     assert validate({"surfaces": []})[0] is True

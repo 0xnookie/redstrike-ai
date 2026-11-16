@@ -60,6 +60,7 @@ COVERAGE_LEDGER = "coverage_ledger.json"
 SURFACE_LEDGER = "surface_ledger.json"
 INBOX = "reconvergence/inbox.jsonl"  # executors append observation records here
 REJECTED_INBOX = "reconvergence/inbox.rejected.jsonl"  # quarantined invalid record parts (ingest safety)
+CONTENT_FOLLOWUPS = "reconvergence/content_followups.jsonl"  # content-kind discoveries routed to content-discovery (fix #5)
 
 # Terminal statuses that are safe to re-open automatically: the class ran (or was skipped) within an
 # ACTIVE phase, so re-running it against newly-found surface is in scope. `n/a` (phase out of scope) and
@@ -254,15 +255,36 @@ def _signal_vocab() -> set:
     return set((m.get("signals") or {}).keys())
 
 
-def _surface_kinds() -> set:
-    """The CLOSED surface-kind enum (surface.py VALID_KINDS; falls back to the schema). Empty => fail-open."""
+def _load_surface_mod():
     try:
         import surface as _sf  # scripts/ on sys.path
-        return set(_sf.VALID_KINDS)
+        return _sf
     except ImportError:  # pragma: no cover - path fallback
+        import importlib.util as _ilu
+        _sp = _ilu.spec_from_file_location("surface", str(ROOT / "scripts" / "surface.py"))
+        _sf = _ilu.module_from_spec(_sp)
+        _sp.loader.exec_module(_sf)
+        return _sf
+
+
+def _surface_kinds() -> set:
+    """The CLOSED testable surface-kind enum (surface.py VALID_KINDS; falls back to the schema). Empty => fail-open."""
+    try:
+        return set(_load_surface_mod().VALID_KINDS)
+    except Exception:  # pragma: no cover
         s = _read_json(ROOT / "skills" / "_contract" / "surface_ledger.schema.json") or {}
         kind = (((s.get("$defs") or {}).get("surface") or {}).get("properties") or {}).get("kind") or {}
         return set(kind.get("enum") or [])
+
+
+def _followup_routes() -> dict:
+    """kind -> recon feeder for the non-testable 'follow-up' kinds (surface.FOLLOWUP_ROUTES; e.g.
+    content -> content-discovery). A content-kind discovery is NOT corruption and NOT a ledger element —
+    it ROUTES BACK to content-discovery for URL/object-ref extraction (fix #5)."""
+    try:
+        return dict(_load_surface_mod().FOLLOWUP_ROUTES)
+    except Exception:  # pragma: no cover
+        return {"content": "content-discovery"}
 
 
 def _read_inbox_raw(eng: Path) -> list:
@@ -280,14 +302,17 @@ def _read_inbox_raw(eng: Path) -> list:
     return obs
 
 
-def split_observations(records, vocab, kinds):
+def split_observations(records, vocab, kinds, followup_routes=None):
     """Validate raw inbox records against the signal vocab + surface-kind enum (pure, no I/O).
 
-    Returns (clean, rejections). Each clean observation keeps ONLY in-vocab signals and valid-kind,
-    non-empty surface items; `rejections` has one entry per source record that carried anything invalid,
-    naming what was dropped and why. An empty `vocab`/`kinds` means 'cannot check' → fail-open (keep all),
-    so an unreadable routing map never discards good observations."""
-    clean, rejections = [], []
+    Returns (clean, rejections, followups). Each clean observation keeps ONLY in-vocab signals and
+    valid-kind, non-empty surface items; `rejections` has one entry per source record that carried anything
+    GENUINELY invalid (a typo signal, an unknown surface kind), naming what was dropped and why; `followups`
+    holds recognized non-testable 'follow-up' discoveries (a `content` sitemap/robots/API-schema) routed BACK
+    to content-discovery for URL/object-ref extraction (fix #5) — these are neither folded into the ledgers
+    nor quarantined as garbage. An empty `vocab`/`kinds` means 'cannot check' → fail-open (keep all)."""
+    froutes = _followup_routes() if followup_routes is None else dict(followup_routes)
+    clean, rejections, followups = [], [], []
     for rec in records or []:
         if not isinstance(rec, dict):
             rejections.append({"source": "?", "reasons": ["record is not a JSON object"], "record": rec})
@@ -300,7 +325,11 @@ def split_observations(records, vocab, kinds):
         for item in rec.get("surface", []) or []:
             k = (item or {}).get("kind")
             v = str((item or {}).get("value", "")).strip()
-            if k and v and (not kinds or k in kinds):
+            if k and v and k in froutes:
+                followups.append({"kind": k, "value": v,
+                                  "discovered_by": (item or {}).get("discovered_by", src),
+                                  "route_to": froutes[k], "action": "extract URLs + object references"})
+            elif k and v and (not kinds or k in kinds):
                 good_surf.append(item)
             else:
                 bad_surf.append(item)
@@ -315,23 +344,24 @@ def split_observations(records, vocab, kinds):
                                "rejected_signals": bad_sig, "rejected_surface": bad_surf})
         if good_sig or good_surf:
             clean.append({"source": src, "signals": good_sig, "surface": good_surf})
-    return clean, rejections
+    return clean, rejections, followups
 
 
 def load_observations(eng: Path) -> list:
     """Read + VALIDATE the inbox: returns observations with ONLY in-vocab signals and valid-kind surface,
-    so an invalid token (a typo signal, a `content` surface) is never folded into the ledgers. The read is
-    pure — the rejected parts are quarantined to a sidecar by `ingest_inbox` at the real ingest point."""
-    clean, _rej = split_observations(_read_inbox_raw(eng), _signal_vocab(), _surface_kinds())
+    so an invalid token (a typo signal, an unknown surface kind) is never folded into the ledgers. The read
+    is pure — rejected parts are quarantined and content follow-ups rerouted by `ingest_inbox`."""
+    clean, _rej, _fu = split_observations(_read_inbox_raw(eng), _signal_vocab(), _surface_kinds())
     return clean
 
 
 def ingest_inbox(eng: Path) -> list:
-    """The real ingest (called by --plan/--apply): read the inbox, QUARANTINE every invalid record part to
-    reconvergence/inbox.rejected.jsonl with a loud stderr warning, and return the cleaned observations.
-    The sidecar is rewritten to reflect the CURRENT inbox's rejected set (idempotent)."""
+    """The real ingest (called by --plan/--apply): read the inbox, QUARANTINE every genuinely-invalid record
+    part to reconvergence/inbox.rejected.jsonl (loud stderr), ROUTE content-kind discoveries to
+    reconvergence/content_followups.jsonl for content-discovery to re-extract (fix #5), and return the cleaned
+    observations. Both sidecars are rewritten to reflect the CURRENT inbox (idempotent)."""
     records = _read_inbox_raw(eng)
-    clean, rejections = split_observations(records, _signal_vocab(), _surface_kinds())
+    clean, rejections, followups = split_observations(records, _signal_vocab(), _surface_kinds())
     sidecar = eng / REJECTED_INBOX
     if rejections:
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -342,6 +372,14 @@ def ingest_inbox(eng: Path) -> list:
                   f"{'; '.join(r.get('reasons', []))} — quarantined to {REJECTED_INBOX}, NOT folded "
                   f"into coverage_ledger.signals_used / the surface ledger", file=sys.stderr)
         atomic_write(sidecar, "\n".join(lines) + "\n")
+    fu_path = eng / CONTENT_FOLLOWUPS
+    if followups:
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        atomic_write(fu_path, "\n".join(json.dumps({**f, "queued_at": stamp}) for f in followups) + "\n")
+        print(f"[reconverge] ROUTED {len(followups)} content discovery(ies) "
+              f"({', '.join(sorted({f['value'] for f in followups})[:4])}) to content-discovery for "
+              f"URL/object-ref extraction — queued in {CONTENT_FOLLOWUPS} (not a surface-ledger element, "
+              f"not quarantined)", file=sys.stderr)
     return clean
 
 
@@ -449,24 +487,31 @@ def selftest() -> None:
     p7 = reconverge(set(), set(), cats, [{"surface": [{"kind": "weird", "value": "x"}]}], mapc, mapp)
     assert p7["added_surface_unrouted"] and not p7["reopen"] and p7["converged"] is False
 
-    # 8) Ingest validation: an out-of-vocab signal + an out-of-enum surface kind are REJECTED, not folded
-    #    (the sink:dom-backlink / `content`-surface leak shape). The valid parts of the record survive.
+    # 8) Ingest validation: an out-of-vocab signal is REJECTED, a valid surface item survives, and a
+    #    `content` discovery is ROUTED to content-discovery (fix #5), not quarantined as garbage.
     vocab = {"param:url-fetching", "asset:cloud"}
     kinds = {"param", "endpoint"}
+    froutes = {"content": "content-discovery"}
     recs = [{"source": "pp/open-redirect", "signals": ["sink:dom-backlink", "param:url-fetching"],
              "surface": [{"kind": "param", "value": "from"}, {"kind": "content", "value": "/sitemap.xml"}]}]
-    clean, rej = split_observations(recs, vocab, kinds)
+    clean, rej, fu = split_observations(recs, vocab, kinds, froutes)
     assert len(clean) == 1 and clean[0]["signals"] == ["param:url-fetching"], clean
     assert [s["value"] for s in clean[0]["surface"]] == ["from"], clean
     assert len(rej) == 1 and "sink:dom-backlink" in rej[0]["rejected_signals"]
-    assert any(b.get("kind") == "content" for b in rej[0]["rejected_surface"])
-    # fail-open: an empty vocab/kinds (unreadable map) keeps everything rather than discarding good data.
-    clean2, rej2 = split_observations(recs, set(), set())
+    assert not rej[0]["rejected_surface"], "content is a followup, not rejected garbage"
+    assert len(fu) == 1 and fu[0]["value"] == "/sitemap.xml" and fu[0]["route_to"] == "content-discovery"
+    # a TRULY out-of-enum kind (typo) is still rejected.
+    recs_bad = [{"source": "x", "surface": [{"kind": "contnet", "value": "/x"}]}]
+    _c, rb, fb = split_observations(recs_bad, vocab, kinds, froutes)
+    assert not fb and rb and any(b.get("kind") == "contnet" for b in rb[0]["rejected_surface"])
+    # fail-open: an empty vocab/kinds (unreadable map) keeps signals; content is still a followup.
+    clean2, rej2, fu2 = split_observations(recs, set(), set(), froutes)
     assert not rej2 and clean2[0]["signals"] == ["sink:dom-backlink", "param:url-fetching"]
+    assert len(fu2) == 1
     # a record with ONLY invalid parts yields no clean observation (so it can't trigger the reconverge gate).
     only_bad = [{"source": "x", "signals": ["totally:made-up"]}]
-    cb, rb = split_observations(only_bad, vocab, kinds)
-    assert cb == [] and rb and "totally:made-up" in rb[0]["rejected_signals"]
+    cb, rb2, _fb = split_observations(only_bad, vocab, kinds, froutes)
+    assert cb == [] and rb2 and "totally:made-up" in rb2[0]["rejected_signals"]
 
     print("reconverge selftest: OK")
 

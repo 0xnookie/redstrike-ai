@@ -297,12 +297,18 @@ def selftest() -> int:
     return 0
 
 
-def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=False) -> int:
-    """Update one ledger category in place (status / findings_count / reason).
+def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=False,
+         escalations=None) -> int:
+    """Update one ledger category in place (status / findings_count / reason / escalations).
 
     This is the first-class way an orchestrator flips an entry after running a
     category, instead of hand-editing the JSON. Enforces the status enum and the
-    'skipped/n/a/blocked need a reason' rule the validator checks for."""
+    'skipped/n/a/blocked need a reason' rule the validator checks for.
+
+    `escalations` (a list of escalation.py ladder technique ids) is MERGED into the entry's
+    `escalations` list — de-duped, order-preserving — so an executor records which ladder steps it
+    climbed on an empty-but-signalled surface. The recall-audit shallow-clear gate reads this to tell an
+    exhausted, honest clear from an untrustworthy first-payload clear (fix #3 — persist ladder progress)."""
     ledger_path = eng / LEDGER_NAME
     if not ledger_path.is_file():
         print(f"[!] no {LEDGER_NAME} at {eng} (run: scripts/coverage.py --plan --engagement {eng})")
@@ -329,13 +335,24 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
         hit["findings_count"] = count
     if note is not None:
         hit["reason"] = note
+    if escalations:
+        have = list(hit.get("escalations", []) or [])
+        seen = set(have)
+        for t in escalations:
+            t = str(t).strip()
+            if t and t not in seen:
+                seen.add(t)
+                have.append(t)
+        hit["escalations"] = have
     atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
     if as_json:
         print(json.dumps({"id": cat_id, "status": status,
                           "findings_count": hit.get("findings_count"),
-                          "reason": hit.get("reason")}, indent=2))
+                          "reason": hit.get("reason"),
+                          "escalations": hit.get("escalations", [])}, indent=2))
     else:
         tail = (f" findings={count}" if count is not None else "") + (f"  reason={note}" if note else "")
+        tail += (f"  escalations+={len(escalations)}" if escalations else "")
         print(f"ok: {cat_id} -> status={status}{tail}")
     return 0
 
@@ -349,6 +366,8 @@ def main() -> int:
     ap.add_argument("--status", help="new status for --mark: " + "|".join(sorted(_MARK_STATUSES)))
     ap.add_argument("--count", type=int, help="findings_count to set for --mark")
     ap.add_argument("--note", help="reason/note for --mark (required when status is skipped/n/a/blocked)")
+    ap.add_argument("--escalations", help="--mark: comma-separated escalation.py ladder technique id(s) tried "
+                    "(e.g. derive-not-assume,encoding-ladder); MERGED into the entry's escalations list")
     ap.add_argument("--list", action="store_true", help="print the routing map categories")
     ap.add_argument("--selftest", action="store_true", help="internal consistency check (CI)")
     ap.add_argument("--signals", help="signals JSON file, or '-' for stdin (omit = none => attempt all)")
@@ -390,8 +409,9 @@ def main() -> int:
             ap.error("--mark needs --engagement")
         if not args.status:
             ap.error("--mark needs --status (" + "|".join(sorted(_MARK_STATUSES)) + ")")
+        esc = [t.strip() for t in (args.escalations or "").split(",") if t.strip()] or None
         return mark(Path(args.engagement), args.mark, args.status,
-                    args.count, args.note, args.as_json)
+                    args.count, args.note, args.as_json, escalations=esc)
 
     if args.validate:
         if not args.engagement:

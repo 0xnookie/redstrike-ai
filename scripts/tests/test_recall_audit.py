@@ -23,6 +23,7 @@ MAPC = [
     {"id": "xss", "triggers": ["sink:html-reflect", "sink:dom", "param:any"]},
     {"id": "sqli", "triggers": ["param:injectable"]},
     {"id": "ssrf", "triggers": ["param:url-fetching"]},
+    {"id": "injection", "triggers": ["sink:template", "sink:command", "param:injectable"]},
     {"id": "secrets", "triggers": []},
 ]
 
@@ -85,6 +86,34 @@ class SkipsAndPending(unittest.TestCase):
                {"id": "sqli", "status": "pending"}]                         # high
         r = ra.audit(led, set(), MAPC)
         self.assertEqual(r["gaps"][0]["severity"], "high")
+
+
+class SinkClassBlackBox(unittest.TestCase):
+    """fix #4: a server-side-sink class (ssti/command-injection/deserialization, under `injection`) gated by
+    sink:template/sink:command can't be SEEN black-box, so a no-signal skip is recon blindness — a MEDIUM gap."""
+
+    def test_blackbox_sink_skip_is_medium_gap(self):
+        led = [{"id": "injection", "status": "skipped",
+                "reason": "no template/command/deserialization sink surfaced"}]
+        r = ra.audit(led, set(), MAPC)
+        g = next(x for x in r["gaps"] if x["category"] == "injection")
+        self.assertEqual(g["type"], "sink-class-skipped-blackbox")
+        self.assertEqual(g["severity"], "medium")
+
+    def test_whitebox_skip_is_trustworthy(self):
+        led = [{"id": "injection", "status": "skipped", "reason": "source reviewed; no sink reaches input"}]
+        self.assertEqual(ra.audit(led, {"source:available"}, MAPC)["summary"]["total"], 0)
+
+    def test_sink_signal_present_is_skipped_but_signalled_not_this(self):
+        # if a sink signal IS available but the class was skipped, that's the HIGH skipped-but-signalled gap.
+        led = [{"id": "injection", "status": "skipped", "reason": "x"}]
+        r = ra.audit(led, {"sink:template"}, MAPC)
+        self.assertTrue(any(g["type"] == "skipped-but-signalled" for g in r["gaps"]))
+        self.assertFalse(any(g["type"] == "sink-class-skipped-blackbox" for g in r["gaps"]))
+
+    def test_non_sink_class_skip_stays_silent(self):
+        led = [{"id": "ssrf", "status": "skipped", "reason": "no URL-fetching parameter surfaced"}]
+        self.assertEqual(ra.audit(led, set(), MAPC)["summary"]["total"], 0)
 
 
 class SelfTest(unittest.TestCase):
