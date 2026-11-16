@@ -952,5 +952,112 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
             self.assertEqual(payload["integrity_errors"], [])
 
 
+# --------------------------------------------------------------------------- #
+# P1-1: recall-audit hard gate — no report over an un-closed shallow-clear /
+# skipped-but-signalled / never-run gap (the false-negative altitude).
+# --------------------------------------------------------------------------- #
+class TestRecallAuditGate(unittest.TestCase):
+    """The recall audit was advisory only — the noxframe report shipped over ~10 HIGH shallow-clear gaps.
+    Once a report exists a gated recall gap must be closed (escalate + re-run) or explicitly accepted."""
+
+    def _eng(self, d, *, shallow=True, escalated=False, accept=None):
+        eng = pathlib.Path(d)
+        f = valid_finding()  # independent reviewer, accepted
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        if shallow:
+            # sqli: high-prior (a signal matched) but empty, ladder unexhausted => a shallow-clear gap
+            sqli = next(c for c in led["categories"] if c["id"] == "sqli")
+            sqli["triggers_matched"] = ["param:injectable"]
+            sqli["findings_count"] = 0
+            if escalated:
+                sys.path.insert(0, str(REPO / "scripts"))
+                import escalation  # noqa: E402
+                sqli["escalations"] = escalation.ladder_for("sqli")
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        if accept is not None:
+            (eng / "reviews").mkdir(parents=True, exist_ok=True)
+            (eng / "reviews" / "recall_audit_accepts.json").write_text(json.dumps(accept), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_shallow_clear_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True))
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["recall_errors"])
+            self.assertTrue(any("sqli" in e and "shallow-clear" in e for e in payload["recall_errors"]))
+
+    def test_no_shallow_clear_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=False))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+
+    def test_exhausted_ladder_is_not_a_gap(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True, escalated=True))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+
+    def test_typed_accept_clears(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True,
+                                          accept={"shallow-clear:sqli": "unseeded test DB, no rows to extract"}))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+            self.assertTrue(any("operator-accepted" in w for w in payload["warnings"]))
+
+    def test_bare_category_accept_clears(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True, accept={"sqli": "deliberately deferred to retest"}))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+
+    def test_blank_accept_reason_is_not_an_accept(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True, accept={"shallow-clear:sqli": "   "}))
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["recall_errors"])
+
+    def test_no_report_recall_is_silent(self):
+        """Mid-hunt (no consolidated report): a shallow-clear ledger must NOT fail the gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            cov = vc._try_import_coverage()
+            led = cov.plan(cov.load_map(), None, {"web"})
+            sqli = next(c for c in led["categories"] if c["id"] == "sqli")
+            sqli["status"], sqli["findings_count"] = "attempted", 0
+            sqli["triggers_matched"] = ["param:injectable"]
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            self.assertEqual(vc._recall_hard_errors(eng), [])
+
+
 if __name__ == "__main__":
     unittest.main()

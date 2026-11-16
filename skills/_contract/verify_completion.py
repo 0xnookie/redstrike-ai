@@ -541,6 +541,98 @@ def _coordination_integrity_errors(eng: Path) -> list:
     return errs
 
 
+def _try_import_recall_audit():
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "recall_audit.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_recall_audit", p)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["rs_recall_audit"] = mod
+        # recall_audit imports `escalation`; make sure scripts/ is importable for it
+        sys.path.insert(0, str(_repo_root() / "scripts"))
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# recall-audit gap types that make a clean-looking report untrustworthy (false-negative altitude). These
+# are the HIGH gaps a report must not ship over: a class that ran-and-found-nothing on a signalled surface
+# with the escalation ladder unexhausted (shallow-clear), a class skipped although a signal matched it
+# (skipped-but-signalled), or a routed class that never ran (pending-at-close / never-run). `untested-surface`
+# is already a hard gate (surface) and `weak-skip-reason`/`no-ledger` are covered elsewhere, so they stay
+# advisory here to avoid double-failing.
+_RECALL_GATED_TYPES = {"shallow-clear", "skipped-but-signalled", "pending-at-close", "never-run"}
+
+
+def _recall_accepts(eng: Path) -> dict:
+    """Operator acknowledgments that a recall gap may remain at report time because the clear is in fact
+    trustworthy (or the class is out of scope for a stated reason). File:
+    `<eng>/reviews/recall_audit_accepts.json`, either `{"<type>:<category>": "reason"}` (or a bare
+    `"<category>"` to accept all its gated gaps), or `[{"id":"<type>:<cat>"|"<cat>", "reason":...}]`.
+    Mirrors reviews/self_verified_accepts.json. Returns key→reason for every entry with a non-empty reason."""
+    p = eng / "reviews" / "recall_audit_accepts.json"
+    if not p.is_file():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    if isinstance(d, dict):
+        for k, v in d.items():
+            reason = v if isinstance(v, str) else (v.get("reason") if isinstance(v, dict) else "")
+            if isinstance(reason, str) and reason.strip():
+                out[str(k)] = reason.strip()
+    elif isinstance(d, list):
+        for e in d:
+            if isinstance(e, dict) and e.get("id") and str(e.get("reason", "")).strip():
+                out[str(e["id"])] = str(e["reason"]).strip()
+    return out
+
+
+def _recall_check(eng: Path) -> tuple:
+    """(hard_errors, warnings) for the recall-audit gate. HARD only once a report exists: a gated recall
+    gap (shallow-clear / skipped-but-signalled / never-run) must be closed (escalate + re-run the class) or
+    explicitly accepted. An accepted gap is surfaced as a warning so the exception is never silent."""
+    if not _report_present(eng):
+        return [], []
+    ra = _try_import_recall_audit()
+    if not ra:
+        return [], []
+    try:
+        res = ra.load_and_audit(eng)
+    except Exception:  # noqa: BLE001
+        return [], []
+    accepts = _recall_accepts(eng)
+    hard, warns = [], []
+    for g in res.get("gaps", []):
+        if g.get("type") not in _RECALL_GATED_TYPES:
+            continue
+        cat = g.get("category") or "?"
+        gtype = g.get("type")
+        keys = (f"{gtype}:{cat}", str(cat))
+        reason = next((accepts[k] for k in keys if k in accepts), None)
+        detail = g.get("detail") or ""
+        if reason:
+            warns.append(f"recall-audit gap operator-accepted: {cat} [{gtype}] — {reason} "
+                         f"(backfill: escalate/run the class to remove this exception)")
+        else:
+            hard.append("recall-audit gate (report present → a shallow-clear/skipped-but-signalled/"
+                        f"never-run gap must be closed or accepted): {cat} [{gtype}] — {detail}. "
+                        f"Escalate + re-run the class, or record an accept in "
+                        f"reviews/recall_audit_accepts.json (\"{gtype}:{cat}\": \"why this clear is trustworthy\")")
+    return hard, warns
+
+
+def _recall_hard_errors(eng: Path) -> list:
+    """HARD recall-audit gate (named entry point; mirrors _coverage_hard_errors/_surface_hard_errors):
+    the gated recall gaps a report must not ship over. [] when no report is present."""
+    return _recall_check(eng)[0]
+
+
 def _duplicate_id_errors(eng: Path, findings: list) -> list:
     """HARD duplicate finding-id gate — active only once a consolidated report exists.
 
@@ -853,6 +945,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # Coordination-artifact integrity: HARD once a report exists — the inbox / surface ledger / coverage
     # ledger must obey their OWN vocabularies (no folded-in out-of-vocab signal or out-of-enum kind).
     integrity_errors = _coordination_integrity_errors(eng)
+    # Recall audit (false-negative altitude): HARD once a report exists — a shallow-clear /
+    # skipped-but-signalled / never-run gap must be closed or explicitly accepted (fix: the recall audit
+    # was advisory only, so a report shipped over ~10 HIGH shallow-clear gaps).
+    recall_errors, recall_warns = _recall_check(eng)
+    top_warnings.extend(recall_warns)
     if not any(eng.rglob("host_discovery.json")):
         top_warnings.append("no host_discovery.json — recon's structured host/port map wasn't persisted; "
                             "the console's Ports view will be empty (Assets falls back to scope+findings). "
@@ -919,7 +1016,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
     gate_ok = ((not failed) and (not coverage_errors) and (not review_errors)
-               and (not dup_errors) and (not integrity_errors))
+               and (not dup_errors) and (not integrity_errors) and (not recall_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -928,6 +1025,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "review_errors": review_errors,
                           "duplicate_id_errors": dup_errors,
                           "integrity_errors": integrity_errors,
+                          "recall_errors": recall_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -951,6 +1049,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("\n✗ coordination-integrity gate FAILED (a coordination artifact broke its own vocabulary):")
             for ie in integrity_errors:
                 print(f"  - {ie}")
+        if recall_errors:
+            print("\n✗ recall-audit gate FAILED (a report is present, so no un-closed shallow-clear/"
+                  "skipped-but-signalled/never-run gap):")
+            for rce in recall_errors:
+                print(f"  - {rce}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -964,7 +1067,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         print(f"\n{verdict}: {len(results) - len(failed)}/{len(results)} finding(s) pass hard checks; "
               f"{len(failed)} failure(s), {len(coverage_errors)} coverage-gate error(s), "
               f"{len(review_errors)} independent-review error(s), {len(dup_errors)} duplicate-id error(s), "
-              f"{len(integrity_errors)} coordination-integrity error(s), {len(all_warnings)} warning(s).")
+              f"{len(integrity_errors)} coordination-integrity error(s), {len(recall_errors)} recall-audit "
+              f"error(s), {len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -979,6 +1083,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("A coordination artifact (inbox / surface ledger / coverage ledger) holds an out-of-vocab "
                   "signal or out-of-enum surface kind => quarantine it (reconverge --apply) and re-plan, "
                   "don't fold an invalid token into the ledgers.")
+        if recall_errors:
+            print("A clean-looking class ran shallow (signalled surface, ladder unexhausted) or a routed "
+                  "class never ran => escalate + re-run it, or record an explicit, reasoned accept in "
+                  "reviews/recall_audit_accepts.json before reporting.")
     return gate_ok
 
 
