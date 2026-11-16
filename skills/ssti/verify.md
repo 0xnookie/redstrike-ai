@@ -18,6 +18,8 @@ EVALUATED (not reflected). Re-run the arithmetic probe and confirm the computed 
 SSTI with confirmed RCE → Critical. SSTI with expression eval / data read but a sandbox blocking exec
 → High/Medium per what's readable. Justify from the benign proof actually obtained.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ssti-verify",

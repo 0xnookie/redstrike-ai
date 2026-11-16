@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `cors` skill —
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/cors --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/cors/verify.md` (the CORS gauntlet) + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/cors/verify.md` (the CORS gauntlet) + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: ACAO **reflects an attacker-controllable origin** AND **ACAC:true** over an endpoint returning **sensitive, credentialed data** (or sensitive data exposed to any origin), the combo is **browser-enforceable** (not `*`+credentials), and the **PoC read the data cross-origin**. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `cors-verify`) and set `status`.

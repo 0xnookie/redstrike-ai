@@ -21,6 +21,8 @@ re-execute the fetch from an attacker origin in a victim session.
 ## CVSS integrity
 Impact = sensitivity of the readable data (session tokens / PII → high). Justify from what the PoC read.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "cors-verify",

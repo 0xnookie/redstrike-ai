@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `bola-bfla` skil
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `api_tests.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/bola-bfla --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/bola-bfla/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/bola-bfla/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: BOLA — A's token returned B's object (two test accounts, B-specific data, 200 not 403); BFLA — a low-priv identity's call to a reserved operation EXECUTED; excessive-data — sensitive fields returned that are only client-filtered; mass-assignment — privileged field changed (read-back). De-dupe vs idor/privesc. Test accounts; benign; scope + approval.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `bola-bfla-verify`) + set `status`.

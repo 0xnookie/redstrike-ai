@@ -15,11 +15,16 @@ AND returned sensitive credentials/token. Guard credential hygiene strictly.
       claim creds if they were genuinely obtained.
 - [ ] **Credential hygiene.** Artifacts store a REDACTED fingerprint, not the full secret; the creds
       were NOT used to access/modify cloud resources (only a benign identity check, if any).
+- [ ] **Cross-skill dup (flag, don't merge).** The same SSRF sink is often also reported by `ssrf-inband`.
+      You can't see sibling findings, so DON'T drop it — note a suspected dup in `review.notes` (e.g. "likely
+      the same SSRF as an ssrf-inband finding on <param>") for reporting to merge.
 - [ ] **Scope + approval.** In scope; approved.
 
 ## CVSS integrity
 Retrieved instance credentials → Critical (direct cloud account compromise path). Metadata reachable
 but no creds (IMDSv2) → Medium/High per what's exposed. Justify from what was actually obtained.
+
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
 
 ## Verdict (write into each finding's review{} block)
 ```json

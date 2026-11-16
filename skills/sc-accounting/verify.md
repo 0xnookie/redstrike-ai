@@ -27,6 +27,8 @@ Rate by the value the invariant break actually moves: steal/mint/seize funds via
 inflation → Critical/High; griefing, stuck funds, or precision-dust accrual → Low/Medium. Recompute from the
 demonstrated before/after delta + $ impact; flag inflation (e.g. a sub-wei rounding dust finding rated Critical).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-accounting-verify",

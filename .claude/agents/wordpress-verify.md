@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `wordpress` skil
 **Input:** engagement output dir `OUT` (`findings.json` + `cve_map.json` + `surface.json` + `framework.json`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/wordpress --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/wordpress/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/wordpress/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + `cve_map.json` + `surface.json` + `framework.json`.
 4. Apply the 7 base checks + the WordPress gauntlet. Decisive: WordPress + the core/plugin/theme version is evidenced from the target via ≥2 independent signals (not one banner, not a guess); the CVE's affected range includes THAT exact version (for a plugin/theme, slug AND version both match — no same-named/neighbour match); the component is present/active and reachability is honest; NO exploitation happened here (version/behaviour confirmation only; xmlrpc pingback/multicall is feasibility-only, user-enum read-only); exploit-availability refs are real; de-duped vs `cve-intelligence` (generic libs), `exposed-surface` (file/VCS exposure), `secrets` (live secrets). In scope.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `wordpress-verify`) + set `status`.

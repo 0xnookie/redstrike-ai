@@ -20,6 +20,8 @@ Re-request the stored file and confirm the marker / OOB.
 Upload-to-RCE → Critical (`S:C`, code execution). Justify from the execution evidence; a stored-but-
 non-executing upload is not RCE (maybe stored-XSS/other — reclassify).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "upload-rce-verify",

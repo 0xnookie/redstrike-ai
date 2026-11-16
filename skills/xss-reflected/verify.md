@@ -22,6 +22,8 @@ For each finding, you MUST rule out every item or the finding is NOT confirmed:
 ## CVSS integrity (base check #4)
 Recompute the vector from evidence. Reflected XSS is typically `AV:N/AC:L/PR:N/UI:R/S:*/C:L/I:L/A:N` (Medium) — raise `S:C`/impact only with evidence (e.g. token theft, account action demonstrated). Reject inflation to High/Critical without that evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {

@@ -29,6 +29,8 @@ Use the CVE's CVSS but temper by reachability/exploitability in THIS target. A r
 plugin RCE with a public exploit → Critical; an installed-but-inactive plugin, or a version-only match →
 Info/Low with `potential_severity` carrying the version-matched ceiling. Justify from the evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "wordpress-verify",

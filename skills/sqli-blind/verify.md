@@ -20,6 +20,8 @@ Run the 7 base checks + the blind SQLi gauntlet. Confirmed = a reproducible bool
 Blind SQLi is still High (data is extractable, just slowly). Justify from the proven inference; don't
 down-rate to Low just because it's blind, nor claim write/RCE without evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sqli-blind-verify",

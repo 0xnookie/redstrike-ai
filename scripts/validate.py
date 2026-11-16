@@ -103,6 +103,30 @@ for schema in sorted((skills_dir / "_contract").glob("*.schema.json")):
     except json.JSONDecodeError as e:
         err(f"{schema.name}: invalid JSON: {e}")
 
+# 4b — schema versioning: finding / attack_chain / *_context artifacts must declare a `version` field so
+# their shape can evolve without silently breaking consumers (extends the map_version pattern). A drift
+# guard: if the field is dropped, this fails.
+for scm in sorted((skills_dir / "_contract").glob("*_context.schema.json")) + [
+        skills_dir / "_contract" / "attack_chain.schema.json"]:
+    if not scm.is_file():
+        continue
+    try:
+        d = json.loads(scm.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        continue  # already reported by check 4
+    checked["schema_version"] = checked.get("schema_version", 0) + 1
+    if "version" not in (d.get("properties") or {}):
+        err(f"{scm.name}: schema must declare a root 'version' property (schema-versioning drift)")
+fsp = skills_dir / "_contract" / "finding.schema.json"
+if fsp.is_file():
+    try:
+        fd = json.loads(fsp.read_text(encoding="utf-8"))
+        checked["schema_version"] = checked.get("schema_version", 0) + 1
+        if "version" not in ((fd.get("$defs", {}).get("finding", {}) or {}).get("properties") or {}):
+            err("finding.schema.json: $defs/finding must declare a 'version' property (schema-versioning drift)")
+    except json.JSONDecodeError:
+        pass
+
 # 5 — .claude agents + skill bindings
 agents_dir = ROOT / ".claude" / "agents"
 if agents_dir.is_dir():
@@ -195,6 +219,32 @@ else:
             err(f"routing-map.json: signal '{sig}' is in the vocab but has no signal_sources producer "
                 f"(dead signal — give it a producer or remove it)")
         checked["signal_provenance"] = len(sources)
+
+        # 7c — signal-vocabulary schema sync: skills/_contract/signals.schema.json enumerates the SAME
+        # closed vocabulary routing-map.json declares, so coordination artifacts (the re-convergence inbox,
+        # coverage_ledger.signals_used, the signals feeder) can be validated against one source. Any drift in
+        # either direction is a FAIL — a signal in the vocab but not the schema can't be validated, and a
+        # signal in the schema but not the vocab routes to nothing (the sink:dom-backlink leak shape).
+        sig_schema_path = ROOT / "skills" / "_contract" / "signals.schema.json"
+        if not sig_schema_path.is_file():
+            err("skills/_contract/signals.schema.json missing (the signal-vocabulary schema)")
+        else:
+            try:
+                sig_schema = json.loads(sig_schema_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as e:
+                sig_schema = None
+                err(f"signals.schema.json: invalid JSON: {e}")
+            if sig_schema is not None:
+                checked["signal_vocab"] = 1
+                schema_vocab = set((sig_schema.get("$defs", {}).get("signal", {}) or {}).get("enum", []) or [])
+                if not schema_vocab:
+                    err("signals.schema.json: $defs/signal/enum is empty or missing (no vocabulary)")
+                for extra in sorted(schema_vocab - vocab):
+                    err(f"signals.schema.json: enum has '{extra}' which routing-map.json does not declare "
+                        f"(a signal that routes to nothing)")
+                for missing in sorted(vocab - schema_vocab):
+                    err(f"signals.schema.json: enum is MISSING '{missing}' from the routing-map vocab "
+                        f"(it could not be validated at ingest)")
 
 # 8 — coverage.py routing/ledger self-test
 try:
@@ -327,6 +377,40 @@ if raup.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"recall_audit.py selftest failed: {e}")
 
+# 8g — dedup self-test (deterministic cross-agent de-duplication: canonical key + merge selection)
+ddup = ROOT / "scripts" / "dedup.py"
+if ddup.is_file():
+    try:
+        import importlib.util
+        _dspec = importlib.util.spec_from_file_location("rs_dedup_lint", ddup)
+        _ded = importlib.util.module_from_spec(_dspec)
+        sys.modules["rs_dedup_lint"] = _ded
+        _dspec.loader.exec_module(_ded)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _ded.selftest()
+        checked["dedup"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"dedup.py selftest failed: {e}")
+
+# 8h — chain_validate self-test (attack-chain integrity: step->accepted finding + composite flag)
+chvp = ROOT / "scripts" / "chain_validate.py"
+if chvp.is_file():
+    try:
+        import importlib.util
+        _chspec = importlib.util.spec_from_file_location("rs_chainvalidate_lint", chvp)
+        _chv = importlib.util.module_from_spec(_chspec)
+        sys.modules["rs_chainvalidate_lint"] = _chv
+        _chspec.loader.exec_module(_chv)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _chv.selftest()
+        checked["chain_validate"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"chain_validate.py selftest failed: {e}")
+
 # 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():
@@ -393,6 +477,10 @@ for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_c
     for verdict in ("accepted", "blocked", "rejected", "needs-evidence"):
         if verdict not in verify_text:
             err(f"{sk.name}/verify.md: verdict template is missing the '{verdict}' verdict")
+    # reviewer rigor: the CVSS step must tell the reviewer to COMPUTE Medium+ vectors with scripts/cvss.py
+    # (don't hand-assert the score). A drift guard for the P2-4 sweep.
+    if "scripts/cvss.py" not in verify_text:
+        err(f"{sk.name}/verify.md: CVSS step must reference scripts/cvss.py (compute Medium+ vectors)")
 
 # 13 — binding symmetry: every executor's verify.md must have a matching .claude/agents/<x>-verify.md
 # reviewer, and every <x>-verify reviewer must have a matching executor — no orphan on either side.
@@ -452,6 +540,17 @@ else:
             err(f"README count gate: can't find the '{_label}' number (pattern {_pat!r})")
         elif int(_m.group(1)) != _expected:
             err(f"README count gate: {_label} says {_m.group(1)} but the repo has {_expected}")
+
+# 16 — reviewer-rigor lint: every `*-verify` agent's load list must include the shared counterevidence +
+# severity-calibration rubric files, so the reviewer loads them up front (not just transitively). Drift
+# guard for the P2-4 sweep.
+if agents_dir.is_dir():
+    for a in sorted(agents_dir.glob("*-verify.md")):
+        checked["reviewer_rigor"] = checked.get("reviewer_rigor", 0) + 1
+        atext = a.read_text(encoding="utf-8", errors="replace")
+        for ref in ("counterevidence.md", "severity-calibration.md"):
+            if ref not in atext:
+                err(f".claude/agents/{a.name}: reviewer must load skills/_contract/{ref}")
 
 # report
 print("Redstrike validate.py")

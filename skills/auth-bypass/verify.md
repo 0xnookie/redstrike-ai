@@ -19,6 +19,8 @@ required step) was reached WITHOUT completing the intended auth. Re-run the bypa
 ## CVSS integrity
 Full auth bypass / 2FA bypass → High/Critical. Rate by what the bypass grants. Justify from evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "auth-bypass-verify",

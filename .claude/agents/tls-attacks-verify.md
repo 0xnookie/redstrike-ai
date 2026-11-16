@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `tls-attacks` sk
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/tls-attacks --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/tls-attacks/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/tls-attacks/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` and every evidence/poc file each finding references (scanner output / controlled-check evidence).
 4. For EACH finding, apply the 7 base checks + the gauntlet. Decisive: **the weakness is actually
    negotiated/present** — the weak protocol/cipher completes a handshake, the cert genuinely fails validation,

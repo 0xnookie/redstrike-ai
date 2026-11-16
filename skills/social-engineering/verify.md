@@ -24,6 +24,8 @@ Rate the organizational/control exposure the gap represents (e.g. credential-har
 account takeover, absent reporting path delaying response), from aggregate metrics — not from a single
 click. Keep it process-level.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "social-engineering-verify",

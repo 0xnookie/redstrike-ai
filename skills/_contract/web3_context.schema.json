@@ -7,6 +7,7 @@
   "required": ["target", "generated_at"],
   "additionalProperties": false,
   "properties": {
+    "version": { "type": "integer", "description": "schema version of this context document (current = 1). Optional and backward-compatible (mirrors coverage_ledger.map_version)." },
     "target": { "type": "string", "description": "protocol / program name" },
     "generated_at": { "type": "string", "format": "date-time" },
     "scope_ref": { "type": "string" },

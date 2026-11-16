@@ -22,6 +22,8 @@ security-relevant sink. The headline is password-reset poisoning — re-drive it
 Password-reset poisoning → High (account takeover path). Cache poisoning via host → per blast radius.
 A benign absolute-URL reflection with no exploit path → Low/Info. Justify from the confirmed sink.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "host-header-verify",

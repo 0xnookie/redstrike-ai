@@ -33,6 +33,8 @@ Tie severity to what the signature actually revealed, not the mere existence of 
 Recompute the vector from the evidence; reject inflation (a `200` on `/.git/` with no walkable objects is
 Info, not High).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "exposed-surface-verify",

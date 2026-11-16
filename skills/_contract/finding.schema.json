@@ -11,6 +11,7 @@
       "required": ["id", "title", "asset", "category", "severity", "confidence", "status", "evidence", "reproduction"],
       "additionalProperties": false,
       "properties": {
+        "version": { "type": "integer", "description": "schema version of this finding (current = 1). Optional and backward-compatible; stamp it so the shape can evolve without silently breaking consumers (mirrors coverage_ledger.map_version)." },
         "id": { "type": "string", "pattern": "^RS-[0-9]{4}-[0-9]{3,}$", "description": "RS-<year>-<seq>, engagement-unique." },
         "title": { "type": "string", "minLength": 4 },
         "asset": { "type": "string", "description": "Target host/URL/endpoint. MUST be in engagement scope." },
@@ -52,6 +53,18 @@
         "impact": { "type": "string", "description": "What the evidence proves an attacker can do. Backtick any inline payload/command/JSON as in `reproduction`." },
         "remediation": { "type": "string", "description": "How to fix it. Backtick any inline code/config/payload." },
         "references": { "type": "array", "items": { "type": "string" } },
+        "cleanup": {
+          "type": "object",
+          "description": "Reversion record. REQUIRED for a post-exploitation/persistence finding that planted or changed state (persistence + the AD/credential post-ex classes) — it proves the benign artifact/change was removed and removal was verified, so the mechanical gate can enforce reversion instead of trusting prose. Omit for findings that change nothing (ordinary web findings).",
+          "required": ["mechanism", "removed", "verified_by", "ref"],
+          "additionalProperties": false,
+          "properties": {
+            "mechanism": { "type": "string", "minLength": 3, "description": "what was planted/changed and then reverted (e.g. registry Run key, scheduled task, test certificate, added group membership, dumped hash file)." },
+            "removed": { "type": "boolean", "description": "true = the change was reverted / the artifact removed. The gate HARD-FAILS a post-ex/persistence finding whose removed is not true." },
+            "verified_by": { "type": "string", "minLength": 3, "description": "how removal was CONFIRMED (the command/observation that showed it gone, or the reviewer that checked)." },
+            "ref": { "type": "string", "description": "evidence-vault path to the cleanup proof (e.g. cleanup.md or the removal command output)." }
+          }
+        },
         "review": {
           "type": "object",
           "description": "Filled by verify.md. Absent = not yet semantically verified.",

@@ -18,6 +18,8 @@ Run the 7 base checks + the LDAP gauntlet. Confirmed = a filter injection manipu
 ## CVSS integrity
 Auth bypass → High/Critical; directory enumeration (users/roles) → Medium/High. Justify from the demonstrated manipulation.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ldap-injection-verify",

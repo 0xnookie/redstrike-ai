@@ -24,6 +24,8 @@ Rate from reach and preconditions — is the secret shared across the fleet (rem
 device; does exploitation need physical access, the dumped image, or network reach? Not merely that a
 string was found.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "iot-verify",

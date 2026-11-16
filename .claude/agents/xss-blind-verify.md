@@ -11,7 +11,7 @@ You are the **independent semantic reviewer** for the Redstrike `xss-blind` skil
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/xss-blind --out OUT` (expect exit 0). If it failed, stop. (Note: an empty `callbacks.jsonl` is a valid liveness pass but yields NO finding.)
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/xss-blind/verify.md` (the blind-XSS gauntlet) + `skills/_contract/finding.schema.json`.
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/xss-blind/verify.md` (the blind-XSS gauntlet) + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `callbacks.jsonl`, `injections.jsonl`, and every evidence/poc file.
 4. For EACH finding, apply the 7 base checks + the gauntlet. The decisive points: an **attributable OOB callback** whose unique token maps to exactly one injection, and the callback **proves JS execution** (HTTP beacon carrying JS-derived data like `document.domain`) — NOT a bare DNS hit, AV, or link-preview. No callback ⇒ not a finding. No sufficient evidence ⇒ `needs-evidence`; ruled out ⇒ `rejected`; proven ⇒ `accepted`.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block into each finding (reviewer `xss-blind-verify`) and set `status`.

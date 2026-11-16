@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `llm-output-hand
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `output_tests.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/llm-output-handling --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/llm-output-handling/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/llm-output-handling/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: the downstream sink ACTUALLY FIRED from the model's
    output — XSS executed in the render, the query injected, the server fetched, code ran (apply the

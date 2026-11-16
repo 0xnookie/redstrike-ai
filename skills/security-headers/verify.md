@@ -21,6 +21,8 @@ Run the 7 base checks + the header gauntlet.
 Default these to Info/Low. Elevate ONLY with the concrete path spelled out and evidenced. Reject
 inflation — this reviewer's main job is to keep the report credible.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "security-headers-verify",

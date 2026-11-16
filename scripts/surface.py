@@ -62,25 +62,53 @@ KIND_ROUTES = {
     "auth-flow":     ["auth", "jwt", "oauth"],
 }
 
+# The CLOSED set of surface kinds — identical to surface_ledger.schema.json $defs/surface/kind/enum.
+# A discovered element whose kind is NOT one of these is a malformed coordination record (e.g. an inbox
+# `content` surface): it is REJECTED at ingest, never added to the ledger as `n/a`, where an invalid kind
+# would masquerade as an accounted-for element and a gate would read it as clean.
+VALID_KINDS = frozenset(KIND_ROUTES)
+
 
 def route_surface(kind: str) -> list:
     """Category ids a surface of this kind should be tested by (deterministic)."""
     return list(KIND_ROUTES.get(kind, []))
 
 
+def partition_items(items):
+    """Split normalized discovered items into (valid, rejected). A valid item has a non-empty value and a
+    kind in the closed surface-kind enum; everything else is rejected WITH a reason, so a malformed
+    coordination record is quarantined instead of silently entering the ledger. Pure (no I/O)."""
+    valid, rejected = [], []
+    for it in items or []:
+        kind = (it or {}).get("kind")
+        value = str((it or {}).get("value", "")).strip()
+        if not kind or not value:
+            rejected.append({**(it or {}), "_reject_reason": "missing kind or value"})
+        elif kind not in VALID_KINDS:
+            rejected.append({**it, "_reject_reason": f"kind {kind!r} is not a surface-ledger kind "
+                                                     f"({', '.join(sorted(VALID_KINDS))})"})
+        else:
+            valid.append(it)
+    return valid, rejected
+
+
 def _sid(kind: str, value: str) -> str:
     return f"{kind}:" + hashlib.sha1(f"{kind}|{value}".encode()).hexdigest()[:10]
 
 
-def plan_from_items(engagement: str, items) -> dict:
+def plan_from_items(engagement: str, items, warn: bool = True) -> dict:
     """Build a fresh ledger from normalized discovered items [{kind,value,discovered_by?}, ...].
-    Every element starts `discovered` (routes computed) or `n/a` when it routes to no category."""
+    Every VALID element starts `discovered` (routes computed) or `n/a` when it routes to no category.
+    An out-of-enum kind is REJECTED (not added as n/a) and, when `warn`, announced loudly on stderr."""
+    valid, rejected = partition_items(items)
+    if rejected and warn:
+        for r in rejected:
+            print(f"[surface] REJECTED invalid surface record: kind={r.get('kind')!r} "
+                  f"value={str(r.get('value',''))[:60]!r} — {r['_reject_reason']}", file=sys.stderr)
     seen, surfaces = set(), []
-    for it in items:
+    for it in valid:
         kind = it.get("kind")
         value = str(it.get("value", "")).strip()
-        if not kind or not value:
-            continue
         sid = _sid(kind, value)
         if sid in seen:
             continue
@@ -232,18 +260,37 @@ def selftest() -> None:
     assert route_surface("identity") == ["authz", "api"]
     assert route_surface("unknown-kind") == []
 
-    # plan: routed element -> discovered; unroutable kind -> n/a; de-dupe
+    # partition: an out-of-enum kind (e.g. the inbox `content` surface) is REJECTED, not folded as n/a.
+    good, bad = partition_items([
+        {"kind": "param", "value": "q"},
+        {"kind": "content", "value": "/sitemap.xml"},        # not a surface-ledger kind -> rejected
+        {"kind": "param", "value": ""},                      # empty value -> rejected
+    ])
+    assert [g["value"] for g in good] == ["q"], good
+    assert {b.get("kind") for b in bad} == {"content", "param"}, bad
+    assert all(b.get("_reject_reason") for b in bad)
+
+    # plan: routed element -> discovered; de-dupe; an invalid kind is dropped (not added as n/a)
     led = plan_from_items("demo", [
         {"kind": "param", "value": "q", "discovered_by": "content-discovery"},
         {"kind": "param", "value": "q"},                     # dup -> dropped
         {"kind": "identity", "value": "userA"},
-        {"kind": "misc", "value": "unroutable"},             # unknown kind -> n/a
-    ])
+        {"kind": "misc", "value": "unroutable"},             # invalid kind -> REJECTED
+    ], warn=False)
     ids = {s["id"] for s in led["surfaces"]}
-    assert len(ids) == 3, led
+    assert len(ids) == 2, led
     byval = {s["value"]: s for s in led["surfaces"]}
     assert byval["q"]["status"] == "discovered" and byval["q"]["routed_to"]
-    assert byval["unroutable"]["status"] == "n/a" and byval["unroutable"]["reason"]
+    assert "unroutable" not in byval, "an invalid kind must not enter the ledger"
+
+    # the VALID_KINDS constant must track the schema enum (drift guard)
+    try:
+        import json as _json
+        _sp = Path(__file__).resolve().parent.parent / "skills" / "_contract" / "surface_ledger.schema.json"
+        _enum = set(_json.loads(_sp.read_text(encoding="utf-8"))["$defs"]["surface"]["properties"]["kind"]["enum"])
+        assert set(VALID_KINDS) == _enum, (set(VALID_KINDS) ^ _enum)
+    except FileNotFoundError:  # pragma: no cover - schema always present in-repo
+        pass
 
     # validate: a discovered routed surface is a gap
     ok, _l, msgs = validate(led)

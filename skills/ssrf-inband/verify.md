@@ -15,11 +15,17 @@ internal/unauthorized target with in-band proof. Re-run the request and inspect 
       corresponds to the internal target (not an error page that looks similar). `poc/<id>/` shows it.
 - [ ] **Bypass (if claimed) genuine.** The allowlist/redirect/protocol bypass is the real reason it
       reached internal, reproducibly.
+- [ ] **Cross-skill dup (flag, don't merge).** If this SSRF reaches cloud metadata
+      (`169.254.169.254` / metadata host), it is also `ssrf-cloud`'s territory. You can't see sibling
+      findings, so DON'T drop it — note a suspected dup in `review.notes` (e.g. "likely the same SSRF as an
+      ssrf-cloud finding on <param>") for reporting to merge.
 - [ ] **Scope + safety.** Target ∈ in-scope internal ranges; read-only; approved.
 
 ## CVSS integrity
 Internal read / service interaction is typically High (`S:C`); full read of sensitive internal data
 or protocol-smuggling to an internal service → Critical. Justify from what was actually reached/read.
+
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
 
 ## Verdict (write into each finding's review{} block)
 ```json

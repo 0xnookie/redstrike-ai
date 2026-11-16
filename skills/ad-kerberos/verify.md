@@ -19,6 +19,8 @@ on a TEST principal, cleaned up. Guard the "capability, not full compromise" lin
 Kerberoast of a privileged account → High/Critical (path to DA); delegation/ticket abuse → Critical
 (domain compromise capability). Justify from what was actually cracked/demonstrated, not the theoretical ceiling.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-kerberos-verify",

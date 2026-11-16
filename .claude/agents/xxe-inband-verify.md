@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `xxe-inband` ski
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `xxe_tests.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`).
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/xxe-inband --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/xxe-inband/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/xxe-inband/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: an EXTERNAL entity (`file://` / internal URL) was resolved and its content reflected (the real file content / internal result) — not merely a benign INTERNAL entity echoed (which only proves entity parsing). SSRF-via-XXE classified; cloud metadata handed to ssrf-cloud. Benign file; no DoS; scope + approval.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `xxe-inband-verify`) + set `status`.

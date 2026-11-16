@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `ssti` skill —
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `probes.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/ssti --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/ssti/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/ssti/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: `{{7*7}}` (or engine equivalent) returned the COMPUTED result / template error — proving server-side evaluation, not reflection (a literal `{{7*7}}` echoed is NOT SSTI). Engine fingerprint consistent. Any RCE escalation benignly proven (OOB/sleep) + approved; else report SSTI at eval severity, not RCE.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `ssti-verify`) + set `status`.

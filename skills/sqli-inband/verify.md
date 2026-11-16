@@ -20,6 +20,8 @@ Run the 7 base checks + the in-band SQLi gauntlet. Confirmed = data returned via
 In-band SQLi with data extraction is High/Critical (`C:H`, often `I:H` if writable). Justify from what
 was demonstrably extractable — do not claim RCE/write without evidence.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sqli-inband-verify",

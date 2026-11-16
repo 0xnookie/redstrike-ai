@@ -20,6 +20,8 @@ Run the 7 base checks + the disclosure gauntlet. Confirmed = REAL sensitive data
 System-prompt leak → Medium (aids other attacks); keys/cross-tenant/PII disclosure → High/Critical.
 Justify from the corroborated content.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sensitive-disclosure-verify",

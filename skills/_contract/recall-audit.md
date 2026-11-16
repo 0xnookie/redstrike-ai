@@ -39,6 +39,14 @@ accepted by the operator with a recorded reason **before reporting**. A report m
 unadjudicated recall gap. Low-prior empties (no recon signal) are acceptable clears — this altitude does
 not manufacture work on surfaces recon found no reason to test.
 
+This is no longer advisory. Once `report/findings_consolidated.json` exists, `verify_completion.py
+--engagement` runs the deterministic engine and **HARD-FAILS** on any `shallow-clear`,
+`skipped-but-signalled`, or `never-run`/`pending-at-close` gap (the noxframe report shipped over ~10 HIGH
+shallow-clear gaps — exactly this). Clear a gap by escalating + re-running the class, or record an explicit,
+reasoned accept in `reviews/recall_audit_accepts.json` (keyed `"<type>:<category>"`, or a bare
+`"<category>"` to accept all its gated gaps — mirrors `reviews/self_verified_accepts.json`). An accepted gap
+is surfaced as a warning, never a silent pass.
+
 ## Relationship to the other gates
 - [`coverage.md`/`coverage.py`] proves categories are **accounted for** (nothing silently `pending`).
 - [`escalation.md`] gives the executor the **ladder** so an empty high-prior surface isn't closed early.

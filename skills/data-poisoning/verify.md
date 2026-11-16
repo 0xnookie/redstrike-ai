@@ -24,6 +24,8 @@ changes the grounded answer. Re-run the benign proof.
 Rate from persistence and blast radius (does it survive sessions / affect every user hitting the query; is it
 a durable backdoor) — not merely that one TEST doc ranked once. Flag inflation.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "data-poisoning-verify",

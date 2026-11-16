@@ -25,6 +25,8 @@ issue is evidenced on an in-scope endpoint by a benign read-only check. Re-run t
 Rate from real exploitability: confirmed Heartbleed memory leak / exploitable downgrade → High; a weak cipher
 merely enabled → Medium/Low; cosmetic cert hygiene → Low/Info. Don't inflate "supported" into "exploited".
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "tls-attacks-verify",

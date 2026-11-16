@@ -23,6 +23,8 @@ were SUBVERTED, proven by a benign canary — re-run the injection and confirm t
 Rate by what the injection enables: guardrail bypass alone → Medium; injection reaching tools/actions
 or cross-user impact → High/Critical (coordinate with `excessive-agency`). Justify from the benign proof.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "prompt-injection-verify",

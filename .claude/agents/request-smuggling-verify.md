@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `request-smuggli
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `desync_tests.jsonl` + `cleanup.md`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/request-smuggling --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/request-smuggling/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/request-smuggling/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `desync_tests.jsonl`, `cleanup.md` + every evidence/poc file.
 4. Apply the 7 base checks + the gauntlet. Decisive: a REPRODUCIBLE desync (named class) confirmed via timing + a SELF-canary — NOT by capturing a real user's request (that's an RoE violation → reject + flag even if technically real). Verify approval was obtained and no persistent poison remains.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `request-smuggling-verify`) + set `status`.

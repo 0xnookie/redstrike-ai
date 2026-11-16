@@ -32,6 +32,8 @@ Blind XSS commonly fires in a privileged, no-interaction context: often
 `AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:N`-ish (e.g. executes in an admin's session). Justify the
 elevation with the callback's fired-context evidence. No callback ⇒ not a finding at all.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": {

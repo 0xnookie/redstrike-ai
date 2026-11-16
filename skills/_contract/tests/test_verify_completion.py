@@ -670,6 +670,47 @@ class TestManifestSchemaRefs(unittest.TestCase):
         self.assertGreaterEqual(refs, 94, "expected the finding/context/cve_intel schema wiring to be present")
 
 
+class TestSchemaVersioning(unittest.TestCase):
+    """P2-3: finding / attack_chain / *_context schemas declare an optional `version` field so artifacts
+    can be stamped and evolve. It is optional (backward-compatible) and an integer when present."""
+
+    def test_finding_accepts_version_and_without(self):
+        eng = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(eng, ignore_errors=True))
+        # with a version stamp
+        f = valid_finding(version=1)
+        write_evidence(eng, f)
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok, detail)
+        # and without one (optional / backward-compatible)
+        f2 = valid_finding()
+        write_evidence(eng, f2)
+        ok2, detail2, _ = vc.check_finding(f2, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok2, detail2)
+
+    def test_context_schemas_accept_version(self):
+        base = {"target": "https://app.acme.com", "generated_at": "2026-01-01T00:00:00Z", "version": 1,
+                "injection_points": [{"id": "sq-001", "endpoint": "/q", "param": "q"}]}
+        self.assertTrue(vc._validate_against_schema(base, "skills/_contract/sqli_context.schema.json")[0])
+
+    def test_attack_chain_accepts_version(self):
+        doc = {"version": 1, "target": "x", "generated_at": "2026-01-01T00:00:00Z",
+               "chains": [{"id": "chain-001", "title": "t",
+                           "steps": [{"finding_id": "RS-2026-001", "role": "entry"},
+                                     {"finding_id": "RS-2026-002", "role": "exfil"}]}]}
+        self.assertTrue(vc._validate_against_schema(doc, "skills/_contract/attack_chain.schema.json")[0])
+
+    def test_all_target_schemas_declare_version(self):
+        import glob
+        for scm in sorted(glob.glob(str(REPO / "skills/_contract/*_context.schema.json"))):
+            d = json.loads(pathlib.Path(scm).read_text(encoding="utf-8"))
+            self.assertIn("version", d.get("properties", {}), scm)
+        ac = json.loads((REPO / "skills/_contract/attack_chain.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("version", ac["properties"])
+        fd = json.loads((REPO / "skills/_contract/finding.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("version", fd["$defs"]["finding"]["properties"])
+
+
 class TestContextSchemas(unittest.TestCase):
     """E4 context wiring: the *_context schemas are the canonical output contract
     (each producer's SKILL.md says its output 'validates against the schema'), so a
@@ -828,6 +869,387 @@ class TestIndependentReviewGate(unittest.TestCase):
             self.assertTrue(payload["pass"], buf.getvalue())
             self.assertFalse(payload["review_errors"])
             self.assertTrue(any("not an independent" in w for w in payload["warnings"]))
+
+
+# --------------------------------------------------------------------------- #
+# P0-1: coordination-artifact integrity gate — no report over an artifact that
+# broke its OWN vocabulary (out-of-vocab signal / out-of-enum surface kind).
+# --------------------------------------------------------------------------- #
+class TestSignalsSchema(unittest.TestCase):
+    """The signal-vocabulary schema validates a signals.json feeder document and rejects a token
+    outside the closed vocabulary (the sink:dom-backlink leak shape)."""
+    SCHEMA = "skills/_contract/signals.schema.json"
+
+    def ok(self, doc):
+        return vc._validate_against_schema(doc, self.SCHEMA)[0]
+
+    def test_conformant_signals_doc_passes(self):
+        self.assertTrue(self.ok({"signals": ["param:injectable", "sink:dom", "asset:cloud"]}))
+
+    def test_out_of_vocab_signal_fails(self):
+        self.assertFalse(self.ok({"signals": ["param:injectable", "sink:dom-backlink"]}))
+
+    def test_vocab_matches_routing_map(self):
+        schema = json.loads((REPO / self.SCHEMA).read_text(encoding="utf-8"))
+        rmap = json.loads((REPO / "skills/_contract/routing-map.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(schema["$defs"]["signal"]["enum"]), set(rmap["signals"]))
+
+
+class TestCoordinationIntegrityGate(unittest.TestCase):
+    """Once a report exists, a coordination artifact that broke its own vocabulary — an out-of-vocab
+    signal folded into coverage_ledger.signals_used / the inbox, or an out-of-enum surface kind in the
+    surface ledger / inbox — HARD-fails (the noxframe sink:dom-backlink / `content`-surface leak)."""
+
+    def _clean_report_eng(self, d):
+        eng = pathlib.Path(d)
+        f = valid_finding()  # reviewer xss-reflected-verify (independent), verdict accepted
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng, led, sled
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_clean_engagement_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["integrity_errors"], [])
+
+    def test_inbox_out_of_vocab_signal_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "pp", "signals": ["sink:dom-backlink"]}) + "\n", encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("sink:dom-backlink" in e for e in payload["integrity_errors"]))
+
+    def test_inbox_out_of_enum_kind_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, _s = self._clean_report_eng(d)
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "x", "surface": [{"kind": "content", "value": "/sitemap.xml"}]}) + "\n",
+                encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("content" in e for e in payload["integrity_errors"]))
+
+    def test_surface_ledger_out_of_enum_kind_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, _l, sled = self._clean_report_eng(d)
+            sled["surfaces"].append({"id": "content:abc", "kind": "content",
+                                     "value": "/sitemap.xml", "status": "n/a", "reason": "x"})
+            (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("surface_ledger.json" in e and "content" in e for e in payload["integrity_errors"]))
+
+    def test_coverage_signals_used_out_of_vocab_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng, led, _s = self._clean_report_eng(d)
+            led["signals_used"] = ["param:injectable", "sink:dom-backlink"]
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("signals_used" in e for e in payload["integrity_errors"]))
+
+    def test_no_report_integrity_is_silent(self):
+        """Mid-hunt (no consolidated report): a malformed inbox must NOT fail the gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            (eng / "reconvergence").mkdir(parents=True, exist_ok=True)
+            (eng / "reconvergence" / "inbox.jsonl").write_text(
+                json.dumps({"source": "x", "signals": ["sink:dom-backlink"]}) + "\n", encoding="utf-8")
+            payload = self._run(eng)
+            self.assertEqual(payload["integrity_errors"], [])
+
+
+# --------------------------------------------------------------------------- #
+# P1-1: recall-audit hard gate — no report over an un-closed shallow-clear /
+# skipped-but-signalled / never-run gap (the false-negative altitude).
+# --------------------------------------------------------------------------- #
+class TestRecallAuditGate(unittest.TestCase):
+    """The recall audit was advisory only — the noxframe report shipped over ~10 HIGH shallow-clear gaps.
+    Once a report exists a gated recall gap must be closed (escalate + re-run) or explicitly accepted."""
+
+    def _eng(self, d, *, shallow=True, escalated=False, accept=None):
+        eng = pathlib.Path(d)
+        f = valid_finding()  # independent reviewer, accepted
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        if shallow:
+            # sqli: high-prior (a signal matched) but empty, ladder unexhausted => a shallow-clear gap
+            sqli = next(c for c in led["categories"] if c["id"] == "sqli")
+            sqli["triggers_matched"] = ["param:injectable"]
+            sqli["findings_count"] = 0
+            if escalated:
+                sys.path.insert(0, str(REPO / "scripts"))
+                import escalation  # noqa: E402
+                sqli["escalations"] = escalation.ladder_for("sqli")
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        if accept is not None:
+            (eng / "reviews").mkdir(parents=True, exist_ok=True)
+            (eng / "reviews" / "recall_audit_accepts.json").write_text(json.dumps(accept), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_shallow_clear_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True))
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["recall_errors"])
+            self.assertTrue(any("sqli" in e and "shallow-clear" in e for e in payload["recall_errors"]))
+
+    def test_no_shallow_clear_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=False))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+
+    def test_exhausted_ladder_is_not_a_gap(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True, escalated=True))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+
+    def test_typed_accept_clears(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True,
+                                          accept={"shallow-clear:sqli": "unseeded test DB, no rows to extract"}))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+            self.assertTrue(any("operator-accepted" in w for w in payload["warnings"]))
+
+    def test_bare_category_accept_clears(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True, accept={"sqli": "deliberately deferred to retest"}))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["recall_errors"], [])
+
+    def test_blank_accept_reason_is_not_an_accept(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._eng(d, shallow=True, accept={"shallow-clear:sqli": "   "}))
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["recall_errors"])
+
+    def test_no_report_recall_is_silent(self):
+        """Mid-hunt (no consolidated report): a shallow-clear ledger must NOT fail the gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            cov = vc._try_import_coverage()
+            led = cov.plan(cov.load_map(), None, {"web"})
+            sqli = next(c for c in led["categories"] if c["id"] == "sqli")
+            sqli["status"], sqli["findings_count"] = "attempted", 0
+            sqli["triggers_matched"] = ["param:injectable"]
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            self.assertEqual(vc._recall_hard_errors(eng), [])
+
+
+# --------------------------------------------------------------------------- #
+# P2-1: cleanup/reversion gate — a post-ex/persistence finding must prove
+# verified reversion with a structured `cleanup` object, not prose.
+# --------------------------------------------------------------------------- #
+class TestCleanupReversionGate(unittest.TestCase):
+    def _eng(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        return pathlib.Path(self._tmp.name)
+
+    def _persistence_finding(self, eng, *, cleanup="valid"):
+        f = valid_finding(category={"cwe": "CWE-507"})
+        f["_rs_source_skill"] = "persistence"
+        write_evidence(eng, f)
+        if cleanup == "valid":
+            ref = "findings/evidence/cleanup.md"
+            (eng / ref).parent.mkdir(parents=True, exist_ok=True)
+            (eng / ref).write_text("removed the scheduled task; schtasks /query confirms gone\n", encoding="utf-8")
+            f["cleanup"] = {"mechanism": "scheduled task benign marker", "removed": True,
+                            "verified_by": "schtasks /query shows the task is gone", "ref": ref}
+        elif cleanup == "not-removed":
+            ref = "findings/evidence/cleanup.md"
+            (eng / ref).parent.mkdir(parents=True, exist_ok=True)
+            (eng / ref).write_text("left in place\n", encoding="utf-8")
+            f["cleanup"] = {"mechanism": "run key", "removed": False,
+                            "verified_by": "n/a", "ref": ref}
+        elif cleanup == "missing-ref":
+            f["cleanup"] = {"mechanism": "run key", "removed": True,
+                            "verified_by": "reg query", "ref": "findings/evidence/nope.md"}
+        # cleanup == "absent" -> no cleanup object
+        return f
+
+    def test_persistence_without_cleanup_fails(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="absent")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+        self.assertIn("cleanup", detail)
+
+    def test_persistence_with_verified_cleanup_passes(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="valid")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok, detail)
+
+    def test_persistence_removed_false_fails(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="not-removed")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+        self.assertIn("removed", detail)
+
+    def test_persistence_missing_cleanup_ref_fails(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="missing-ref")
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+        self.assertIn("cleanup ref not found", detail)
+
+    def test_web_finding_needs_no_cleanup(self):
+        eng = self._eng()
+        f = valid_finding()  # no _rs_source_skill -> not a post-ex class
+        write_evidence(eng, f)
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertTrue(ok, detail)
+
+    def test_credential_access_also_requires_cleanup(self):
+        eng = self._eng()
+        f = self._persistence_finding(eng, cleanup="absent")
+        f["_rs_source_skill"] = "credential-access"
+        ok, detail, _ = vc.check_finding(f, eng, SCOPE_YAML, None, set())
+        self.assertFalse(ok)
+
+    def test_engagement_per_skill_persistence_without_cleanup_hard_fails(self):
+        """A persistence finding discovered via the per-skill layout (tagged by dir) without a verified
+        cleanup object must FAIL the engagement gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding(category={"cwe": "CWE-507"})
+            write_evidence(eng, f)  # evidence resolves from eng root
+            (eng / "persistence").mkdir()
+            (eng / "persistence" / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok = vc.validate_engagement(eng, as_json=True)
+            payload = json.loads(buf.getvalue())
+            self.assertFalse(payload["pass"], buf.getvalue())
+            self.assertTrue(any("cleanup" in r["detail"] for r in payload["results"] if not r["passed"]))
+
+
+# --------------------------------------------------------------------------- #
+# P2-2: attack-chain integrity gate — chain steps resolve to accepted/blocked
+# findings; chain findings are composite.
+# --------------------------------------------------------------------------- #
+class TestAttackChainGate(unittest.TestCase):
+    def _clean_report_eng(self, d):
+        eng = pathlib.Path(d)
+        f = valid_finding()  # id RS-2026-001, accepted by an independent reviewer
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def _write_chains(self, eng, steps):
+        (eng / "attack-chain-discovery").mkdir(parents=True, exist_ok=True)
+        (eng / "attack-chain-discovery" / "chains.json").write_text(json.dumps(
+            {"target": "app.acme.com", "generated_at": "2026-01-01T00:00:00Z",
+             "chains": [{"id": "chain-001", "title": "demo", "steps": steps}]}), encoding="utf-8")
+
+    def test_chain_on_known_accepted_finding_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._clean_report_eng(d)
+            self._write_chains(eng, [{"finding_id": "RS-2026-001", "role": "entry"},
+                                     {"finding_id": "RS-2026-001", "role": "exfil"}])
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["chain_errors"], [])
+
+    def test_chain_on_unknown_finding_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._clean_report_eng(d)
+            self._write_chains(eng, [{"finding_id": "RS-2026-001", "role": "entry"},
+                                     {"finding_id": "RS-2026-999", "role": "exfil"}])
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("RS-2026-999" in e for e in payload["chain_errors"]))
 
 
 if __name__ == "__main__":

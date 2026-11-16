@@ -28,6 +28,8 @@ funds via a swapped implementation → Critical; a storage collision corrupting 
 lower-impact re-init or non-privileged-reachable layout quirk → High/Medium. Recompute from the demonstrated
 effect + $ impact; flag inflation (e.g. an `_authorizeUpgrade` that's actually owner-gated).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "sc-upgradeability-verify",

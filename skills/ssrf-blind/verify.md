@@ -21,6 +21,8 @@ TARGET EGRESS proving a server-side fetch. No callback ⇒ no finding.
 External-only blind SSRF ~Medium. Internal interaction (timing-proven) → High. Don't rate Critical
 without demonstrated internal impact.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ssrf-blind-verify",

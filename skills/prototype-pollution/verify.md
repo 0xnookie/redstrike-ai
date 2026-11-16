@@ -24,6 +24,8 @@ Run the 7 base checks + the PP gauntlet. Confirmed = an attacker-controlled key 
 Pollution-only → Low/Medium. Pollution→XSS → High. Pollution→server RCE → Critical. Pollution→DoS → Medium/High.
 Severity MUST match the gadget actually proven, not the theoretical ceiling.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "prototype-pollution-verify",

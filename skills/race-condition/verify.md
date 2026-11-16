@@ -21,6 +21,8 @@ reproducibly, benignly. Re-run the benign, bounded burst.
 ## CVSS integrity
 Rate from the demonstrated business impact of the broken invariant, not the mere existence of a race.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "race-condition-verify",

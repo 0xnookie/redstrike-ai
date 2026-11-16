@@ -22,6 +22,8 @@ with real impact, reproducibly.
 Rate by business impact (free goods, privilege, fund movement). These often don't map cleanly to
 CVSS — state the business impact explicitly alongside any vector. Justify from the evidenced advantage.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "business-logic-verify",

@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `sqli-blind` ski
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `inferences.jsonl` + `callbacks.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/sqli-blind --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/sqli-blind/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/sqli-blind/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/findings.json`, `inferences.jsonl`, `callbacks.jsonl` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: the response/latency flips with the injected truth value (`1=1` vs `1=2`), reproducibly across trials — not a one-off slow response; time payloads controlled for jitter; OOB (if used) attributable + exfiltrates a DB value. At least one benign fact inferred. Scope + approval; no destructive payloads.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `sqli-blind-verify`) + set `status`.

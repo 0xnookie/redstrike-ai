@@ -49,10 +49,21 @@ class PlanAndValidate(unittest.TestCase):
         self.assertEqual(q["status"], "discovered")
         self.assertTrue(q["routed_to"])
 
-    def test_unroutable_is_na(self):
-        led = sf.plan_from_items("demo", [{"kind": "weird", "value": "z"}])
-        self.assertEqual(led["surfaces"][0]["status"], "n/a")
-        self.assertTrue(led["surfaces"][0]["reason"])
+    def test_invalid_kind_is_rejected_not_na(self):
+        # an out-of-enum kind (e.g. the inbox `content` surface) is REJECTED at ingest, never
+        # folded into the ledger as n/a where a gate would read it as an accounted-for element.
+        good, bad = sf.partition_items([{"kind": "content", "value": "/x.xml"},
+                                        {"kind": "param", "value": "q"}])
+        self.assertEqual([g["value"] for g in good], ["q"])
+        self.assertEqual([b["kind"] for b in bad], ["content"])
+        self.assertTrue(bad[0]["_reject_reason"])
+        led = sf.plan_from_items("demo", [{"kind": "weird", "value": "z"}], warn=False)
+        self.assertEqual(led["surfaces"], [])
+
+    def test_valid_kinds_match_schema_enum(self):
+        import json
+        schema = json.loads((HERE.parents[2] / "skills/_contract/surface_ledger.schema.json").read_text())
+        self.assertEqual(set(sf.VALID_KINDS), set(schema["$defs"]["surface"]["properties"]["kind"]["enum"]))
 
     def test_discovered_routed_surface_is_a_gap(self):
         led = self._plan()

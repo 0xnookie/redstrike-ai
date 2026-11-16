@@ -23,6 +23,8 @@ component), mapped to OWASP MASVS, secrets redacted. Re-run the benign proof.
 Rate from the real blast radius (attacker preconditions: does it need a rooted/jailbroken device, physical
 access, or a malicious co-located app?), not merely that a check was bypassable. Map to the relevant OWASP MASVS control.
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "mobile-verify",

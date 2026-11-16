@@ -20,6 +20,8 @@ reverted. Guard the revert + single-account-DCSync limits.
 An edge granting control of a privileged principal / DCSync right → Critical (domain compromise path).
 Justify from the demonstrated abuse + where the edge leads (BloodHound path).
 
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
+
 ## Verdict (write into each finding's review{} block)
 ```json
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "ad-acl-abuse-verify",

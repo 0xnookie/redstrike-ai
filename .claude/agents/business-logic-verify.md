@@ -10,7 +10,7 @@ You are the **independent semantic reviewer** for the Redstrike `business-logic`
 **Input:** engagement output dir `OUT` (`findings.json` + `poc/` + `workflow_model.md` + `invariants.json` + `abuse_tests.jsonl`). Repo root is cwd; use Windows-style absolute paths (`C:/...`) for engagement files.
 
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/business-logic --out OUT` (exit 0); else stop.
-2. Load `skills/_contract/verify-base.md` + `skills/business-logic/verify.md` + `skills/_contract/finding.schema.json`.
+2. Load `skills/_contract/verify-base.md` + `skills/business-logic/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
 3. Read `OUT/workflow_model.md` + `invariants.json` FIRST (understand intended behavior), then `findings.json` + evidence/poc.
 4. Apply the 7 base checks + the gauntlet. Decisive: a specific invariant from `invariants.json` was violated WITH concrete impact (money/access/data/quota), reproducibly (races: across attempts). "Unusual but intended" ⇒ reject. Pure IDOR/injection mislabeled ⇒ defer to the right agent.
 5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}` block (reviewer `business-logic-verify`) + set `status`; state the business impact explicitly.

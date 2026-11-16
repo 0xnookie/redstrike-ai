@@ -11,8 +11,12 @@ the role matrix reserves for a higher role. Re-run the low-priv session against 
       privileged data returned), not a 403 or a no-op.
 - [ ] **Genuinely higher privilege, per the matrix.** Cross-check `authz_context.json`: the endpoint
       is actually reserved for a higher role, not a capability A is intended to have.
-- [ ] **Not IDOR mislabeled.** Function-level (any-low-priv-can-call-admin) vs object-level (access a
-      specific other user's object) — reclassify to `idor` if it's really object scoping.
+- [ ] **Not IDOR mislabeled (reclassify).** Function-level (any-low-priv-can-call-admin) vs object-level
+      (access a specific other user's object) — reclassify to `idor` if it's really object scoping; an API
+      object/function-authz bug belongs to `bola-bfla`.
+- [ ] **Cross-skill dup (flag, don't merge).** The same access-control gap may also be reported by `idor`
+      or `bola-bfla`. You can't see sibling findings, so DON'T drop it — if it looks like the same bug, note
+      it in `review.notes` for reporting to merge.
 - [ ] **Effect confirmed.** For a state-changing admin action, the change is verified by reading it
       back; for data, the returned data is genuinely privileged.
 - [ ] **Test account; benign/reversible action; approval; scope.**
@@ -20,6 +24,8 @@ the role matrix reserves for a higher role. Re-run the low-priv session against 
 ## CVSS integrity
 Vertical escalation to admin → High/Critical (`PR:L→`, `S:C` possible). Rate by the power gained.
 Justify from the demonstrated privileged action.
+
+Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the base score (do not hand-assert it); the gate recomputes and flags drift.
 
 ## Verdict (write into each finding's review{} block)
 ```json
