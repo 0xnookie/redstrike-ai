@@ -107,6 +107,69 @@ class TestBreaker(unittest.TestCase):
         self.assertEqual(rg.check(hs, now=10.0, rps=1000)["decision"], "pass")
 
 
+class TestObserveTally(unittest.TestCase):
+    def test_status_histogram_records_blocks_and_oks(self):
+        hs = rg._blank_host()
+        rg.observe(hs, 200, now=1.0)
+        rg.observe(hs, 200, now=2.0)
+        rg.observe(hs, 403, now=3.0, rng=fixed_rng())
+        self.assertEqual(hs["statuses"], {"200": 2, "403": 1})
+
+    def test_challenge_count_and_timestamps(self):
+        hs = rg._blank_host()
+        rg.observe(hs, 503, now=10.0, is_challenge=True, rng=fixed_rng())
+        self.assertEqual(hs["challenges"], 1)
+        self.assertTrue(hs["first_block_ts"])          # a block stamps first_block_ts
+        rg.observe(hs, 200, now=20.0)
+        self.assertTrue(hs["last_ok_ts"])              # a clean read stamps last_ok_ts
+
+    def test_waf_identity_recorded_first_wins(self):
+        hs = rg._blank_host()
+        rg.observe(hs, 200, now=1.0, waf="cloudflare")
+        rg.observe(hs, 200, now=2.0, waf="akamai")
+        self.assertEqual(hs["waf"], "cloudflare")
+
+    def test_unreadable_status_still_records_waf(self):
+        hs = rg._blank_host()
+        rg.observe(hs, None, now=1.0, waf="aws")
+        self.assertEqual(hs["waf"], "aws")
+        self.assertEqual(hs["statuses"], {})           # no status → no histogram entry
+
+
+class TestFingerprintWaf(unittest.TestCase):
+    def test_cloudflare(self):
+        self.assertEqual(rg.fingerprint_waf("HTTP/2 403\ncf-ray: abc123\nserver: cloudflare"), "cloudflare")
+
+    def test_aws(self):
+        self.assertEqual(rg.fingerprint_waf("set-cookie: AWSALB=xyz; path=/"), "aws")
+
+    def test_akamai(self):
+        self.assertEqual(rg.fingerprint_waf("set-cookie: ak_bmsc=zzz"), "akamai")
+
+    def test_sucuri(self):
+        self.assertEqual(rg.fingerprint_waf("x-sucuri-id: 12345"), "sucuri")
+
+    def test_none_when_no_signature(self):
+        self.assertIsNone(rg.fingerprint_waf("HTTP/1.1 200 OK\nserver: nginx"))
+
+    def test_empty(self):
+        self.assertIsNone(rg.fingerprint_waf(""))
+
+
+class TestObserveRunRecordsWaf(unittest.TestCase):
+    def test_run_observe_records_identity_from_headers(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        state = d / "rate_state.json"
+        payload = {"tool_name": "Bash",
+                   "tool_input": {"command": "curl -I https://api.acme.com/"},
+                   "tool_response": "HTTP/2 403 Forbidden\ncf-ray: deadbeef\nserver: cloudflare"}
+        rg.run_observe(payload, state, now=1000.0)
+        hs = json.loads(state.read_text())["hosts"]["api.acme.com"]
+        self.assertEqual(hs["waf"], "cloudflare")
+        self.assertEqual(hs["statuses"], {"403": 1})
+        self.assertEqual(hs["total_blocks"], 1)
+
+
 class TestParseStatus(unittest.TestCase):
     def test_http_status_line(self):
         self.assertEqual(rg.parse_status("HTTP/1.1 429 Too Many Requests"), (429, True))

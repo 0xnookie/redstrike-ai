@@ -17,7 +17,12 @@ Two jobs, two modes, one shared state file:
         4. otherwise PASS and record the attempt.
   • PostToolUse (`--observe`)  — AFTER a request completes: read the response status from
         the tool output; a block (429/403/503/challenge) trips/escalates H's breaker with
-        exponential backoff + jitter, a clean success closes it.
+        exponential backoff + jitter, a clean success closes it. It ALSO records a diagnostics
+        TALLY per host (observability, not enforcement): a status histogram, a challenge count, a
+        WAF/CDN IDENTITY fingerprint (name only, read off the front's own headers/cookies — NO
+        bypass/evasion logic), and first-block / last-ok timestamps. The tally is a FLOOR: status
+        parse is best-effort, so an unreadable response is simply not counted. The diagnostics
+        module reads this tally back to tell "unreliable coverage behind a WAF" from "clean target".
 
 HONESTY (same altitude as scope_gate's own caveats):
   • The auth-attempt budget caps logins per (host, username) under the engagement's lockout
@@ -50,6 +55,7 @@ Usage (wired by the launcher into settings.json):
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import os
 import random
@@ -129,10 +135,51 @@ _USER_RES = [
 ]
 
 
+# WAF/CDN IDENTITY fingerprints — name the fronting product by its OWN advertised response headers
+# and cookies. IDENTITY ONLY: this tells an operator WHICH WAF/CDN is in front (so unreliable
+# coverage behind one is visible in diagnostics); it carries NO evasion/bypass logic of any kind.
+_WAF_SIGS = [
+    ("cloudflare", re.compile(
+        r"(?i)(?:^|\n)\s*server\s*:\s*cloudflare\b|(?i)\bcf-ray\s*:|(?i)__cf_bm=|(?i)\bcf_chl_|"
+        r"(?i)\bcf-mitigated\s*:")),
+    ("aws", re.compile(
+        r"(?i)\bAWSALB(?:CORS)?=|(?i)\bx-amzn-[a-z0-9-]+\s*:|(?i)\bx-amz-cf-id\s*:|"
+        r"(?i)(?:^|\n)\s*server\s*:\s*awselb\b")),
+    ("sucuri", re.compile(r"(?i)\bx-sucuri-(?:id|cache)\s*:")),
+    ("imperva-incapsula", re.compile(r"(?i)\bincap_ses_|(?i)\bvisid_incap_|(?i)\bx-iinfo\s*:")),
+    ("akamai", re.compile(
+        r"(?i)\bak_bmsc=|(?i)\bx-akamai-[a-z0-9-]+\s*:|(?i)(?:^|\n)\s*server\s*:\s*akamaighost\b")),
+    ("fastly", re.compile(r"(?i)\bfastly-debug|(?i)\bx-served-by\s*:\s*cache|(?i)\bx-fastly\b")),
+]
+
+
+def fingerprint_waf(text: str) -> str | None:
+    """Best-effort WAF/CDN IDENTITY from response headers/cookies in the tool output.
+
+    Returns the product name (cloudflare/aws/sucuri/…) or None. IDENTITY ONLY — purely so
+    diagnostics can say *which* front is in play; there is NO bypass/evasion logic here.
+    """
+    if not text:
+        return None
+    for name, rx in _WAF_SIGS:
+        if rx.search(text):
+            return name
+    return None
+
+
+def _iso(now: float) -> str:
+    """Epoch seconds → ISO-8601 UTC (for first_block_ts / last_ok_ts in the tally)."""
+    return _dt.datetime.fromtimestamp(now, _dt.timezone.utc).isoformat()
+
+
 # --- state ------------------------------------------------------------------
 def _blank_host() -> dict:
+    # Fields after `auth` are the --observe TALLY (a FLOOR; status parse is best-effort): a status
+    # histogram, a challenge count, the WAF/CDN identity, and first-block / last-ok timestamps.
     return {"ts": [], "blocks": 0, "open_until": 0.0,
-            "last_status": 0, "total_requests": 0, "total_blocks": 0, "auth": {}}
+            "last_status": 0, "total_requests": 0, "total_blocks": 0, "auth": {},
+            "statuses": {}, "challenges": 0, "waf": None,
+            "first_block_ts": None, "last_ok_ts": None}
 
 
 def _host_state(state: dict, host: str) -> dict:
@@ -242,16 +289,34 @@ def auth_check(hs: dict, key: str, now: float, *, budget: int,
 
 
 def observe(hs: dict, status: int | None, now: float, *, is_challenge: bool = False,
+            waf: str | None = None,
             base_backoff: float = BASE_BACKOFF_SEC, max_open: float = MAX_OPEN_SEC,
             block_statuses=BLOCK_STATUSES, rng=random.random) -> dict:
-    """Fold an observed response into the host's breaker state.
+    """Fold an observed response into the host's breaker state AND its diagnostics tally.
 
     A block (status in `block_statuses`, or a detected challenge) escalates the breaker with
     exponential backoff + ±20% jitter; a clean success (any non-block status we could read)
-    resets it. An unreadable status (None, not a challenge) is a no-op. Returns `hs`.
+    resets it. An unreadable status (None, not a challenge) does not touch the breaker.
+
+    In addition it RECORDS (observability, not enforcement): a per-status histogram, a challenge
+    count, the WAF/CDN IDENTITY (name only — never bypass data), and the first-block / last-ok
+    timestamps. The tally is a FLOOR: a response whose status the parser could not read simply is
+    not counted, so a low block rate is never proof of a healthy transport. Returns `hs`.
     """
     blocked = is_challenge or (status is not None and status in block_statuses)
+    # --- diagnostics tally (FLOOR; best-effort) ---
+    if status is not None:
+        hist = hs.setdefault("statuses", {})
+        key = str(status)
+        hist[key] = int(hist.get(key, 0)) + 1
+    if is_challenge:
+        hs["challenges"] = int(hs.get("challenges", 0)) + 1
+    if waf and not hs.get("waf"):
+        hs["waf"] = waf  # IDENTITY only — first one wins
+    # --- breaker + timestamps ---
     if blocked:
+        if not hs.get("first_block_ts"):
+            hs["first_block_ts"] = _iso(now)
         hs["blocks"] = int(hs.get("blocks", 0)) + 1
         hs["total_blocks"] = int(hs.get("total_blocks", 0)) + 1
         delay = base_backoff * (2 ** (hs["blocks"] - 1))
@@ -265,6 +330,7 @@ def observe(hs: dict, status: int | None, now: float, *, is_challenge: bool = Fa
         hs["blocks"] = 0
         hs["open_until"] = 0.0
         hs["last_status"] = status
+        hs["last_ok_ts"] = _iso(now)
     return hs
 
 
@@ -487,13 +553,15 @@ def run_observe(payload: dict, state_path: Path, now: float | None = None) -> in
     hosts = target_hosts(tool_name, tool_input)
     if not hosts:
         return 0
-    status, is_challenge = parse_status(_response_text(payload))
-    if status is None and not is_challenge:
+    text = _response_text(payload)
+    status, is_challenge = parse_status(text)
+    waf = fingerprint_waf(text)
+    if status is None and not is_challenge and waf is None:
         return 0  # nothing we can honestly fold in
 
     def _txn(state):
         for host in hosts:
-            observe(_host_state(state, host), status, now, is_challenge=is_challenge)
+            observe(_host_state(state, host), status, now, is_challenge=is_challenge, waf=waf)
         return None, state
 
     with_state(state_path, _txn)
