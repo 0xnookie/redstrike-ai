@@ -36,6 +36,7 @@
         },
         "reason": { "type": "string", "description": "why this status — REQUIRED for skipped/n/a/blocked; a stated trigger or baseline note for attempted/pending." },
         "triggers_matched": { "type": "array", "items": { "type": "string" }, "description": "recon signals that routed this category." },
+        "escalations": { "type": "array", "items": { "type": "string" }, "description": "escalation-ladder technique ids already tried for this category (scripts/escalation.py tokens, e.g. derive-not-assume/browser-render/token-cookie-and-header). Fed by executors/engine as they climb the ladder; the recall-audit shallow-clear gate reads this to tell an exhausted, honest clear from an untrustworthy first-payload clear." },
         "findings_count": { "type": "integer", "minimum": 0, "description": "accepted findings this category produced (filled after the run)." },
         "decided_by": { "enum": ["deterministic-map", "operator", "model"], "description": "deterministic-map for a planned route/skip; operator/model when a human or the agent overrode it (with reason)." }
       }

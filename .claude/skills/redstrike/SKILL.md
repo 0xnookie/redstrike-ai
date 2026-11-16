@@ -85,6 +85,12 @@ with a recorded reason. The formerly un-triggered classes are now wired in: `nos
 
 **b. Run every `pending` category.** For each, run its `<class>-context` feeder (families) then its
 variant/category agents, and flip its ledger entry to `attempted` (set `findings_count`) or `blocked`.
+**When a class returns EMPTY on a recon-signalled surface, climb the `scripts/escalation.py` ladder before
+calling it clean, and RECORD each technique you tried:**
+`python scripts/coverage.py --mark <class> --status attempted --count 0 --escalations derive-not-assume,encoding-ladder`
+— this persists ladder progress on the ledger entry so the recall-audit shallow-clear gate (§2d) can tell an
+exhausted, honest clear from an untrustworthy first-payload clear. An empty high-prior class with an
+UNEXHAUSTED ladder is a HARD recall gap at report time.
 Human-readable mirror of the map:
 - **white-box (ONLY if `scope.yaml` grants authorized source access):** run `redstrike-source-audit` once in recon → `source-audit/source_context.json`, a routed `file:line → vuln class → executor` candidate map. Its per-class dangerous-sink candidates feed the matching `<class>-context` feeder below as higher-confidence leads (a grep hit is a LEAD the executor must still PROVE at runtime); secret candidates → `redstrike-secrets`, dependency candidates → `redstrike-cve-intelligence`. No source access ⇒ skip it (pure black-box run).
 - reflected/stored/dom input + sinks → `redstrike-xss-context` → `xss-*`
@@ -106,9 +112,11 @@ report exists, `verify_completion.py --engagement` HARD-FAILS on any unaccounted
 **d. Recall audit — the "what did we miss?" altitude (before reporting).** Coverage proves categories ran;
 this checks the clears are REAL. Launch the independent **`recall-audit`** reviewer subagent
 (`skills/_contract/recall-audit.md`; deterministic engine `scripts/recall_audit.py <dir>`). It flags
-`shallow-clear` (empty on a recon-signalled surface with the `escalation.md` ladder unexhausted),
-`skipped-but-signalled`, and never-run routes. Every **REAL-MISS** it returns must be re-hunted (run the
-next escalation step / un-skip the route) or explicitly operator-accepted with a reason **before reporting**.
+`shallow-clear` (empty on a recon-signalled surface with the `escalation.md` ladder unexhausted — read
+from each category's persisted `escalations` list, §2b), `skipped-but-signalled`, and never-run routes.
+Every **REAL-MISS** it returns must be re-hunted (run the next escalation step — and record it with
+`coverage.py --mark … --escalations …` — / un-skip the route) or explicitly operator-accepted with a
+reason **before reporting**.
 
 **e. Re-convergence — feed findings BACK into recon until a fixpoint (before reporting).** The hunt
 DISCOVERS new surface the initial recon never saw: an SSRF reaching an internal host / cloud metadata, a
