@@ -252,5 +252,77 @@ class TestScopeParsing(unittest.TestCase):
             self.assertEqual(got["source"], "scope.json")
 
 
+# --------------------------------------------------------------------------- #
+# Phase 2 (reliability): runtime/diagnostics.json is served + summarized
+# --------------------------------------------------------------------------- #
+def _diag(outcome="degraded-empty", reason="WAF blocked the run",
+          transport_status="blocked", worst="app.acme.com", block_rate=0.9):
+    return {"engagement": "acme-2026", "generated_at": "2026-01-01T01:00:00Z", "runs": [{
+        "session": "s1", "mode": "autonomous", "started": "2026-01-01T00:00:00Z",
+        "ended": "2026-01-01T01:00:00Z", "engine_rc": 0, "gate_rc": None,
+        "outcome": outcome, "degraded_reason": reason, "findings_count": 0,
+        "tool_failures": [], "exceptions": [],
+        "transport_health": {"hosts": [{"host": worst, "requests": 100, "blocks": 90,
+                                        "block_rate": block_rate, "statuses": {"403": 90},
+                                        "challenges": 0, "waf": "cloudflare", "classification": "blocked"}],
+                             "overall": {"block_rate": block_rate, "worst_host": worst,
+                                         "status": transport_status}},
+        "empty_recon": {}, "phase_tally": [], "gate_summary": {}}]}
+
+
+class TestDiagnosticsServing(unittest.TestCase):
+    def test_diagnostics_in_wanted_allowlist(self):
+        self.assertIn("diagnostics.json", c.WANTED)
+
+    def test_files_for_resolves_runtime_diagnostics(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text("x", encoding="utf-8")
+            mk(eng / "runtime" / "diagnostics.json", _diag())
+            files = c.files_for(eng)
+            self.assertIn("diagnostics.json", files)
+            self.assertEqual(files["diagnostics.json"].name, "diagnostics.json")
+
+    def test_diagnostics_summary_latest_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            mk(eng / "runtime" / "diagnostics.json", _diag())
+            s = c.diagnostics_summary(c.files_for(eng))
+            self.assertEqual(s["outcome"], "degraded-empty")
+            self.assertEqual(s["degraded_reason"], "WAF blocked the run")
+            self.assertEqual(s["transport_status"], "blocked")
+            self.assertEqual(s["worst_host"], "app.acme.com")
+
+    def test_diagnostics_summary_none_without_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text("x", encoding="utf-8")
+            self.assertIsNone(c.diagnostics_summary(c.files_for(eng)))
+
+    def test_manifest_entry_carries_outcome_and_reason(self):
+        with tempfile.TemporaryDirectory() as d:
+            parent = pathlib.Path(d)
+            eng = parent / "acme-2026-01-01"
+            eng.mkdir()
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            mk(eng / "runtime" / "diagnostics.json", _diag())
+            entry = next(e for e in c.manifest_entries(parent) if e["id"] == "acme-2026-01-01")
+            self.assertEqual(entry["outcome"], "degraded-empty")
+            self.assertEqual(entry["degraded_reason"], "WAF blocked the run")
+            self.assertEqual(entry["diagnostics"]["transport_status"], "blocked")
+            self.assertTrue(entry["has"]["diagnostics.json"])
+
+    def test_manifest_entry_outcome_none_without_diagnostics(self):
+        with tempfile.TemporaryDirectory() as d:
+            parent = pathlib.Path(d)
+            eng = parent / "beta-2026-02-02"
+            eng.mkdir()
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            entry = next(e for e in c.manifest_entries(parent) if e["id"] == "beta-2026-02-02")
+            self.assertIsNone(entry["outcome"])
+            self.assertIsNone(entry["degraded_reason"])
+            self.assertFalse(entry["has"]["diagnostics.json"])
+
+
 if __name__ == "__main__":
     unittest.main()
