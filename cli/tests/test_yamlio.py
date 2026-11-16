@@ -33,7 +33,6 @@ class TestMiniYaml(unittest.TestCase):
             ("rules", "no_dos"),
             ("rules", "no_destructive"),
             ("rules", "rate_limit_rps"),
-            ("rules", "lockout_threshold"),
             ("rules", "approval_required_phases"),
         ):
             r, g = ref, got

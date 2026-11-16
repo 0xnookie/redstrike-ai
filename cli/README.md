@@ -117,20 +117,25 @@ claude "<begin prompt>" --add-dir <repo> --append-system-prompt-file runtime/roe
 - **`--add-dir <repo>`** loads the repo's `.claude/skills` + `.claude/agents`.
 - **`runtime/roe.md`** (appended system prompt) states the scope + RoE and that authorization
   intake is already satisfied, so a launched session doesn't stall re-asking for a go-ahead.
-- **`runtime/settings.json`** carries the governance: a **PreToolUse scope-gate hook**, denies
-  that keep the agent out of the launcher-owned governance files, a modest read-only tool
-  allowlist, and subagent/memory bounds. Offensive tools are **not** pre-approved.
+- **`runtime/settings.json`** carries the governance: a **PreToolUse scope-gate hook**, the
+  **`sandbox.network` allowlist** derived from the engagement scope, denies that keep the agent
+  out of the launcher-owned governance files, a modest read-only tool allowlist, and
+  subagent/memory bounds. Offensive tools are **not** pre-approved.
 - **`runtime/scope.json`** is a machine projection of the canonical, signed `scope.yaml`
   (re-derived on every run). The scope gate reads the JSON; the operator edits the YAML.
 
 ## Safety model (and honest limits)
 - The scope gate (`hooks/scope_gate.py`) **denies** tool calls that reach an out-of-scope asset
-  (WebFetch / active Bash), and blocks writes to `runtime/` and `scope.yaml` (self-approval guard).
-  It **fails closed** when the scope record is missing.
+  (WebFetch / active Bash), blocks writes to `runtime/` and `scope.yaml` (self-approval guard), and
+  denies active tooling once the **engagement window** closes. It **fails closed** when the scope
+  record is missing.
 - A hook matching tool *input* is a **safety net, not a boundary** — the real network boundary is
-  the OS sandbox allowlist (`settings.sandbox.network`) on WSL2/Linux. Bash permission rules are
-  pattern-based, not a boundary either.
-- **Native Windows has no OS sandbox** — run engagements in WSL2/Linux.
+  the OS sandbox allowlist (`settings.sandbox.network`), which the launcher now generates from the
+  in-scope domains/cidrs/urls and enforces on WSL2/Linux. Bash permission rules are pattern-based,
+  not a boundary either.
+- **Native Windows has no OS sandbox** — run engagements in WSL2/Linux. The `run` path prints a
+  **network-confinement banner** when the OS sandbox is OFF or its deps are missing, since the scope
+  gate is then the only boundary.
 - **Auth:** personal use via `claude login` (subscription) or `CLAUDE_CODE_OAUTH_TOKEN`.
   `ANTHROPIC_API_KEY`, if set, overrides and bills the key. A product distributed to others must
   use API keys per Anthropic's terms.
