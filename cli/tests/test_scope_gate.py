@@ -1,3 +1,4 @@
+import datetime as dt
 import pathlib
 import sys
 import tempfile
@@ -145,6 +146,61 @@ class TestCodeIdentifierNotHost(unittest.TestCase):
         # the "(" rule must not swallow a genuine out-of-scope host
         self.assertEqual(sg.extract_targets("curl admin.acme.com/panel"), ["admin.acme.com"])
         self.assertEqual(dec("Bash", {"command": "nmap admin.acme.com"}), "deny")
+
+
+class TestEngagementWindow(unittest.TestCase):
+    """The engagement window is re-checked on every active tool call, not just at launch:
+    once now > window.end (or before window.start) active tooling is DENIED, fail-closed."""
+
+    WIN_SCOPE = {
+        "in_scope": {"domains": ["*.acme.com"], "cidrs": [], "urls": []},
+        "out_of_scope": {"domains": [], "cidrs": []},
+        "window": {"start": "2026-01-01T00:00:00Z", "end": "2026-01-31T23:59:59Z"},
+    }
+    BEFORE = dt.datetime(2025, 12, 1, tzinfo=dt.timezone.utc)
+    DURING = dt.datetime(2026, 1, 15, tzinfo=dt.timezone.utc)
+    AFTER = dt.datetime(2026, 2, 15, tzinfo=dt.timezone.utc)
+
+    def _d(self, tool, inp, now):
+        return sg.evaluate(tool, inp, self.WIN_SCOPE, PROT, CWD, now=now)
+
+    def test_bash_denied_after_window_closes(self):
+        out = self._d("Bash", {"command": "nmap app.acme.com"}, self.AFTER)
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("window has closed", out["reason"])
+
+    def test_webfetch_denied_after_window_closes(self):
+        self.assertEqual(self._d("WebFetch", {"url": "https://app.acme.com/"}, self.AFTER)["decision"], "deny")
+
+    def test_mcp_denied_after_window_closes(self):
+        out = sg.evaluate("mcp__x__browser", {"args": ["https://app.acme.com/"]},
+                          self.WIN_SCOPE, PROT, CWD, now=self.AFTER)
+        self.assertEqual(out["decision"], "deny")
+
+    def test_denied_before_window_opens(self):
+        out = self._d("Bash", {"command": "nmap app.acme.com"}, self.BEFORE)
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("not opened yet", out["reason"])
+
+    def test_in_window_in_scope_passes(self):
+        self.assertEqual(self._d("Bash", {"command": "nmap app.acme.com"}, self.DURING)["decision"], "pass")
+
+    def test_out_of_scope_still_denied_in_window(self):
+        # window being open does not loosen scope enforcement
+        out = sg.evaluate("WebFetch", {"url": "https://evil-attacker-xyz.com/"},
+                          self.WIN_SCOPE, PROT, CWD, now=self.DURING)
+        self.assertEqual(out["decision"], "deny")
+
+    def test_local_write_not_blocked_by_closed_window(self):
+        # findings/notes can still be written up after the window closes (write-guard only)
+        out = sg.evaluate("Write", {"file_path": str(CWD / "findings" / "report.md")},
+                          self.WIN_SCOPE, PROT, CWD, now=self.AFTER)
+        self.assertEqual(out["decision"], "pass")
+
+    def test_no_window_key_is_not_denied(self):
+        # a scope with no window (the other fixtures) must behave as before
+        self.assertEqual(sg.evaluate("Bash", {"command": "nmap api.acme.com"}, SCOPE, PROT, CWD,
+                                     now=self.AFTER)["decision"], "pass")
 
 
 class TestEvaluateContract(unittest.TestCase):

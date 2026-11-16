@@ -7,6 +7,7 @@ which the RoE/skill treats as the §0 go-ahead — and which the agent is denied
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -41,6 +42,7 @@ def build_fields(
     exclude_domains: list[str] | None = None,
     exclude_cidrs: list[str] | None = None,
     rate_limit: int = 20,
+    lockout_threshold: int = 5,
     oob: str = "",
     window: tuple[str, str] | None = None,
     notes: str | None = None,
@@ -56,6 +58,7 @@ def build_fields(
             "no_dos": True,
             "no_destructive": True,
             "rate_limit_rps": rate_limit,
+            "lockout_threshold": lockout_threshold,
             "prod_touch_requires_approval": True,
             "approval_required_phases": ["exploitation", "post-exploitation"],
         },
@@ -81,6 +84,9 @@ def scaffold(repo_root: Path, fields: dict, *, operator: str, force: bool = Fals
         "operator": operator,
         "confirmed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "confirmation": "operator asserted written authorization is on file at launcher init",
+        # The operator-acknowledged fingerprint of the canonical scope.yaml at init. The launcher
+        # verifies the live scope.yaml against this at every run (a drift is surfaced, not silent).
+        "scope_sha256": hashlib.sha256((eng_dir / "scope.yaml").read_bytes()).hexdigest(),
         "cli_version": __version__,
     }
     (eng_dir / "runtime" / "authorization.json").write_text(

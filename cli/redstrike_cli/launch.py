@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import approvals as approvalsmod
+from . import audit as auditmod
 from . import roe as roemod
 from . import scope as scopemod
 from . import settings as settingsmod
@@ -26,6 +27,8 @@ class Prepared:
     pending_path: Path
     session_id: str
     scope: dict
+    scope_sha256: str = ""           # fingerprint of the live scope.yaml at this launch
+    scope_integrity_warning: str = ""  # set when the live scope.yaml drifted from the acknowledged one
 
 
 def default_prompt(engagement_id: str) -> str:
@@ -87,6 +90,13 @@ def prepare_runtime(
     scope_json = runtime / "scope.json"
     proj = scopemod.derive_scope_json(scope_yaml, scope_json)  # re-derive from canonical YAML
 
+    # scope.yaml integrity: verify the live canonical record against the fingerprint the operator
+    # acknowledged at init. A drift is SURFACED (and bound into the audit head), not silent — this is
+    # the first thing that checks the "signed canonical authorization record" it claims to be. It
+    # warns rather than blocks: scope legitimately evolves between runs (e.g. a discovered subdomain).
+    scope_sha256 = auditmod.scope_fingerprint(scope_yaml)
+    scope_integrity_warning = _verify_scope_integrity(engagement_dir, scope_sha256)
+
     # Track category coverage from the start (deterministic routing, not model discretion).
     _seed_coverage_ledger(engagement_dir, repo_root, python_exe)
 
@@ -108,6 +118,7 @@ def prepare_runtime(
         mode=mode, extra_allow=extra_allow,
         gate_policy=(gate_policy if mode == "autonomous" else None),
         approvals=(approvals_path if mode == "autonomous" else None),
+        scope=proj,  # populates the OS-sandbox network allowlist from the engagement scope
     )
     settingsmod.write_settings(settings_path, settings)
 
@@ -156,7 +167,31 @@ def prepare_runtime(
         pending_path=pending_path,
         session_id=session_id,
         scope=proj,
+        scope_sha256=scope_sha256,
+        scope_integrity_warning=scope_integrity_warning,
     )
+
+
+def _verify_scope_integrity(engagement_dir: Path, current_sha: str) -> str:
+    """Compare the live scope.yaml fingerprint to the one acknowledged at init (authorization.json).
+
+    Returns a warning string on drift (or an unreadable record), else "". Returns "" when no baseline
+    was ever recorded (pre-integrity engagements) so older engagements are not falsely flagged.
+    """
+    auth_path = engagement_dir / "runtime" / "authorization.json"
+    try:
+        acknowledged = json.loads(auth_path.read_text(encoding="utf-8")).get("scope_sha256", "")
+    except Exception:
+        acknowledged = ""
+    if not acknowledged or not current_sha:
+        return ""
+    if acknowledged != current_sha:
+        return (
+            "scope.yaml has CHANGED since authorization was acknowledged at init "
+            f"(acknowledged sha256 {acknowledged[:12]}…, now {current_sha[:12]}…) — "
+            "confirm the change is authorized; the new fingerprint is recorded in the audit head."
+        )
+    return ""
 
 
 def build_argv(

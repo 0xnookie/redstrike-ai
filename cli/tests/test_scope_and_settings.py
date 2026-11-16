@@ -93,6 +93,63 @@ class TestSettings(unittest.TestCase):
         )
         self.assertIn("--max-rps", s["hooks"]["PreToolUse"][0]["hooks"][1]["command"])
 
+    def test_no_sandbox_block_without_scope(self):
+        # the existing callers pass no scope → no sandbox key (nothing to derive it from)
+        s = settings.render_settings(
+            python_exe="/usr/bin/python3",
+            hook_script=pathlib.Path("/repo/cli/redstrike_cli/hooks/scope_gate.py"),
+            scope_json=pathlib.Path("/eng/runtime/scope.json"),
+        )
+        self.assertNotIn("sandbox", s)
+
+
+class TestSandbox(unittest.TestCase):
+    SCOPE = {
+        "in_scope": {
+            "domains": ["*.acme.com", "API.acme.com"],
+            "cidrs": ["203.0.113.0/24"],
+            "urls": ["https://portal.acme.com/login"],
+        },
+        "out_of_scope": {"domains": ["admin.acme.com"], "cidrs": ["203.0.113.200/29"]},
+    }
+
+    def test_build_sandbox_from_scope(self):
+        sb = settings.build_sandbox(self.SCOPE)
+        self.assertIsNotNone(sb)
+        hosts = sb["network"]["allowedHosts"]
+        # domains + cidrs + the host extracted from in_scope.urls, lowercased + deduped
+        self.assertIn("*.acme.com", hosts)
+        self.assertIn("api.acme.com", hosts)        # normalized to lowercase
+        self.assertIn("203.0.113.0/24", hosts)
+        self.assertIn("portal.acme.com", hosts)     # from the url entry
+        self.assertIn("allowUnixSockets", sb["network"])
+
+    def test_explicit_out_of_scope_entries_excluded(self):
+        # an entry that is itself explicitly out-of-scope never lands on the allowlist
+        scope = {
+            "in_scope": {"domains": ["acme.com", "admin.acme.com"], "cidrs": [], "urls": []},
+            "out_of_scope": {"domains": ["admin.acme.com"], "cidrs": []},
+        }
+        hosts = settings.build_sandbox(scope)["network"]["allowedHosts"]
+        self.assertIn("acme.com", hosts)
+        self.assertNotIn("admin.acme.com", hosts)
+
+    def test_build_sandbox_none_without_scope(self):
+        self.assertIsNone(settings.build_sandbox(None))
+        self.assertIsNone(settings.build_sandbox({}))
+
+    def test_render_settings_emits_sandbox_from_scope(self):
+        s = settings.render_settings(
+            python_exe="/usr/bin/python3",
+            hook_script=pathlib.Path("/repo/cli/redstrike_cli/hooks/scope_gate.py"),
+            scope_json=pathlib.Path("/eng/runtime/scope.json"),
+            scope=self.SCOPE,
+        )
+        json.dumps(s)  # serializable
+        self.assertIn("sandbox", s)
+        self.assertIn("*.acme.com", s["sandbox"]["network"]["allowedHosts"])
+        self.assertNotIn("admin.acme.com", s["sandbox"]["network"]["allowedHosts"])
+
 
 class TestRoe(unittest.TestCase):
     def test_roe_contains_key_directives(self):

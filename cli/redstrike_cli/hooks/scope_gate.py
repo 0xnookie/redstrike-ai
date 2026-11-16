@@ -22,6 +22,7 @@ Usage (wired by the launcher into settings.json):
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import fnmatch
 import hashlib
 import ipaddress
@@ -225,6 +226,46 @@ def _targets_protected(raw_path: str, protected: list[Path], cwd: Path) -> bool:
     return False
 
 
+# --- engagement window ------------------------------------------------------
+# Tools that reach the target over the network; the engagement window governs these. Local file
+# writes (Edit/Write/...) are left to the governance-path guard so findings/notes can still be
+# written up after the window closes.
+_ACTIVE_TOOLS = ("WebFetch", "Bash", "PowerShell")
+
+
+def _parse_iso(s: str):
+    """ISO-8601 → aware datetime (UTC default), or None. Self-contained (hook may run as a plain
+    script with no package context), so this intentionally duplicates scope.parse_iso."""
+    if not s:
+        return None
+    s = str(s).strip().replace("Z", "+00:00")
+    try:
+        d = _dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=_dt.timezone.utc)
+    return d
+
+
+def window_denial(scope: dict, now: _dt.datetime) -> str | None:
+    """Reason to DENY active tooling because the engagement window is not current, else None.
+
+    Enforced CONTINUOUSLY in-session (launch.gate only checks it once at launch, so a long run
+    could otherwise keep hitting the target after the authorized window closed). Only engages when
+    the window carries a parseable bound: a scope with no window (e.g. the gate's own unit fixtures)
+    is not denied here — launch.gate already blocks a launch whose scope has no window.
+    """
+    win = scope.get("window") or {}
+    end = _parse_iso(win.get("end", ""))
+    if end is not None and now > end:
+        return f"engagement window has closed (ended {win.get('end')}) — no active tooling permitted"
+    start = _parse_iso(win.get("start", ""))
+    if start is not None and now < start:
+        return f"engagement window has not opened yet (starts {win.get('start')})"
+    return None
+
+
 # --- decision ---------------------------------------------------------------
 def evaluate(
     tool_name: str,
@@ -236,13 +277,24 @@ def evaluate(
     defer: bool = False,
     bash_allow=(),
     approvals=frozenset(),
+    now: _dt.datetime | None = None,
 ) -> dict:
     """Return {'decision': 'deny'|'defer'|'pass', 'reason': str, ['fingerprint': str]}.
 
     In `defer` mode (autonomous runs) an in-scope shell command that the operator has
     not pre-allowed (`--allow`) or approved is DEFERRED for sign-off instead of run.
+
+    Active (target-reaching) tools are additionally DENIED once the engagement window has closed
+    (or before it opens) — fail-closed, framed as engagement policy.
     """
     tool_input = tool_input or {}
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+
+    # Engagement window: closed/not-yet-open ⇒ deny any active, target-reaching tool.
+    if tool_name in _ACTIVE_TOOLS or tool_name.startswith("mcp__"):
+        wd = window_denial(scope, now)
+        if wd:
+            return _deny(wd)
 
     if tool_name in _WRITE_TOOLS:
         for key in _PATH_KEYS:

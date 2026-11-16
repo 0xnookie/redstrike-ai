@@ -105,6 +105,22 @@ def sandbox_deps() -> tuple[bool, list[str]]:
     return (not missing), missing
 
 
+def sandbox_status() -> tuple[bool, str]:
+    """Is OS-level network confinement actually available on THIS host? (ok, detail).
+
+    When False, the sandbox.network allowlist the launcher writes cannot be enforced and the
+    (input-matching, best-effort) scope gate is the only boundary — the run path surfaces this
+    as a visible banner rather than leaving it buried in `doctor`."""
+    if is_windows():
+        return (False, "native Windows has NO OS sandbox — network confinement is OFF; the scope "
+                       "gate (matches tool input) is the ONLY boundary. Run engagements in WSL2/Linux.")
+    ok, missing = sandbox_deps()
+    if not ok:
+        return (False, f"OS sandbox deps missing ({', '.join(missing)}) — network confinement is "
+                       f"LIMITED; install them, or the scope gate is the only boundary.")
+    return (True, "OS sandbox network confinement available")
+
+
 def find_bash() -> str | None:
     return shutil.which("bash")
 

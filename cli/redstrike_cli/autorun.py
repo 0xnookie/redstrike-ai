@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import approvals as approvalsmod
+from . import audit as auditmod
 from . import ui
 
 
@@ -103,13 +104,16 @@ def _print_summary(s: RunSummary, rc: int, stream) -> None:
 
 
 def run_autonomous(
-    claude_bin: str, argv: list[str], cwd: Path, audit_path: Path, pending_path: Path | None = None, stream=None
+    claude_bin: str, argv: list[str], cwd: Path, audit_path: Path, pending_path: Path | None = None,
+    stream=None, audit_head: str | None = None,
 ) -> tuple[int, RunSummary]:
     stream = stream or sys.stdout
     s = RunSummary()
     try:
         audit = open(audit_path, "a", encoding="utf-8")  # append: keep the chain of custody across resumes
-        audit.write(f"# --- redstrike autonomous run {_dt.datetime.now(_dt.timezone.utc).isoformat()} ---\n")
+        # Tamper-evident, `#`-prefixed head (also the console's run-boundary marker): stamps the run
+        # with sha256(scope.yaml) + the authorizing reference when the caller supplies one.
+        audit.write(audit_head or f"# --- redstrike autonomous run {_dt.datetime.now(_dt.timezone.utc).isoformat()} ---\n")
     except Exception:
         audit = None
     try:
@@ -125,8 +129,9 @@ def run_autonomous(
     try:
         assert proc.stdout is not None
         for raw in proc.stdout:
+            # Redact captured credential material (hashes/tokens/creds) BEFORE it ever hits disk.
             if audit:
-                audit.write(raw)
+                audit.write(auditmod.redact_text(raw))
             line = raw.strip()
             if not line:
                 continue

@@ -11,13 +11,21 @@ Two jobs, two modes, one shared state file:
 
   • PreToolUse  (default)      — BEFORE a request to host H:
         1. breaker OPEN for H (recent run of block responses) ⇒ DENY, pause until it cools;
-        2. H's requests in the last second ≥ the rps budget ⇒ DENY, space out / add jitter;
-        3. otherwise PASS and record the attempt.
+        2. the call looks like an auth attempt and H's auth-attempt budget is spent ⇒ DENY
+           (lockout avoidance — see the auth-budget section below);
+        3. H's requests in the last second ≥ the rps budget ⇒ DENY, space out / add jitter;
+        4. otherwise PASS and record the attempt.
   • PostToolUse (`--observe`)  — AFTER a request completes: read the response status from
         the tool output; a block (429/403/503/challenge) trips/escalates H's breaker with
         exponential backoff + jitter, a clean success closes it.
 
 HONESTY (same altitude as scope_gate's own caveats):
+  • The auth-attempt budget caps logins per (host, username) under the engagement's lockout
+    threshold so a slow spray can't DoS a real account. But confirmation of FAILURE only exists
+    at PostToolUse, so it counts every detected attempt as if it could fail, and when it cannot
+    recover a username from the command it falls back to a coarse per-host throttle that does NOT
+    guarantee any specific account stays unlocked. Detection is heuristic; a login it does not
+    recognize is not budgeted, so this REDUCES lockout risk — it does not eliminate it.
   • A PreToolUse hook cannot *sleep* the agent — it can only pass/deny. "Pacing" is therefore
     enforced as a DENY framed as engagement policy ("you are over budget for H — wait/jitter
     before the next request"), which (per roe-gate's framing rule) makes the agent PAUSE and
@@ -88,11 +96,43 @@ _STATUS_LINE_RE = re.compile(r"\bHTTP/(?:1\.[01]|2|3)\s+(\d{3})\b")
 # A lone 3-digit code on its own line (curl -w '%{http_code}') — the LAST such wins (final response).
 _BARE_CODE_RE = re.compile(r"(?m)^\s*([1-5]\d{2})\s*$")
 
+# --- auth-attempt / lockout budget ------------------------------------------
+# The rps gate bounds how FAST we go, not how many failed LOGINS we attempt. A slow spray (one
+# try per account, paced under the rps budget) can still march an account past its lockout
+# threshold — a denial-of-service on a real user. This budget caps auth attempts per
+# (host, username) under the engagement's account-lockout threshold so the engagement never
+# locks the accounts it is testing.
+#
+# LIMIT (be honest): confirmation of whether an attempt FAILED only exists at PostToolUse, so
+# this counts EVERY detected auth attempt (pass or fail) as if it could fail — conservative on
+# purpose. When no username is recoverable from the command, it falls back to a coarse per-host
+# spray throttle (keyed "*") and CANNOT guarantee a specific account won't lock; see run_pre.
+AUTH_WINDOW_SEC = 1800.0           # the window lockout counters decay over (~most AD policies)
+DEFAULT_LOCKOUT_THRESHOLD = 5      # assumed lockout threshold when scope.rules.lockout_threshold is absent
+DEFAULT_SPRAY_CAP = 50             # per-host cap on un-attributed (username-unknown) auth attempts / window
+
+# Tools whose command text signals an authentication attempt (login / brute / spray).
+_BRUTE_RE = re.compile(
+    r"\b(hydra|medusa|ncrack|patator|crackmapexec|cme|netexec|nxc|kerbrute|brutespray|smtp-user-enum)\b",
+    re.IGNORECASE,
+)
+_CRED_PARAM_RE = re.compile(r"(?i)(?:^|[?&\s'\"])(?:password|passwd|pwd|pass)=[^&\s'\"]+")
+_BASIC_AUTH_RE = re.compile(r"(?i)authorization\s*:\s*basic\s+\S+")
+_CURL_USERPASS_RE = re.compile(r"(?i)(?:^|\s)(?:-u|--user)[ =]\S+:\S+")
+# Username extractors (first hit wins); ordered most- to least-specific.
+_USER_RES = [
+    re.compile(r"(?:^|\s)-l\s+([^\s:]+)"),                           # hydra -l user (lowercase only; -L is a LIST file)
+    re.compile(r"(?i)(?:^|\s)(?:-u|--user(?:name)?)[ =]([^\s:&'\"]+)"),
+    re.compile(r"(?i)[?&](?:username|user|login|email)=([^&\s'\"]+)"),
+    re.compile(r"(?i)\b(?:username|login)=([^&\s'\"]+)"),
+    re.compile(r"(?i)://([^/:@\s]+):[^/@\s]+@"),                     # creds in a URL authority
+]
+
 
 # --- state ------------------------------------------------------------------
 def _blank_host() -> dict:
     return {"ts": [], "blocks": 0, "open_until": 0.0,
-            "last_status": 0, "total_requests": 0, "total_blocks": 0}
+            "last_status": 0, "total_requests": 0, "total_blocks": 0, "auth": {}}
 
 
 def _host_state(state: dict, host: str) -> dict:
@@ -141,6 +181,63 @@ def check(hs: dict, now: float, *, rps: float, window: float = WINDOW_SEC) -> di
         }
     hs["ts"].append(now)
     hs["total_requests"] = int(hs.get("total_requests", 0)) + 1
+    return {"decision": "pass", "reason": "", "retry_after": 0.0}
+
+
+def detect_auth(tool_name: str, tool_input: dict) -> tuple[bool, str | None]:
+    """Is this tool call an authentication attempt, and against which username (if recoverable)?
+
+    Conservative: only a brute/spray tool, a credential parameter, an HTTP Basic header, or
+    `-u user:pass` counts as an auth attempt — ordinary recon does not. Returns (False, None)
+    otherwise. The username (when found) keys the per-account budget; absent, the caller falls
+    back to the coarse per-host spray throttle.
+    """
+    ti = tool_input or {}
+    if tool_name in ("Bash", "PowerShell"):
+        text = str(ti.get("command", ""))
+    elif tool_name == "WebFetch":
+        text = str(ti.get("url", ""))
+    elif tool_name.startswith("mcp__"):
+        text = json.dumps(ti, default=str)
+    else:
+        return (False, None)
+    is_auth = bool(
+        _BRUTE_RE.search(text) or _CRED_PARAM_RE.search(text)
+        or _BASIC_AUTH_RE.search(text) or _CURL_USERPASS_RE.search(text)
+    )
+    if not is_auth:
+        return (False, None)
+    for rx in _USER_RES:
+        m = rx.search(text)
+        if m and m.group(1):
+            return (True, m.group(1).lower())
+    return (True, None)
+
+
+def auth_check(hs: dict, key: str, now: float, *, budget: int,
+               window: float = AUTH_WINDOW_SEC) -> dict:
+    """Bound auth attempts for one budget key (a username, or "*" for un-attributed spray) on this
+    host. DENY once `budget` attempts sit inside the window, so we never make the attempt that would
+    trip the lockout. Mutates `hs` only on PASS (records the attempt), mirroring `check`.
+    """
+    auth = hs.setdefault("auth", {})
+    rec = auth.get(key) or {"ts": []}
+    ts = [t for t in rec.get("ts", []) if t >= now - window]
+    if budget > 0 and len(ts) >= budget:
+        wait = max(0.0, (ts[0] + window) - now)
+        rec["ts"] = ts
+        auth[key] = rec
+        who = "account" if key != "*" else "host (username unknown)"
+        return {
+            "decision": "deny",
+            "reason": (f"auth-attempt budget reached for {who} ({len(ts)}/{budget} in "
+                       f"{int(window)}s) — pausing to avoid locking the account "
+                       f"(retry in ~{wait / 60:.0f}m)"),
+            "retry_after": wait,
+        }
+    ts.append(now)
+    rec["ts"] = ts
+    auth[key] = rec
     return {"decision": "pass", "reason": "", "retry_after": 0.0}
 
 
@@ -321,6 +418,20 @@ def resolve_rps(scope_path: str, max_rps: float | None) -> float:
     return rps
 
 
+def resolve_lockout_threshold(scope_path: str) -> int:
+    """scope.rules.lockout_threshold (the account-lockout threshold for this engagement), or the
+    conservative default. The per-account budget allows threshold-1 attempts and denies the one
+    that would reach the threshold."""
+    try:
+        scope = json.loads(Path(scope_path).read_text(encoding="utf-8"))
+        v = (scope.get("rules", {}) or {}).get("lockout_threshold")
+        if v is not None:
+            return max(1, int(v))
+    except Exception:
+        pass
+    return DEFAULT_LOCKOUT_THRESHOLD
+
+
 # --- hook I/O ---------------------------------------------------------------
 def _emit_deny(reason: str) -> None:
     # Framed as engagement pacing policy (NOT a target defense) so the agent PAUSES and re-plans
@@ -346,8 +457,20 @@ def run_pre(payload: dict, scope_path: str, state_path: Path, max_rps: float | N
     if not hosts:
         return 0
     rps = resolve_rps(scope_path, max_rps)
+    is_auth, user = detect_auth(tool_name, tool_input)
+    threshold = resolve_lockout_threshold(scope_path)
 
     def _txn(state):
+        # Lockout avoidance comes FIRST — locking a real account is worse than being paced.
+        if is_auth:
+            key = user or "*"
+            budget = max(1, threshold - 1) if user else DEFAULT_SPRAY_CAP
+            for host in hosts:
+                if sg.is_ignorable(host):
+                    continue
+                ad = auth_check(_host_state(state, host), key, now, budget=budget)
+                if ad["decision"] == "deny":
+                    return dict(ad, host=host), state
         return decide(state, hosts, now, rps=rps), state
 
     d = with_state(state_path, _txn)

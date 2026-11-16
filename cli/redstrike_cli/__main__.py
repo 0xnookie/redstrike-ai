@@ -15,6 +15,7 @@ from . import __version__, engagement, gate, launch, preflight, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
+from . import settings as settingsmod
 
 
 def _is_repo(p: Path) -> bool:
@@ -234,6 +235,24 @@ def maybe_launch_console(args, repo: Path) -> None:
         print("  tip: view results in the web console — `redstrike console`")
 
 
+def _warn_scope_integrity(prep) -> None:
+    """Surface a scope.yaml drift (vs the fingerprint acknowledged at init) before launch."""
+    w = getattr(prep, "scope_integrity_warning", "")
+    if w:
+        print(ui.warn(w))
+
+
+def _warn_no_sandbox() -> None:
+    """Promote the 'no OS sandbox / network confinement OFF' check to a visible banner on the run
+    path (not just buried in `doctor`): without the OS sandbox, the scope gate is the only boundary."""
+    ok, detail = preflight.sandbox_status()
+    if not ok:
+        print()
+        print(ui.rule("network confinement"))
+        print(ui.warn(detail))
+        print()
+
+
 def _post_run_gate(repo: Path, eng_dir: Path, rc: int) -> int:
     """Run the mechanical completion + coverage gate after an engine run. The engine itself
     can't self-gate between phases, so this is where the gates become mechanical rather than
@@ -286,6 +305,8 @@ def cmd_run(args, repo: Path) -> int:
             suffix += f"  ·  engine: {engine.name}"
         ui.print_banner(f"engagement {eng_dir.name}" + suffix)
 
+    _warn_no_sandbox()
+
     if args.autonomous:
         return _run_autonomous(args, repo, eng_dir, engine)
 
@@ -297,6 +318,7 @@ def cmd_run(args, repo: Path) -> int:
 
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
+    _warn_scope_integrity(prep)
 
     problems = engine.gate(prep)
     if problems:
@@ -331,7 +353,8 @@ def cmd_run(args, repo: Path) -> int:
     print()
     print(ui.ok(f"scope gate armed · launching {engine.name} engine (interactive, gated)…"))
     print()
-    res = engine.run(prep, eng_dir, inv, mode="interactive")
+    audit = eng_dir / "runtime" / "autorun.jsonl"  # audit the interactive run too (stamped head + footer)
+    res = engine.run(prep, eng_dir, inv, mode="interactive", audit=audit)
     rc = _post_run_gate(repo, eng_dir, res.rc)
     maybe_launch_console(args, repo)
     return rc
@@ -350,6 +373,11 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
 
     for line in scopemod.summary_lines(prep.scope):
         print(f"  {line}")
+    _warn_scope_integrity(prep)
+    # Flag --allow globs broad enough to run active-exploit commands with no per-command deferral,
+    # i.e. that would bypass the autonomous approval gate for the highest-impact classes.
+    for w in settingsmod.broad_allow_warnings(extra_allow):
+        print(ui.warn(w))
     problems = engine.gate(prep)
     if problems:
         print()

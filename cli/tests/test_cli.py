@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -9,7 +10,9 @@ from contextlib import redirect_stdout
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # cli/
 
-from redstrike_cli import engagement, gate, launch  # noqa: E402
+import unittest.mock as mock  # noqa: E402
+
+from redstrike_cli import engagement, gate, launch, preflight  # noqa: E402
 from redstrike_cli.__main__ import main  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -54,6 +57,12 @@ class TestInitAndRunDryRun(unittest.TestCase):
             self.assertTrue((eng / "runtime" / "roe.md").is_file())
             settings = json.loads((eng / "runtime" / "settings.json").read_text(encoding="utf-8"))
             self.assertIn("PreToolUse", settings["hooks"])
+            # the OS-sandbox network boundary is derived from the engagement scope (P0-1)
+            self.assertIn("sandbox", settings)
+            allowed_hosts = settings["sandbox"]["network"]["allowedHosts"]
+            self.assertIn("*.acme.com", allowed_hosts)
+            self.assertIn("api.acme.com", allowed_hosts)
+            self.assertNotIn("admin.acme.com", allowed_hosts)  # explicit exclude dropped
             # dry-run prints the argv with the key flags
             self.assertIn("--append-system-prompt-file", out)
             self.assertIn("--add-dir", out)
@@ -131,6 +140,102 @@ class TestConsole(unittest.TestCase):
             out = buf.getvalue()
             self.assertEqual(rc, 0, out)
             self.assertNotIn("bringing up the web console", out)
+
+
+class TestSandboxBanner(unittest.TestCase):
+    def test_status_windows_is_off(self):
+        with mock.patch.object(preflight, "is_windows", return_value=True):
+            ok, detail = preflight.sandbox_status()
+        self.assertFalse(ok)
+        self.assertIn("NO OS sandbox", detail)
+
+    def test_status_deps_missing_is_limited(self):
+        with mock.patch.object(preflight, "is_windows", return_value=False), \
+             mock.patch.object(preflight, "sandbox_deps", return_value=(False, ["bwrap"])):
+            ok, detail = preflight.sandbox_status()
+        self.assertFalse(ok)
+        self.assertIn("LIMITED", detail)
+
+    def test_status_ok_when_present(self):
+        with mock.patch.object(preflight, "is_windows", return_value=False), \
+             mock.patch.object(preflight, "sandbox_deps", return_value=(True, [])):
+            ok, _ = preflight.sandbox_status()
+        self.assertTrue(ok)
+
+    def test_run_prints_banner_when_confinement_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            (repo / "engagements").mkdir()
+            main(["--repo", str(repo), "--no-color", "--no-banner",
+                  "init", "Acme", "--authorized-by", "x", "--domain", "*.acme.com",
+                  "--i-confirm-authorization"])
+            eid = engagement.engagement_id("Acme")
+            buf = io.StringIO()
+            with mock.patch("redstrike_cli.preflight.sandbox_status",
+                            return_value=(False, "CONFINEMENT-OFF-marker")), redirect_stdout(buf):
+                rc = main(["--repo", str(repo), "--no-color", "--no-banner", "run", eid, "--dry-run"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertIn("CONFINEMENT-OFF-marker", out)
+            self.assertIn("network confinement", out)
+
+    def test_run_no_banner_when_confinement_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            (repo / "engagements").mkdir()
+            main(["--repo", str(repo), "--no-color", "--no-banner",
+                  "init", "Acme", "--authorized-by", "x", "--domain", "*.acme.com",
+                  "--i-confirm-authorization"])
+            eid = engagement.engagement_id("Acme")
+            buf = io.StringIO()
+            with mock.patch("redstrike_cli.preflight.sandbox_status", return_value=(True, "ok")), \
+                 redirect_stdout(buf):
+                main(["--repo", str(repo), "--no-color", "--no-banner", "run", eid, "--dry-run"])
+            self.assertNotIn("network confinement", buf.getvalue())
+
+
+class TestScopeIntegrity(unittest.TestCase):
+    def _scaffold(self, repo: pathlib.Path) -> pathlib.Path:
+        (repo / "engagements").mkdir()
+        fields = engagement.build_fields(client="Acme", authorized_by="sec@acme", domains=["*.acme.com"])
+        engagement.scaffold(repo, fields, operator="t")
+        return repo / "engagements" / fields["engagement"]
+
+    def test_scaffold_records_acknowledged_sha(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._scaffold(pathlib.Path(d))
+            auth = json.loads((eng / "runtime" / "authorization.json").read_text(encoding="utf-8"))
+            expected = hashlib.sha256((eng / "scope.yaml").read_bytes()).hexdigest()
+            self.assertEqual(auth["scope_sha256"], expected)
+
+    def test_prepare_no_warning_when_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = self._scaffold(repo)
+            prep = launch.prepare_runtime(eng, repo, sys.executable)
+            self.assertEqual(prep.scope_integrity_warning, "")
+            self.assertTrue(prep.scope_sha256)
+
+    def test_prepare_warns_on_scope_drift(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = self._scaffold(repo)
+            p = eng / "scope.yaml"
+            p.write_text(p.read_text(encoding="utf-8") + "\n# an edit after acknowledgment\n", encoding="utf-8")
+            prep = launch.prepare_runtime(eng, repo, sys.executable)
+            self.assertIn("CHANGED", prep.scope_integrity_warning)
+
+    def test_no_baseline_is_not_flagged(self):
+        # an engagement with no recorded scope_sha256 (pre-integrity) must not be falsely flagged
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = self._scaffold(repo)
+            auth_path = eng / "runtime" / "authorization.json"
+            auth = json.loads(auth_path.read_text(encoding="utf-8"))
+            auth.pop("scope_sha256", None)
+            auth_path.write_text(json.dumps(auth), encoding="utf-8")
+            prep = launch.prepare_runtime(eng, repo, sys.executable)
+            self.assertEqual(prep.scope_integrity_warning, "")
 
 
 class TestCoverageWiring(unittest.TestCase):
