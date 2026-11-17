@@ -32,7 +32,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 ## Steps  (action · tool · output)
 1. Ingest stored candidates from the feeder (`persists == true` + accepted-but-unseen) · `jq xss_context.json` · `stored_candidates.json`
 2. Enumerate render surfaces + viewer privilege for each candidate · `refs/render_surfaces.md` + crawl (`katana`/`chrome-devtools-mcp`) · `render_map.json`
-3. Submit a benign unique tracer to each store point · ladder fetch + interceptor · `tracers.jsonl`
+3. Submit a benign unique tracer to each store point · ladder fetch + interceptor · `tracers.jsonl` — if the store write is a **non-replayable server action** (see note), source + replay from `proxy-context/http_history.json` with the tracer/payload injected into the captured field
 4. Locate where each tracer renders (which surface, which viewer) · crawl as each identity · `render_map.json` (confirmed pairs)
 5. Classify context AT THE RENDER SURFACE; canary the output encoder/sanitizer · `refs/context_rules.md`(xss-context) + DOM inspect · (into findings draft)
 6. Select payload; probe store-side AND output-side sanitizers · `refs/stored_payloads.md` + `dalfox` · `payloads_tried.jsonl`
@@ -44,6 +44,14 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 12. Emit report + PoCs · synth + `printf` · `report.md`, `curl_commands.sh`
 13. /REVIEW SKILL (mechanical) · `review.md` → `verify_completion.py`
 14. /VERIFY (semantic) · `verify.md` (subagent)
+
+**Non-replayable store writes.** When the store endpoint is a Next.js / RSC **server action** (the write
+POSTs with a `Next-Action` header + a bound-state `multipart/form-data` body — a hand-built POST 500s, so it
+is **not** constructible from scratch), **source the store request from `proxy-context/http_history.json`** —
+captured one time via browser-through-proxy (`_contract/proxy.md` §4a) — and **replay it with the stored-XSS
+tracer/payload injected** into the captured text field, leaving the bound-state part intact, instead of
+constructing the store request. `scripts/replay_server_action.py` extracts the entry + marks the
+payload-inject slot. The render-side cross-user execution confirmation (steps 7–9) is unchanged.
 
 ## Tools
 - **Ingest:** `jq` over `xss_context.json`

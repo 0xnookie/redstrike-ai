@@ -28,6 +28,13 @@ One `exchanges[]` record per captured request/response (shape + fields in `SKILL
 merges on: `host` + `path` + `method`; facets: `status`, `mime`, `params`; the raw `req`/`res` drive the
 console's request/response viewer.
 
+**Replay-faithful for non-replayable writes.** An RSC / Next.js **server-action** POST (`Next-Action` header
++ a `multipart/form-data` body whose first part is the bound `prevState` arg) is **not reconstructable from
+scratch** (`_contract/proxy.md` §4a) — the captured entry is the only replayable copy. Keep the `Next-Action`
+header and the `Content-Type`/boundary, and keep the `req.body` (multipart included) **verbatim**. Redaction
+(below) swaps secret *values* only; it must not alter the bound-state part or the part boundaries.
+`scripts/replay_server_action.py` turns one such entry into a replay template (id-swap / payload-inject slots).
+
 ## Redaction (before writing — non-negotiable)
 Replace every secret with the literal `‹redacted›`:
 - `Authorization`, `Cookie`/`Set-Cookie`, `X-API-Key`, bearer/session tokens
