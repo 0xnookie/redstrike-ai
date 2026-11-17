@@ -429,15 +429,40 @@ def _reportable_findings_count(eng: Path, findings: list) -> int:
 
 
 def _diagnostics_hard_errors(eng: Path, findings: list) -> list:
-    """HARD diagnostics gate (reliability) — active once a report exists AND it carries ZERO reportable
-    findings. An empty report must PROVE it was a real clean test, not a silent 'we were blocked /
-    produced nothing'. The latest diagnostics run must carry an EXPLAINED outcome: `clean-tested`, or
-    `degraded-empty`/`failed` WITH a `degraded_reason`. A missing diagnostics file, a missing/contradictory
-    outcome, or an unexplained empty HARD-fails (empty ≠ clean). [] when no report, or the report has
-    reportable findings (then the diagnostics gate does not apply)."""
+    """HARD diagnostics gate (reliability) — active once a report exists. Two cases:
+
+    * report WITH reportable findings — the latest diagnostics run must not CONTRADICT it. The only
+      diagnostics writer is the launcher's post-run gate, so an engagement driven through the interactive
+      Skill path keeps a stale CLI-init / blocked-on-approval `runs[-1]` (outcome `degraded-empty`,
+      `findings_count` 0) → a false "Assessment degraded" even over accepted findings. If a run exists and
+      its outcome/findings_count contradict the report, HARD-fail with the `scripts/close.py` remedy. A
+      report WITH findings and NO diagnostics file stays a non-error (close.py is advised, never required
+      here — nothing stale to contradict).
+    * zero-finding report — the empty must PROVE it was a real clean test, not a silent 'we were blocked /
+      produced nothing'. The latest run must carry an EXPLAINED outcome: `clean-tested`, or
+      `degraded-empty`/`failed` WITH a `degraded_reason`. A missing diagnostics file, a missing/contradictory
+      outcome, or an unexplained empty HARD-fails (empty ≠ clean).
+
+    Reads only the stable run-record fields (`outcome`, `findings_count`, `degraded_reason`). [] when no
+    report is present."""
     if not _report_present(eng):
         return []
-    if _reportable_findings_count(eng, findings) > 0:
+    rc = _reportable_findings_count(eng, findings)
+    if rc > 0:
+        run = _latest_run(_load_diagnostics(eng))
+        if run is None:
+            return []  # no diagnostics recorded → nothing stale to contradict (close.py advised, not required)
+        outcome = run.get("outcome")
+        try:
+            fc = int(run.get("findings_count") or 0)
+        except (TypeError, ValueError):
+            fc = 0
+        if outcome != "produced-findings" or fc == 0:
+            return [("diagnostics gate (report has findings → the latest runtime/diagnostics.json run must "
+                     "agree): latest runtime/diagnostics.json run is stale / contradicts the report "
+                     f"(outcome={outcome!r}, findings_count={fc}, but the report carries {rc} reportable "
+                     "finding(s)) — run `python scripts/close.py --engagement <dir>` to record this "
+                     "engagement's outcome.")]
         return []
     run = _latest_run(_load_diagnostics(eng))
     pre = ("diagnostics gate (zero-finding report → the latest runtime/diagnostics.json run must carry an "

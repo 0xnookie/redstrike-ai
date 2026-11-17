@@ -116,6 +116,95 @@ class SinkClassBlackBox(unittest.TestCase):
         self.assertEqual(ra.audit(led, set(), MAPC)["summary"]["total"], 0)
 
 
+class AcceptWriter(unittest.TestCase):
+    """The honest-accept writer (`--accept`): records an accept ONLY for a gap the deterministic engine
+    actually flags, ONLY with a named environmental blocker from the closed vocab, and (for a shallow-clear)
+    ONLY alongside the real escalation techniques that ran — writing the LIST shape the gate already reads."""
+
+    def _shallow_eng(self, *, found=0):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        eng = pathlib.Path(self._tmp.name)
+        import json as _json
+        (eng / "coverage_ledger.json").write_text(_json.dumps(
+            {"categories": [{"id": "sqli", "status": "attempted", "findings_count": found,
+                             "triggers_matched": ["param:injectable"]}]}), encoding="utf-8")
+        return eng
+
+    def _accepts(self, eng):
+        import json as _json
+        return _json.loads((eng / "reviews" / "recall_audit_accepts.json").read_text(encoding="utf-8"))
+
+    def test_writes_accept_in_list_shape(self):
+        eng = self._shallow_eng()
+        ladder = esc.ladder_for("sqli")[:2]
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=["opaque-session"],
+                                  ladder_run=ladder, reason="unseeded test DB, no rows to extract")
+        self.assertTrue(ok, msg)
+        data = self._accepts(eng)
+        self.assertIsInstance(data, list)
+        e = data[0]
+        self.assertEqual(e["id"], "shallow-clear:sqli")
+        self.assertTrue(e["reason"].strip())           # reader keys on id + non-empty reason
+        self.assertEqual(e["blocker"], ["opaque-session"])
+        self.assertEqual(e["ladder_run"], ladder)
+
+    def test_refuse_non_gap(self):
+        eng = self._shallow_eng(found=2)               # sqli HAS findings -> not a gap
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=["opaque-session"],
+                                  ladder_run=esc.ladder_for("sqli"), reason="x")
+        self.assertFalse(ok)
+        self.assertIn("does not currently flag", msg)
+        self.assertFalse((eng / "reviews" / "recall_audit_accepts.json").exists())
+
+    def test_refuse_missing_blocker(self):
+        eng = self._shallow_eng()
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=[],
+                                  ladder_run=esc.ladder_for("sqli"), reason="x")
+        self.assertFalse(ok)
+        self.assertIn("--blocker is required", msg)
+
+    def test_refuse_blocker_off_vocab(self):
+        eng = self._shallow_eng()
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=["made-up-reason"],
+                                  ladder_run=esc.ladder_for("sqli"), reason="x")
+        self.assertFalse(ok)
+        self.assertIn("unknown --blocker", msg)
+
+    def test_refuse_shallow_clear_without_ladder_run(self):
+        eng = self._shallow_eng()
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=["opaque-session"],
+                                  ladder_run=[], reason="x")
+        self.assertFalse(ok)
+        self.assertIn("--ladder-run is required", msg)
+
+    def test_refuse_ladder_technique_off_ladder(self):
+        eng = self._shallow_eng()
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=["opaque-session"],
+                                  ladder_run=["not-a-real-technique"], reason="x")
+        self.assertFalse(ok)
+        self.assertIn("not in", msg)
+
+    def test_refuse_blank_reason(self):
+        eng = self._shallow_eng()
+        ok, msg = ra.write_accept(eng, "shallow-clear:sqli", blockers=["opaque-session"],
+                                  ladder_run=esc.ladder_for("sqli"), reason="   ")
+        self.assertFalse(ok)
+        self.assertIn("--reason is required", msg)
+
+    def test_idempotent_replace_same_id(self):
+        eng = self._shallow_eng()
+        ladder = esc.ladder_for("sqli")
+        ra.write_accept(eng, "shallow-clear:sqli", blockers=["opaque-session"],
+                        ladder_run=ladder, reason="first")
+        ra.write_accept(eng, "shallow-clear:sqli", blockers=["single-identity"],
+                        ladder_run=ladder, reason="second")
+        data = self._accepts(eng)
+        self.assertEqual(len(data), 1)                 # replaced, not duplicated
+        self.assertEqual(data[0]["reason"], "second")
+
+
 class SelfTest(unittest.TestCase):
     def test_module_selftest(self):
         ra.selftest()

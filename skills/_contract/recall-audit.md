@@ -42,10 +42,34 @@ not manufacture work on surfaces recon found no reason to test.
 This is no longer advisory. Once `report/findings_consolidated.json` exists, `verify_completion.py
 --engagement` runs the deterministic engine and **HARD-FAILS** on any `shallow-clear`,
 `skipped-but-signalled`, or `never-run`/`pending-at-close` gap (the noxframe report shipped over ~10 HIGH
-shallow-clear gaps — exactly this). Clear a gap by escalating + re-running the class, or record an explicit,
-reasoned accept in `reviews/recall_audit_accepts.json` (keyed `"<type>:<category>"`, or a bare
-`"<category>"` to accept all its gated gaps — mirrors `reviews/self_verified_accepts.json`). An accepted gap
-is surfaced as a warning, never a silent pass.
+shallow-clear gaps — exactly this). Clear a gap by escalating + re-running the class, **or**, for a gap that
+is genuinely unclosable in this environment, record an honest accept.
+
+### Honest-accept — the first-choice close for a genuinely-unclosable gap
+Do **not** hand-fake a clear (`coverage.py --mark <class> --status attempted --count 0 --escalations <full
+ladder>` deterministically clears a shallow-clear with no reason — the fabrication the safety classifier
+blocks). Record the accept with the writer instead, which is un-gameable:
+
+```
+python scripts/recall_audit.py --accept <type:category> --engagement <dir> \
+    --blocker <csv> [--ladder-run <csv>] --reason "<why this gap is unclosable here>"
+```
+
+- **`--blocker` is REQUIRED**, from a CLOSED vocabulary (`no-oob-collaborator`, `single-identity`,
+  `browser-declined`, `captcha-gated`, `opaque-session`, `no-sink-surface`, `destructive-withheld`,
+  `no-mailbox`). An accept must NAME the environmental reason the gap couldn't be closed — it states
+  "couldn't, **because X**" (auditable), never "tried, trust us".
+- The writer **refuses** an accept for a `(type:category)` the deterministic engine does not currently
+  flag (no pre-stamping non-gaps), and for a `shallow-clear` it **requires `--ladder-run`** — the real
+  escalation technique ids that genuinely ran (validated against the class's ladder), recorded separately
+  from the residual blocker.
+- It writes `reviews/recall_audit_accepts.json` in the list shape the gate already reads
+  (`[{"id":"<type>:<category>", "reason":..., "blocker":[...], "ladder_run":[...]}]`). A bare `"<category>"`
+  id accepts all of that class's gated gaps. An accepted gap is surfaced as a **warning**, never a silent pass.
+
+> Orchestration: run **`python scripts/close.py --engagement <dir>`** before `verify_completion.py` so the
+> diagnostics gate always reads a current run record for this engagement (fresh or historical), then clear or
+> accept each recall gap, then re-run the gate.
 
 ## Relationship to the other gates
 - [`coverage.md`/`coverage.py`] proves categories are **accounted for** (nothing silently `pending`).
