@@ -3,15 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   NotebookPen, Download, Lightbulb, Radar, FileText, Globe, KeyRound,
-  CheckCircle2, XCircle, Ban, ChevronRight, Users, ScrollText,
+  CheckCircle2, XCircle, Ban, ChevronRight, Users, ScrollText, Plus, X, Loader2,
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
+import { useControl } from "@/components/control/ControlProvider";
 import { useToast } from "@/components/ui/Toast";
 import { cx, fmtDate } from "@/lib/format";
 import { SEVERITY, sevMeta } from "@/lib/theme";
 import type { Finding, NotebookLead, NotebookAccount, LeadStatus } from "@/lib/types";
+import type { AccountBody } from "@/lib/control";
 import { buildNotebook, fmtBytes, type LeadTab } from "@/lib/notebook";
-import { Kpi, Pill, Dot, ViewHead, Panel, PanelHeader, EmptyState, Segmented } from "@/components/ui/primitives";
+import { Kpi, Pill, Dot, ViewHead, Panel, PanelHeader, EmptyState, Segmented, Select } from "@/components/ui/primitives";
 
 /* ── presentation maps ──────────────────────────────────────────────────── */
 const LEAD_STATUS: Record<LeadStatus, { label: string; color: string; pulse?: boolean }> = {
@@ -497,14 +499,172 @@ function ChipSec({ title, children }: { title: string; children: React.ReactNode
 }
 
 /* ── test accounts ──────────────────────────────────────────────────────── */
+// Monochrome chrome; matches LaunchPanel's Field/inputCls so the inline add-form reads as
+// native console UI (no new primitives).
+const acctInputCls =
+  "h-9 w-full rounded-lg border border-line bg-card2 px-2.5 text-sm outline-none placeholder:text-muted focus:border-fg/40";
+type SecretType = "password" | "token" | "cookie";
+
+function AField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-medium text-muted">{label}</span>
+      <div className="mt-1">{children}</div>
+    </label>
+  );
+}
+
 function AccountsPanel({ accounts }: { accounts: NotebookAccount[] }) {
+  // WRITE wiring: the control plane owns the mutation; the console store re-reads notebook.json.
+  // activeId comes from useConsole() (the engagement whose notebook is on screen — the control
+  // plane's own selection can diverge from it), so the write targets exactly what's displayed.
+  const { conn, doAddAccount, busy } = useControl();
+  const { activeId, reloadActive } = useConsole();
+  const canWrite = conn === "ready";
+
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ id: "", role: "", identity: "", auth: "", used_for: "", status: "" });
+  const [secretType, setSecretType] = useState<SecretType>("password");
+  // The raw secret lives ONLY here, in component state, until submit — never localStorage,
+  // sessionStorage, or any store, and it is cleared on every submit (mirrors ConnectionsView's KeyForm).
+  const [secret, setSecret] = useState("");
+  const [working, setWorking] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+
+  const upd = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const resetForm = () => {
+    setForm({ id: "", role: "", identity: "", auth: "", used_for: "", status: "" });
+    setSecret(""); // the secret never outlives the form
+    setSecretType("password");
+    setErr("");
+  };
+  const closeForm = () => { resetForm(); setAdding(false); };
+
+  const submit = async () => {
+    if (!form.id.trim() || !secret.trim()) return;
+    setWorking(true);
+    setErr("");
+    const body: AccountBody = { action: "add", id: form.id.trim() };
+    if (form.role.trim()) body.role = form.role.trim();
+    if (form.identity.trim()) body.identity = form.identity.trim();
+    if (form.auth.trim()) body.auth = form.auth.trim();
+    if (form.used_for.trim()) body.used_for = form.used_for.trim();
+    if (form.status.trim()) body.status = form.status.trim();
+    body[secretType] = secret.trim();
+    const r = await doAddAccount(activeId, body);
+    setSecret(""); // CLEAR the secret on submit — win or lose, it leaves component state immediately
+    setWorking(false);
+    if (r?.ok) {
+      resetForm();
+      setAdding(false);
+      await reloadActive();
+    } else {
+      setErr((r?.stderr || r?.error || "Could not add the account.").trim());
+    }
+  };
+
+  const remove = async (id: string) => {
+    setRemoving(id);
+    setErr("");
+    const r = await doAddAccount(activeId, { action: "remove", id });
+    setRemoving(null);
+    if (r?.ok) await reloadActive();
+    else setErr((r?.stderr || r?.error || "Could not remove the account.").trim());
+  };
+
   const tenants = Array.from(new Set(accounts.map((a) => a.tenant).filter(Boolean))) as string[];
   const roles = Array.from(new Set(accounts.map((a) => a.role).filter(Boolean))) as string[];
   const showMatrix = tenants.length > 0 && roles.length > 0;
+  const canSubmit = !!form.id.trim() && !!secret.trim() && !working && !busy;
+
   return (
     <Panel>
-      <PanelHeader title="Test accounts" sub={`${accounts.length}`} icon={<Users size={15} className="text-muted" />} />
+      <PanelHeader
+        title="Test accounts"
+        sub={`${accounts.length}`}
+        icon={<Users size={15} className="text-muted" />}
+        actions={canWrite ? (
+          <button onClick={() => (adding ? closeForm() : setAdding(true))} className="btn-ghost">
+            {adding ? <><X size={13} /> Cancel</> : <><Plus size={13} /> Add account</>}
+          </button>
+        ) : undefined}
+      />
       <div className="space-y-3 px-[22px] pb-5">
+        {canWrite && adding && (
+          <div className="space-y-2.5 rounded-lg border border-line bg-card2/60 p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <AField label="ID"><input className={acctInputCls} value={form.id} onChange={upd("id")} placeholder="tester-a" autoComplete="off" /></AField>
+              <AField label="Role"><input className={acctInputCls} value={form.role} onChange={upd("role")} placeholder="admin / user" autoComplete="off" /></AField>
+            </div>
+            <AField label="Identity"><input className={acctInputCls} value={form.identity} onChange={upd("identity")} placeholder="tester-a@acme.com" autoComplete="off" /></AField>
+            <div className="grid grid-cols-2 gap-2">
+              <AField label="Auth method"><input className={acctInputCls} value={form.auth} onChange={upd("auth")} placeholder="password / bearer" autoComplete="off" /></AField>
+              <AField label="Status">
+                <Select wrapperClassName="w-full" className="bg-card2 text-sm" value={form.status} onChange={upd("status")}>
+                  <option value="">—</option>
+                  {Object.entries(ACCT_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </Select>
+              </AField>
+            </div>
+            <AField label="Used for"><input className={acctInputCls} value={form.used_for} onChange={upd("used_for")} placeholder="idor / privesc matrix" autoComplete="off" /></AField>
+
+            {/* secret: a type selector + ONE masked value field (mirrors ConnectionsView KeyForm) */}
+            <div>
+              <span className="text-[11px] font-medium text-muted">Secret</span>
+              <div className="mt-1 flex gap-1">
+                {(["password", "token", "cookie"] as SecretType[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setSecretType(m)}
+                    className={cx(
+                      "h-7 rounded-lg border px-2.5 text-[11px] font-medium capitalize transition",
+                      secretType === m ? "border-brand/50 bg-brand/10 text-fg" : "border-line bg-card text-muted hover:text-fg",
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <div className="relative mt-1.5">
+                <KeyRound size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  type="password"
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && void submit()}
+                  placeholder={secretType}
+                  autoComplete="off"
+                  className="h-9 w-full rounded-lg border border-line bg-card pl-8 pr-2 text-sm outline-none placeholder:text-muted focus:border-brand/50"
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-faint">
+                Written only to the engagement’s gitignored creds file — the notebook keeps a redacted projection.
+              </p>
+            </div>
+
+            {err && <p className="text-[11px] text-rose-400">{err}</p>}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void submit()}
+                disabled={!canSubmit}
+                className={cx(
+                  "inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-medium text-brand-fg transition hover:brightness-110",
+                  !canSubmit && "cursor-not-allowed opacity-60",
+                )}
+              >
+                {working ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add account
+              </button>
+              <button onClick={closeForm} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3.5 text-sm font-medium text-muted transition hover:text-fg">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {accounts.length === 0 ? (
           <p className="py-4 text-center text-xs text-muted">No test accounts recorded.</p>
         ) : (
@@ -540,7 +700,20 @@ function AccountsPanel({ accounts }: { accounts: NotebookAccount[] }) {
                         <span className="block truncate text-sm font-medium text-fg">{a.id}</span>
                         <span className="text-[11px] text-muted">{[a.role, a.auth].filter(Boolean).join(" · ") || "—"}</span>
                       </span>
-                      {sc && <Pill label={sc.label} color={sc.color} dot />}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {sc && <Pill label={sc.label} color={sc.color} dot />}
+                        {canWrite && (
+                          <button
+                            onClick={() => void remove(a.id)}
+                            disabled={removing === a.id || busy}
+                            aria-label={`Remove ${a.id}`}
+                            title="Remove account"
+                            className="grid h-6 w-6 place-items-center rounded-md text-faint transition hover:text-rose-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {removing === a.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {(a.identity || a.used_for || a.used_on) && (
                       <div className="mt-1 space-y-0.5 text-[11px] text-faint">
@@ -554,6 +727,12 @@ function AccountsPanel({ accounts }: { accounts: NotebookAccount[] }) {
               })}
             </ul>
           </>
+        )}
+
+        {/* remove errors surface here (the add-form shows its own error inline above) */}
+        {err && !adding && <p className="text-[11px] text-rose-400">{err}</p>}
+        {!canWrite && (
+          <p className="text-[10.5px] text-faint">Connect the control plane to add or remove test accounts.</p>
         )}
       </div>
     </Panel>

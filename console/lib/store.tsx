@@ -93,6 +93,9 @@ interface ConsoleCtx {
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
   clearData: () => void;
   reloadEngagements: () => Promise<void>;
+  /** re-fetch the ACTIVE engagement's served files (HEAD-compared), so a just-written
+   *  artifact — e.g. an added/removed test account in notebook.json — shows without a reload */
+  reloadActive: () => Promise<void>;
   selectedFinding: Finding | null;
   openFinding: (f: Finding) => void;
   closeFinding: () => void;
@@ -361,6 +364,11 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loadEngagement, toast]);
 
+  // On-demand refresh of the active engagement's served files (same HEAD-compare path the live
+  // poller uses; notebook.json's size changes on write, so it's re-fetched). Lets a control-plane
+  // write — e.g. adding/removing a test account — surface at once instead of waiting for a poll.
+  const reloadActive = useCallback(() => refreshEngagement(activeId), [refreshEngagement, activeId]);
+
   // which cadence applies to the engagement being viewed (if any)
   const runLive = !!activeId && !!ctl?.live.includes(activeId);
   const dataLive = activeEngagement?.status === "running";
@@ -595,7 +603,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
     mode, engagements: shownEngagements, activeEngagement, activeId, setActiveId,
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, jsRecon, tests, coverage, cveIntel,
     content, history, notebook, hostRaw,
-    cveFeed, cveLive, loadFiles, clearData, reloadEngagements,
+    cveFeed, cveLive, loadFiles, clearData, reloadEngagements, reloadActive,
     selectedFinding, openFinding, closeFinding,
     selectedHost, openHost, closeHost,
     selectedEndpoint, openEndpoint, closeEndpoint,
