@@ -11,6 +11,11 @@
 - **GOAL:** Produce a complete intelligence picture of a target's client-side JS — every endpoint, param, API, secret, dangerous sink, and tech choice — as an MD report plus ready-to-run curl commands. Done = all checklist boxes checked AND review passes.
 - **OUTPUT:** one `out/<site>/` tree per site — `raw/{inline,external,sourcemaps}/` · `beautified/{inline,external}/` · `ast/external/` + `ast/symbols.json` · `analysis/{inline,external}/` + `analysis/site-summary.md` · `findings/{endpoints,params,apis,secrets,gadgets,libraries}.jsonl` · `report.md` · `curl_commands.sh` · `logs/` (see §Outputs for the exact mandated tree).
 - **DATA / RAG:** inputs = scope roots + optional auth (cookies/headers for authed-vs-unauthed diff). `refs/` corpus = secret regexes, dangerous-sink list, retire.js vuln-lib signatures, param-mining wordlist. Chains FROM host-discovery (live hosts) + content-discovery (crawled JS URLs); chains TO the per-vuln context feeders (esp. the DOM-XSS agent, consuming `findings/gadgets.jsonl` + `findings/endpoints.jsonl`). OPTIONAL: js-extracted endpoints/params (`findings/endpoints.jsonl` + `findings/params.jsonl`) may re-enrich content-discovery's `custom_wordlist.txt` on a second pass — an enrichment, not a precedence (recon stays acyclic).
+- **SIGNALS:** when a JS-discovered endpoint or server-action reveals a **registration/signup** flow (a
+  `register`/`signup` route or server-action) or a **login/session** flow, emit `flow:registration` /
+  `flow:auth` into the engagement `signals.json` (closed vocabulary — `_contract/signals.schema.json`) so
+  the orchestrator routes the auth classes and self-provisions test accounts (`redstrike` §1).
+  js-analysis co-produces these `flow:*` signals with content-discovery — emit only what you observed.
 - **DECOMPOSITION:** n/a (recon, not a vuln class).
 
 ## Goal

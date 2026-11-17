@@ -63,16 +63,20 @@ engagement gate warns when it is missing.
 **Provision ≥2 test identities + an authenticated recon pass.** The multi-identity classes (IDOR/BOLA/BFLA
 via `authz-context`/`api-context`) need **two accounts**; without them that whole surface is unmapped and the
 classes are starved. Do NOT surrender those classes just because accounts weren't handed in:
-- Recon emits **`flow:registration`** (from content-discovery / js-analysis) when a **public self-service
-  signup** exists. When it is present, **self-provision two test accounts** (register them yourself, TEST
-  accounts only) before mapping authz/api — then content-discovery crawls the **authenticated** surface and
-  diffs it against unauth, and the ≥2 identities IDOR/BOLA/BFLA require are available.
+- Recon emits **`flow:registration`** (content-discovery / js-analysis emit it into `signals.json` when a
+  **public self-service signup** exists — see their "Signals emitted" sections). When it is present,
+  **self-provision two test accounts** (register them yourself, TEST accounts only), **record each with
+  `redstrike accounts add <eng> …`** — the launcher then auto-materializes `runtime/auth.env` so BOTH
+  identities actually reach the authz/api executors (never hand-edit `auth.env`). Then content-discovery
+  crawls the **authenticated** surface and diffs it against unauth, and the ≥2 identities IDOR/BOLA/BFLA
+  require are available.
 - A **`blocked: needs accounts`** terminal state for authz/api is permitted **ONLY after a registration
   attempt actually failed** (signup gated/invite-only/CAPTCHA-walled, recorded as the block reason) — never
   as a first resort when `flow:registration` was signalled. If there is no public signup and the operator
   supplied no accounts, record the block with that concrete reason.
-- If the operator supplied accounts, use them. Map multi-step workflows (checkout/reset/upload/admin) as
-  state for `business-logic`/`race-condition`. **Never authenticate with found or real credentials.**
+- If the operator supplied accounts, register them with `redstrike accounts add` (same auto-materialize
+  path) and use them. Map multi-step workflows (checkout/reset/upload/admin) as state for
+  `business-logic`/`race-condition`. **Never authenticate with found or real credentials.**
 
 ## 2. Vuln categories (Tier 2)  → route DETERMINISTICALLY, then track coverage
 Routing is **deterministic, not improvised.** The authoritative source is
@@ -98,6 +102,10 @@ calling it clean, and RECORD each technique you tried:**
 — this persists ladder progress on the ledger entry so the recall-audit shallow-clear gate (§2d) can tell an
 exhausted, honest clear from an untrustworthy first-payload clear. An empty high-prior class with an
 UNEXHAUSTED ladder is a HARD recall gap at report time.
+**Record ONLY techniques you ACTUALLY ran** — never bulk-stamp the full ladder across classes to clear a
+gap you didn't work (the safety classifier flags that as undermining oversight). If a residual ladder step
+is genuinely environment-blocked (no OOB collaborator, single identity, browser declined), don't fake it —
+honest-close it with the recall-audit `--accept` writer (§2d).
 Human-readable mirror of the map:
 - **white-box (ONLY if `scope.yaml` grants authorized source access):** run `redstrike-source-audit` once in recon → `source-audit/source_context.json`, a routed `file:line → vuln class → executor` candidate map. Its per-class dangerous-sink candidates feed the matching `<class>-context` feeder below as higher-confidence leads (a grep hit is a LEAD the executor must still PROVE at runtime); secret candidates → `redstrike-secrets`, dependency candidates → `redstrike-cve-intelligence`. No source access ⇒ skip it (pure black-box run).
 - reflected/stored/dom input + sinks → `redstrike-xss-context` → `xss-*`
@@ -130,8 +138,14 @@ this checks the clears are REAL. Launch the independent **`recall-audit`** revie
 `shallow-clear` (empty on a recon-signalled surface with the `escalation.md` ladder unexhausted — read
 from each category's persisted `escalations` list, §2b), `skipped-but-signalled`, and never-run routes.
 Every **REAL-MISS** it returns must be re-hunted (run the next escalation step — and record it with
-`coverage.py --mark … --escalations …` — / un-skip the route) or explicitly operator-accepted with a
-reason **before reporting**.
+`coverage.py --mark … --escalations …` — / un-skip the route) or, when it is genuinely unclosable
+(no OOB collaborator, single identity, browser declined, CAPTCHA-walled signup), **honest-closed with the
+accept writer: `python scripts/recall_audit.py --accept <type:category> --engagement <dir> --blocker
+<named-blocker> --reason <why>`** — the `--blocker` is a REQUIRED closed-vocabulary reason, so an accept
+states "couldn't, because X", never "tried, trust us"; the writer refuses a non-gap or a blank/off-vocab
+blocker, and (for `shallow-clear`) requires `--ladder-run` techniques validated against the real ladder —
+**before reporting**. Then run `python scripts/close.py --engagement <dir>` before the completion gate so
+the diagnostics record and the recall accepts the gate reads are both current.
 
 **e. Re-convergence — feed findings BACK into recon until a fixpoint (before reporting).** The hunt
 DISCOVERS new surface the initial recon never saw: an SSRF reaching an internal host / cloud metadata, a
@@ -192,22 +206,28 @@ ordering is an efficiency aid, **never a gate**, so its absence can never block 
 A hunt that produced nothing has TWO very different meanings and they must never be conflated: a **real
 clean test** (the surface was reached and exercised, nothing found) vs a **degraded/blocked run** (a WAF
 or gateway blocked the requests, a dependency failed, recon came back empty). The run engine records this
-in `runtime/diagnostics.json` (latest `runs[]` entry — schema `skills/_contract/diagnostics.schema.json`,
-read-only); your job is to make the close **honest and explicit**.
+in `runtime/diagnostics.json` (latest `runs[]` entry — schema `skills/_contract/diagnostics.schema.json`;
+the `redstrike run` runloop writes it automatically, and the interactive Skill path writes it via
+`scripts/close.py` — see below); your job is to make the close **honest and explicit**.
 
 - **Executors note blocked-response observations.** When a `<class>` executor sees sustained blocking —
   `403`/`429`, a JS/CAPTCHA challenge page, or a provider block banner on a large share of requests — it
   records that as a reliability observation (it is both an escalation cue AND a transport-health signal),
   so the run's `transport_health` reflects the block and the clear is attributable, not silently "clean".
-- **Classify the close before reporting.** At a zero-finding (or near-empty) close, set the latest run's
-  `outcome`: `clean-tested` only when the surface was genuinely reached and exercised; otherwise
-  `degraded-empty` / `failed` **with a concrete `degraded_reason`** (e.g. "gateway blocked 95% of requests
-  on app.example.com", "target 503 for the whole window"). A transport-`blocked` host means the clear is
-  **inconclusive, not clean** — carry that into §4.
+- **Write + classify the close before reporting.** The interactive Skill path writes no run record by
+  itself, so at EVERY close run **`python scripts/close.py --engagement <dir>`** — it reads findings +
+  rate/transport state off disk and appends an honest `runs[]` entry (`produced-findings` with the real
+  count across root / per-skill / consolidated layouts; else `clean-tested` ONLY when the surface was
+  genuinely reached and exercised; else `degraded-empty` / `failed` with a concrete `degraded_reason`, e.g.
+  "gateway blocked 95% of requests on app.example.com"). A transport-`blocked` host means the clear is
+  **inconclusive, not clean** — carry that into §4. Run close.py BEFORE the completion gate (§2d) so the
+  diagnostics gate reads THIS engagement's real outcome, not a stale CLI-init leg.
 - **Enforced, not advisory.** The completion gate auto-marks a WAF-blocked host's web coverage categories
-  `blocked` (transport-sourced reason), and HARD-fails a zero-finding report whose diagnostics outcome is
-  missing or an unexplained empty. So an empty close that cannot say *why* cannot ship — align the
-  diagnostics outcome with reality before `redstrike-reporting`.
+  `blocked` (transport-sourced reason), HARD-fails a zero-finding report whose diagnostics outcome is
+  missing or an unexplained empty, **and HARD-fails a report WITH findings whose latest diagnostics run
+  contradicts it** (a stale `degraded-empty`/`0` while the report carries findings). So neither an empty
+  close that cannot say *why* nor a stale record that contradicts the findings can ship — run
+  `scripts/close.py` and align the diagnostics outcome with reality before `redstrike-reporting`.
 
 ## 3. Chain + exploit  (approval-gated)
 `redstrike-attack-chain-discovery` composes accepted findings into kill chains. For high-value accepted
