@@ -24,12 +24,20 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted + approved.
 1. Ingest endpoints/forms + business-logic single-use/limited actions · `jq` · (into tests)
 2. Pick targets: TOCTOU (check-then-use) + limit-overrun (single-use/quota) · refs · `race_tests.jsonl`
 3. Baseline serially (confirm the action is normally limited) · interceptor · `race_tests.jsonl`
-4. Fire a BOUNDED concurrent burst (single-packet HTTP/2 via Turbo Intruder, or last-byte sync HTTP/1) · Turbo Intruder · `poc/<id>/`
+4. Fire a BOUNDED concurrent burst (single-packet HTTP/2 via Turbo Intruder, or last-byte sync HTTP/1) · Turbo Intruder · `poc/<id>/` — if the action is a **non-replayable server action** (see note), source the request from `proxy-context/http_history.json` and fire THAT captured request as the parallel burst
 5. Detect the break (redeemed >1×, double balance, duplicate unique, bypassed quota) vs serial baseline · synth · `race_tests.jsonl`
 6. Confirm benignly + minimally on a test account; revert any state (refund/void) · synth · `cleanup`/`poc`
 7. Rate (CVSS) + write finding · synth · `findings.json`
 8. Emit report + PoC script · synth · `report.md`, `curl_commands.sh`
 9. /REVIEW · `review.md` · 10. /VERIFY · `verify.md`
+
+**Non-replayable server-action targets.** When the single-use / limited action is a Next.js / RSC **server
+action** (a POST with a `Next-Action` header + a bound-state `multipart/form-data` body — **not**
+curl-constructible from scratch, a synthesized POST 500s), **source the request from
+`proxy-context/http_history.json`** — captured once via browser-through-proxy (`_contract/proxy.md` §4a) —
+and **fire that captured request as the parallel burst** (bound-state part unchanged), rather than
+synthesizing the concurrent requests. Turbo Intruder / the Repeater parallel group drives the captured
+request; `scripts/replay_server_action.py` extracts the entry.
 
 ## Tools
 - Turbo Intruder (`Engine.BURP2`, single-packet gate), Burp Repeater parallel group, interceptor, `refs/race_techniques.md`

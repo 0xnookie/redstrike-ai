@@ -8,6 +8,7 @@ import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "./CommandPalette";
 import { FindingDrawer } from "@/components/findings/FindingDrawer";
 import { AssetDetail, EndpointDetail } from "@/components/AssetDetail";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useConsole } from "@/lib/store";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -74,9 +75,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <FindingDrawer finding={selectedFinding} onClose={closeFinding} />
-      <AssetDetail host={selectedHost} onClose={closeHost} />
-      <EndpointDetail path={selectedEndpoint} onClose={closeEndpoint} />
+      {/* Detail drawers mount in the shell (above app/error.tsx), so a malformed-field throw here
+          would otherwise escape to the global boundary and blank the whole app. Degrade to simply
+          not opening the drawer (fallback null) — the nav and current view stay intact. */}
+      <ErrorBoundary fallback={null}>
+        <FindingDrawer finding={selectedFinding} onClose={closeFinding} />
+        <AssetDetail host={selectedHost} onClose={closeHost} />
+        <EndpointDetail path={selectedEndpoint} onClose={closeEndpoint} />
+      </ErrorBoundary>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );

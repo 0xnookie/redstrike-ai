@@ -19,6 +19,10 @@ A redacted `http_history.json` of the proxy's captured traffic. DONE = `checklis
 - Every in-scope request/response the proxy captured (agent + human-driven browsing), normalized.
 - Secrets redacted (tokens, cookies, PII → `‹redacted›`).
 - A per-host/route summary that seeds the content map + the console Site Map (request/response view).
+- Requests kept **replay-faithful**: the full header set (including routing headers like **`Next-Action`**)
+  and the **complete body — `multipart/form-data` bodies preserved verbatim** — so a captured RSC /
+  server-action write replays byte-for-byte and can be tampered field-by-field (`_contract/proxy.md` §4a).
+  These writes are **not reconstructable from scratch**; the capture *is* the only replayable copy.
 
 ## Steps  (action · tool · output)
 1. Health-check the connected proxy · proxy capability · (gate: **no proxy ⇒ SKIP** — write an empty `http_history.json` + note, pass)
@@ -64,6 +68,19 @@ merges on; `status`/`mime`/`params` drive its facets; `req`/`res` carry the raw 
 ```
 **Redact** every secret/cookie/token/PII to `‹redacted›` before writing. A legacy flat array of exchanges is
 parsed tolerantly, but prefer the `{ "exchanges": [ … ] }` object above.
+
+**Replay-faithful capture (RSC / Next.js server-action writes).** A server-action POST carries a
+`Next-Action: <id>` request header and a `multipart/form-data` body whose first part is the bound closure /
+`prevState` arg — and it is **not reconstructable from scratch** (`_contract/proxy.md` §4a), so this captured
+entry is the only replayable copy. Preserve it faithfully:
+- keep the **`Next-Action`** header and the request `Content-Type` (with its multipart `boundary`) in
+  `req.headers` — these are routing/structure, not secrets, so they are **not** redacted;
+- keep the **full `req.body` verbatim**, including the multipart bound-state part — do **not** truncate or
+  reflow it. Redaction swaps secret *values* (a token/password field's value → `‹redacted›`) only; it must
+  leave the bound-state part and the part boundaries intact, or the entry no longer replays.
+
+`scripts/replay_server_action.py` reads this entry and emits a replay template with id-swap / payload-inject
+slots for the `xss-stored` / `bola-bfla` / `business-logic` / `race-condition` executors.
 
 ## Phases
 - **Phase 1:** health + pull + normalize (read-only export).

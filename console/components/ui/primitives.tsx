@@ -1,6 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import { cx } from "@/lib/format";
-import { SEVERITY, VERDICT, CONFIDENCE, hexA } from "@/lib/theme";
+import { SEVERITY, hexA, verdictMeta, confMeta } from "@/lib/theme";
 import type { Severity, Verdict, Confidence } from "@/lib/types";
 
 /* ---------- Card = panel (frameless in dark, filled in light) ---------- */
@@ -131,11 +131,11 @@ export function SeverityBadge({ severity, dot = true }: { severity: Severity; do
   return <Pill label={m.label} color={m.color} dot={dot} />;
 }
 export function VerdictBadge({ verdict }: { verdict: Verdict }) {
-  const m = VERDICT[verdict];
+  const m = verdictMeta(verdict);
   return <Pill label={m.label} color={m.color} dot />;
 }
 export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
-  const m = CONFIDENCE[confidence];
+  const m = confMeta(confidence);
   return <Pill label={m.label} color={m.color} />;
 }
 

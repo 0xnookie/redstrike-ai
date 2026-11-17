@@ -1283,9 +1283,10 @@ class TestAttackChainGate(unittest.TestCase):
 # Built against the pinned diagnostics.json contract with fixtures (Phase 1 owns
 # the producer + schema; this exercises the CONSUMER only).
 # --------------------------------------------------------------------------- #
-def _diag_doc(*, outcome="clean-tested", degraded_reason=None, blocked_hosts=None):
+def _diag_doc(*, outcome="clean-tested", degraded_reason=None, blocked_hosts=None, findings_count=0):
     """A minimal runtime/diagnostics.json matching the pinned contract: one run with the given
-    outcome, plus optional transport_health hosts classified 'blocked'."""
+    outcome, plus optional transport_health hosts classified 'blocked'. `findings_count` defaults to 0
+    (the zero-finding fixtures); set it for the report-WITH-findings consistency cases."""
     hosts = []
     worst = None
     for host, rate, waf in (blocked_hosts or []):
@@ -1297,7 +1298,7 @@ def _diag_doc(*, outcome="clean-tested", degraded_reason=None, blocked_hosts=Non
     run = {"session": "s1", "mode": "autonomous", "started": "2026-01-01T00:00:00Z",
            "ended": "2026-01-01T01:00:00Z", "engine_rc": 0, "gate_rc": None,
            "outcome": outcome, "degraded_reason": degraded_reason,
-           "findings_count": 0, "tool_failures": [], "exceptions": [],
+           "findings_count": findings_count, "tool_failures": [], "exceptions": [],
            "transport_health": {"hosts": hosts,
                                 "overall": {"block_rate": (worst[1] if worst else 0.0),
                                             "worst_host": (worst[0] if worst else None),
@@ -1594,6 +1595,87 @@ class TestDiagnosticsAutoPopulateIntegration(unittest.TestCase):
             self.assertFalse(payload["pass"], payload)
             self.assertTrue(payload["diagnostics_errors"])
             self.assertFalse(payload["coverage_errors"])  # coverage gap was auto-resolved
+
+
+# --------------------------------------------------------------------------- #
+# Fix #3b: a report WITH findings must not carry a STALE latest run that contradicts it (the interactive
+# Skill path writes no run record, so runs[-1] stays a stale degraded CLI-init entry — a false "degraded").
+# --------------------------------------------------------------------------- #
+class TestDiagnosticsStaleFindingsGate(unittest.TestCase):
+    """Once a report WITH reportable findings exists, a latest diagnostics run whose outcome/findings_count
+    contradict it HARD-fails (run scripts/close.py). A report WITH findings and NO diagnostics file stays a
+    non-error — there is nothing stale to contradict."""
+
+    def _report_with_finding_eng(self, d):
+        """A report-present engagement with ONE reportable finding that satisfies every OTHER hard gate, so
+        ONLY the diagnostics stale-findings gate is under test."""
+        eng = pathlib.Path(d)
+        f = valid_finding()  # independent reviewer, accepted → reportable
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    def test_stale_degraded_run_contradicts_findings_report_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_with_finding_eng(d)
+            # the exact stale entry the Skill path leaves: degraded-empty, findings_count 0
+            _write_diag(eng, _diag_doc(outcome="degraded-empty",
+                                       degraded_reason="blocked on approval", findings_count=0))
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["diagnostics_errors"])
+            joined = " ".join(payload["diagnostics_errors"])
+            self.assertIn("close.py", joined)
+            self.assertIn("stale", joined)
+
+    def test_fresh_produced_run_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_with_finding_eng(d)
+            _write_diag(eng, _diag_doc(outcome="produced-findings", findings_count=1))
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["diagnostics_errors"], [])
+
+    def test_produced_outcome_but_zero_count_fails(self):
+        """produced-findings but findings_count 0 is still a contradiction (a half-stale record)."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_with_finding_eng(d)
+            _write_diag(eng, _diag_doc(outcome="produced-findings", findings_count=0))
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["diagnostics_errors"])
+
+    def test_findings_report_without_diagnostics_is_ok(self):
+        """Back-compat: a report WITH findings and NO diagnostics.json must NOT trip the gate."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_with_finding_eng(d)  # no runtime/diagnostics.json
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["diagnostics_errors"], [])
 
 
 if __name__ == "__main__":

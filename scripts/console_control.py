@@ -506,6 +506,8 @@ def make_control_handler(target: Path, token: str):
                     return self._stop(eid)
                 if verb == "delete":
                     return self._delete(eid, eng)
+                if verb == "accounts":
+                    return self._accounts(eid, eng, body)
             return self._json(HTTPStatus.NOT_FOUND, {"error": "unknown api route"})
 
         # -- actions (thin wrappers over the redstrike CLI) ------------------
@@ -609,6 +611,45 @@ def make_control_handler(target: Path, token: str):
                 _RUNS.pop(eid, None)
                 _ENDED.pop(eid, None)
             return self._json(HTTPStatus.OK, {"ok": True, "deleted": eid})
+
+        def _accounts(self, eid: str, eng: Path, body: dict):
+            """Register (action:add) or remove (action:remove) a test-account credential by
+            shelling to `redstrike accounts`. The raw secret only ever lands in
+            <eng>/runtime/creds.json (gitignored, never console-served); the CLI mirrors a
+            REDACTED projection into notebook.json. No raw secret is echoed back (the CLI prints
+            only a masked hint)."""
+            action = (body.get("action") or "add").strip()
+            acct_id = (body.get("id") or "").strip()
+            if not acct_id:
+                return self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "id required"})
+            # pass the resolved engagement path (not just the id) so it resolves regardless of
+            # which root this control plane serves; eng is already a vetted discovered engagement.
+            if action == "remove":
+                p = _run_cli(["accounts", "rm", str(eng), f"--id={acct_id}"])
+                return self._json(HTTPStatus.OK if p.returncode == 0 else HTTPStatus.BAD_REQUEST,
+                                  {"ok": p.returncode == 0, "rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr})
+            if action != "add":
+                return self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": f"unknown action {action!r}"})
+            headers = body.get("headers") if isinstance(body.get("headers"), dict) else {}
+            has_secret = any(str(body.get(k) or "").strip() for k in ("password", "token", "cookie")) or bool(headers)
+            if not has_secret:
+                return self._json(HTTPStatus.BAD_REQUEST,
+                                  {"ok": False, "error": "a secret is required (password / token / cookie / headers)"})
+            # --flag=value form: a leading-dash secret is never mis-parsed as an option. argv is a
+            # list (no shell), so every value is passed literally — no injection surface.
+            args = ["accounts", "add", str(eng), f"--id={acct_id}"]
+            for flag, key in (("--role", "role"), ("--tenant", "tenant"), ("--identity", "identity"),
+                              ("--auth", "auth"), ("--used-for", "used_for"), ("--status", "status"),
+                              ("--password", "password"), ("--token", "token"), ("--cookie", "cookie")):
+                val = body.get(key)
+                if val is not None and str(val) != "":
+                    args.append(f"{flag}={val}")
+            for k, v in headers.items():
+                if k:
+                    args.append(f"--header={k}: {v}")
+            p = _run_cli(args)
+            return self._json(HTTPStatus.OK if p.returncode == 0 else HTTPStatus.BAD_REQUEST,
+                              {"ok": p.returncode == 0, "rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr})
 
         # -- LLM provider auth ----------------------------------------------
         def _set_auth(self, provider: str, body: dict):

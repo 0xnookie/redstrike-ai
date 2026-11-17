@@ -18,7 +18,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 
 ## Steps  (action · tool · output)
 1. Ingest endpoints + identities · `jq api_context.json` · (into tests)
-2. BOLA: as identity A, access B's object id (path/body) · multi-session interceptor · `api_tests.jsonl`
+2. BOLA: as identity A, access B's object id (path/body) · multi-session interceptor · `api_tests.jsonl` — if the write is a **non-replayable server action** (see note), source + replay from `proxy-context/http_history.json` with the object id swapped
 3. BFLA: as low-priv A, call a privileged operation (method+path/override) · interceptor · `api_tests.jsonl`
 4. Excessive data: compare returned fields vs what's needed (PII/internal flags) · request-diff · `api_tests.jsonl`
 5. Mass assignment: send `role`/`isAdmin`/`verified` to create/update · refs · `api_tests.jsonl`
@@ -26,6 +26,15 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 7. Rate (CVSS) + write finding · synth · `findings.json`
 8. Emit report + curl · synth · `report.md`, `curl_commands.sh`
 9. /REVIEW · `review.md` · 10. /VERIFY · `verify.md`
+
+**Non-replayable server-action writes.** When the object-id swap / privileged op rides a Next.js / RSC
+**server action** (a POST with a `Next-Action` header + a bound-state `multipart/form-data` body — a
+constructed request returns a 500 `digest`, so it is **not** curl-/interceptor-buildable from scratch),
+**source the request from `proxy-context/http_history.json`** — captured one time via browser-through-proxy
+(`_contract/proxy.md` §4a) — and **replay it with the object id swapped** across identities (BFLA: replay the
+captured privileged action as the low-priv identity), instead of synthesizing the request. The bound-state
+part stays untouched so the server accepts the replay. `scripts/replay_server_action.py` extracts the entry +
+marks the id-swap slot. Degrades to a human handing over one capture.
 
 ## Tools
 - multi-session interceptor, request-diff, `api-context/refs/api_techniques.md`

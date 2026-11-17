@@ -6,10 +6,12 @@ Bash unsandboxed). Also wraps scripts/doctor.sh for the offensive-tool roster.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,6 +21,10 @@ from pathlib import Path
 from . import MIN_CLAUDE_VERSION
 
 _VER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+
+
+def _now_iso() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
 
 @dataclass
@@ -191,3 +197,103 @@ def gather(repo_root: Path) -> list[Check]:
 
 def blocking(checks: list[Check]) -> list[Check]:
     return [c for c in checks if c.level == "err"]
+
+
+# --- toolchain capability snapshot -------------------------------------------
+# The recon/web discovery JOBS the engagement actually needs, each a PRIMARY tool plus ordered
+# fallbacks (drawn from scripts/tools.manifest recon/web categories). A capability is a job, not a
+# bare binary: a missing primary (httpx/dnsx/subfinder/naabu — the go/bin modern-first set) means a
+# SILENT fall back to a lesser tool (nmap/dig/curl/gobuster). This snapshot makes that visible.
+TOOLING_CAPABILITIES: list[tuple[str, str, list[str]]] = [
+    ("subdomain-enum",    "subfinder", ["amass", "assetfinder", "findomain", "dnsenum", "fierce"]),
+    ("dns-resolve",       "dnsx",      ["dig", "host", "nslookup"]),
+    ("http-probe",        "httpx",     ["curl", "wget"]),
+    ("port-scan",         "naabu",     ["nmap", "masscan", "rustscan"]),
+    ("content-discovery", "ffuf",      ["feroxbuster", "gobuster", "dirsearch", "dirb"]),
+]
+
+
+def tooling_probe_prefix() -> list[str]:
+    """How to ask the REAL execution environment whether a command exists. On Windows the pentest
+    toolkit lives in WSL, so route `command -v` through `wsl.exe bash -lc` rather than the launcher's
+    own (Windows) PATH; on Linux/WSL probe the local login shell."""
+    if is_windows():
+        return ["wsl.exe", "bash", "-lc"]
+    return ["bash", "-lc"]
+
+
+def _probe_present(tools: list[str], prefix: list[str]) -> set[str]:
+    """Return the subset of `tools` present in the probed environment, in ONE shell invocation (the
+    shell prints the name of each tool that resolves). Best-effort: on any failure — no WSL, no bash,
+    a timeout — returns the empty set (so every capability reads as degraded, which is the honest,
+    fail-loud default rather than a false 'present')."""
+    uniq = [t for t in dict.fromkeys(tools) if t]
+    if not uniq:
+        return set()
+    script = 'for t in %s; do command -v "$t" >/dev/null 2>&1 && printf "%%s\\n" "$t"; done' % (
+        " ".join(shlex.quote(t) for t in uniq))
+    rc, out, _ = _run([*prefix, script], timeout=30)
+    if not out:
+        return set()
+    allow = set(uniq)
+    return {ln.strip() for ln in out.splitlines() if ln.strip() in allow}
+
+
+def tooling_snapshot(repo: Path | None = None, *, shell=None) -> dict:
+    """Probe the REAL execution environment for each recon/web capability's primary + fallbacks and
+    classify it ``ok`` (primary present) or ``degraded`` (primary absent → a fallback, or nothing, in
+    use). Emits per-CAPABILITY results plus an ``overall`` rollup, written to ``runtime/tooling.json``
+    by :func:`write_tooling`.
+
+    ``shell`` overrides how presence is probed (the test seam): a command-PREFIX list such as
+    ``["bash", "-lc"]``, or a callable taking the tool-name list and returning the set of present
+    names. ``repo`` is accepted for symmetry with the other preflight entry points (the roster is
+    fixed, not read from the repo) and is currently unused.
+    """
+    all_tools: list[str] = []
+    for _, primary, fbs in TOOLING_CAPABILITIES:
+        all_tools.append(primary)
+        all_tools.extend(fbs)
+
+    if callable(shell):
+        present = set(shell(list(dict.fromkeys(all_tools))))
+        probe_desc = "injected"
+    else:
+        prefix = list(shell) if shell else tooling_probe_prefix()
+        present = _probe_present(all_tools, prefix)
+        probe_desc = " ".join(prefix)
+
+    caps: list[dict] = []
+    degraded = 0
+    for name, primary, fbs in TOOLING_CAPABILITIES:
+        has_primary = primary in present
+        fallback = None
+        if not has_primary:
+            degraded += 1
+            fallback = next((f for f in fbs if f in present), None)
+        caps.append({
+            "capability": name,
+            "primary": primary,
+            "present": has_primary,
+            # the fallback actually AVAILABLE when the primary is absent (None = none present);
+            # null when the primary is present (no fallback needed).
+            "fallback": fallback,
+            "status": "ok" if has_primary else "degraded",
+        })
+    return {
+        "generated_at": _now_iso(),
+        "probe": probe_desc,
+        "capabilities": caps,
+        "overall": {"degraded_count": degraded, "status": "degraded" if degraded else "ok"},
+    }
+
+
+def write_tooling(eng_dir: Path, snapshot: dict) -> Path:
+    """Persist a tooling snapshot to ``<engagement>/runtime/tooling.json`` (creates ``runtime/``).
+    Returns the path written."""
+    eng_dir = Path(eng_dir)
+    runtime = eng_dir / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    path = runtime / "tooling.json"
+    path.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
+    return path

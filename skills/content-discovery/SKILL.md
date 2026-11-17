@@ -89,6 +89,21 @@ other field you ACTUALLY observed and omit (never guess) the rest. Shape:
 map's status-code and type facets; a route with neither still maps, but loses that fidelity. A legacy flat
 list is parsed tolerantly, but prefer the `routes[]` record above.
 
+## Signals emitted  (fold these into the engagement `signals.json`)
+Content-discovery is the authoritative producer for the **`flow:*` routing family**. If you map the
+surface but emit none of these, the deterministic coverage plan can't route the auth/authz/workflow
+classes and the orchestrator's §1 two-identity provisioning never triggers. For each signal you
+ACTUALLY observe, record it in `signals.json` (closed vocabulary — `_contract/signals.schema.json`;
+optionally attach a short note under `signal_evidence`). Emit only what you saw — never guess:
+- **`flow:registration`** — a reachable public self-service signup/registration form or route (e.g.
+  `/register`, `/signup`, or a registration server-action). This is the one that STARVES IDOR/BOLA when
+  missed: it tells the orchestrator to self-provision two TEST accounts (`redstrike` §1).
+- **`flow:login-form`** + **`flow:auth`** — a login form / session flow exists.
+- **`flow:password-reset`** — a forgot/reset-password flow exists.
+- **`flow:state-change`** — cookie-authenticated state-changing actions exist.
+- **`flow:multi-step`** / **`action:limited-state-change`** — multi-step workflows / single-use or
+  quota-limited actions (checkout, coupon, vote, withdraw) → `business-logic` / `race-condition`.
+
 ## Phases
 - **Phase 1 (generic):** crawl + historical + custom-wordlist build.
 - **Phase 2 (target-specific):** brute-force + parameter discovery + consolidation.

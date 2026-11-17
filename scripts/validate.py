@@ -411,6 +411,24 @@ if chvp.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"chain_validate.py selftest failed: {e}")
 
+# 8i — structvalidate self-test (the shared stdlib structural validator console.py serves artifacts
+# through; keeps strict/lenient + the js-analysis drift-catch deterministic)
+svp = ROOT / "scripts" / "structvalidate.py"
+if svp.is_file():
+    try:
+        import importlib.util
+        _svspec = importlib.util.spec_from_file_location("rs_structvalidate_lint", svp)
+        _sv = importlib.util.module_from_spec(_svspec)
+        sys.modules["rs_structvalidate_lint"] = _sv
+        _svspec.loader.exec_module(_sv)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _sv.selftest()
+        checked["structvalidate"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"structvalidate.py selftest failed: {e}")
+
 # 9 — cve_prioritize self-test (KEV/EPSS/reachability/CVSS ranking logic)
 cvep = ROOT / "scripts" / "cve_prioritize.py"
 if cvep.is_file():

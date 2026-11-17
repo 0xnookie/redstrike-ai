@@ -5,7 +5,8 @@ import { Printer, FileDown, ShieldCheck } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { useToast } from "@/components/ui/Toast";
 import { reportable, severityCounts, maxCvss } from "@/lib/stats";
-import { SEVERITY, SEVERITY_ORDER, VERDICT, FEASIBILITY, sevMeta } from "@/lib/theme";
+import { SEVERITY, SEVERITY_ORDER, sevMeta, feasMeta } from "@/lib/theme";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { cvssScore, cvssRating } from "@/lib/cvss";
 import { fmtDate, verdictOf } from "@/lib/format";
 import type { Finding } from "@/lib/types";
@@ -110,12 +111,14 @@ export default function ReportPage() {
       )}
 
       {/* full findings, risk-ordered */}
+      <ErrorBoundary label="A finding in this report has a malformed field">
       <Card className="mb-3">
         <div className="border-b border-line p-4"><h2 className="text-sm font-semibold">Findings detail</h2></div>
         <div className="divide-y divide-line">
           {ordered.map((f) => <ReportFinding key={f.id} finding={f} onOpen={() => openFinding(f)} />)}
         </div>
       </Card>
+      </ErrorBoundary>
 
       {/* demonstration-limited */}
       {blocked.length > 0 && (
@@ -144,7 +147,7 @@ export default function ReportPage() {
               <div key={c.id} className="rounded-lg border border-line bg-card2 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{c.title}</span>
-                  {c.feasibility && <Pill label={FEASIBILITY[c.feasibility].label} color={FEASIBILITY[c.feasibility].color} dot />}
+                  {c.feasibility && <Pill label={feasMeta(c.feasibility).label} color={feasMeta(c.feasibility).color} dot />}
                 </div>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1 font-mono text-[11px] text-muted">
                   {c.steps.map((s, i) => (

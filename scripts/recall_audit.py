@@ -167,6 +167,109 @@ def load_and_audit(eng: Path) -> dict:
     return res
 
 
+# --- honest-accept writer (recall fix: close the gameable-vs-honest asymmetry) ----------------------- #
+# Clearing a shallow-clear by HAND (coverage.py --mark attempted --count 0 --escalations <full ladder>)
+# is deterministic, reason-free, and the fabrication the safety classifier blocks — so the honest path was
+# the higher-friction one. This writer makes the HONEST close first-class and un-gameable: it records an
+# accept ONLY for a gap the deterministic engine actually flags, ONLY with a named environmental blocker
+# from a CLOSED vocabulary, and (for a shallow-clear) ONLY alongside the escalation techniques that
+# genuinely ran — so an accept auditably states "couldn't, because X", never "tried, trust us".
+#
+# CLOSED blocker vocabulary: the named environmental reasons a gap can be genuinely unclosable in-scope.
+_BLOCKER_VOCAB = {
+    "no-oob-collaborator",   # no out-of-band collaborator/canary in scope — blind/OOB proof impossible
+    "single-identity",       # only one test identity — a cross-user authz miss can't be demonstrated
+    "browser-declined",      # no real-browser render available — client-side (DOM/reflected) detection blocked
+    "captcha-gated",         # the surface sits behind a CAPTCHA that can't be solved in-scope
+    "opaque-session",        # the session/token is opaque/unforgeable with the access available
+    "no-sink-surface",       # black-box: no reachable template/command/deserializer sink to probe
+    "destructive-withheld",  # the only remaining escalation is destructive and withheld by the RoE
+    "no-mailbox",            # no mailbox/inbox to receive a reset/confirmation and complete the flow
+}
+
+
+def _parse_csv(val) -> list:
+    return [t.strip() for t in str(val or "").split(",") if t.strip()]
+
+
+def write_accept(eng: Path, accept_id: str, *, blockers, ladder_run, reason) -> tuple:
+    """Record an honest recall-audit accept into ``<eng>/reviews/recall_audit_accepts.json`` in the LIST
+    shape ``verify_completion._recall_accepts`` reads (``[{"id","reason","blocker","ladder_run"}]``) — the
+    reader keys on ``id``+``reason`` and tolerates the extra fields, so this ENRICHES the record without a
+    reader change. Returns ``(ok, message)``. Un-gameable guard rails (checked in cost order — cheap
+    validations before the disk read):
+
+      1. ``accept_id`` must be ``<type>:<category>``.
+      2. ``reason`` must be non-empty (a blank reason is not an accept — the reader drops it anyway).
+      3. ``--blocker`` is REQUIRED, from the CLOSED ``_BLOCKER_VOCAB`` — an accept must NAME why the gap is
+         unclosable; "we just didn't" is rejected.
+      4. the gap must ACTUALLY be flagged by the deterministic engine for THIS engagement (no pre-stamping
+         a non-gap).
+      5. a ``shallow-clear`` accept REQUIRES ``--ladder-run`` validated against ``escalation.ladder_for`` —
+         real technique ids that genuinely ran, recorded separately from the residual blocker.
+    """
+    if ":" not in accept_id:
+        return False, (f"--accept must be '<type>:<category>' (e.g. shallow-clear:sqli); got {accept_id!r}")
+    gtype, cat = (p.strip() for p in accept_id.split(":", 1))
+    if not gtype or not cat:
+        return False, (f"--accept must be '<type>:<category>' (e.g. shallow-clear:sqli); got {accept_id!r}")
+
+    if not (reason and str(reason).strip()):
+        return False, "--reason is required and must be non-empty (state why this gap is genuinely unclosable here)"
+
+    if not blockers:
+        return False, ("--blocker is required: an accept must name the environmental blocker that made the gap "
+                       f"unclosable (closed vocab: {', '.join(sorted(_BLOCKER_VOCAB))}). An accept states "
+                       "'couldn't, because X' — never 'tried, trust us'.")
+    bad = [b for b in blockers if b not in _BLOCKER_VOCAB]
+    if bad:
+        return False, (f"unknown --blocker value(s) {bad}; choose from the closed vocab: "
+                       f"{', '.join(sorted(_BLOCKER_VOCAB))}")
+
+    res = load_and_audit(eng)
+    gaps = res.get("gaps", [])
+    match = next((g for g in gaps if g.get("category") == cat and g.get("type") == gtype), None)
+    if match is None:
+        flagged = sorted({f"{g.get('type')}:{g.get('category')}" for g in gaps})
+        return False, (f"the deterministic recall engine does not currently flag {accept_id!r} for this "
+                       f"engagement — nothing to accept (currently flagged: {flagged or ['none']}). Re-run the "
+                       "class or correct the type:category; an accept cannot pre-stamp a non-gap.")
+
+    if gtype == "shallow-clear":
+        valid = _esc.ladder_for(cat)
+        if not ladder_run:
+            return False, ("--ladder-run is required for a shallow-clear accept: record the escalation "
+                           f"technique ids that genuinely ran (from {cat}'s ladder: {', '.join(valid)}). "
+                           "An honest clear separates what ran from the residual blocker.")
+        bad_l = [t for t in ladder_run if t not in set(valid)]
+        if bad_l:
+            return False, (f"--ladder-run technique(s) {bad_l} are not in {cat}'s escalation ladder "
+                           f"({', '.join(valid)}) — record the REAL technique ids that ran.")
+
+    entry = {"id": accept_id, "reason": str(reason).strip(), "blocker": list(blockers)}
+    if ladder_run:
+        entry["ladder_run"] = list(ladder_run)
+
+    p = eng / "reviews" / "recall_audit_accepts.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    existing = []
+    if p.is_file():
+        try:
+            cur = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            cur = None
+        if isinstance(cur, list):
+            existing = [e for e in cur if isinstance(e, dict)]
+        elif isinstance(cur, dict):  # migrate the legacy dict shape to the list shape (enrich, don't break)
+            for k, v in cur.items():
+                r = v if isinstance(v, str) else (v.get("reason") if isinstance(v, dict) else "")
+                existing.append({"id": str(k), "reason": r})
+    existing = [e for e in existing if e.get("id") != accept_id]  # idempotent: replace a prior accept
+    existing.append(entry)
+    p.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    return True, f"recorded accept {accept_id} (blocker={','.join(blockers)}) -> {p}"
+
+
 def selftest() -> None:
     mapc = [
         {"id": "xss", "triggers": ["sink:html-reflect", "sink:dom", "param:any"]},
@@ -228,15 +331,57 @@ def selftest() -> None:
     assert all(g["category"] != "xss" for g in r["gaps"]), "a class with findings is not a gap"
     assert r["gaps"][0]["severity"] == "high"
 
+    # 8) honest-accept writer refusals that fire BEFORE any disk read (un-gameable guard rails):
+    ok, msg = write_accept(Path("."), "sqli", blockers=["opaque-session"], ladder_run=[], reason="r")
+    assert not ok and "<type>:<category>" in msg, msg                 # bad id shape
+    ok, msg = write_accept(Path("."), "shallow-clear:sqli", blockers=[], ladder_run=[], reason="r")
+    assert not ok and "--blocker is required" in msg, msg             # no named blocker
+    ok, msg = write_accept(Path("."), "shallow-clear:sqli", blockers=["totally-made-up"],
+                           ladder_run=[], reason="r")
+    assert not ok and "unknown --blocker" in msg, msg                 # blocker off the closed vocab
+    ok, msg = write_accept(Path("."), "shallow-clear:sqli", blockers=["opaque-session"],
+                           ladder_run=[], reason="   ")
+    assert not ok and "--reason is required" in msg, msg              # blank reason
+
     print("recall_audit selftest: OK")
+
+
+def main(argv=None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Redstrike recall-audit — the 'what did we miss?' altitude, and the honest-accept writer.")
+    ap.add_argument("engagement", nargs="?", help="engagement dir to audit (dump ranked recall gaps as JSON)")
+    ap.add_argument("--selftest", action="store_true", help="run the module selftest")
+    ap.add_argument("--accept", metavar="TYPE:CATEGORY",
+                    help="record an honest accept for a genuinely-unclosable recall gap (the first-choice "
+                         "honest close); requires --engagement, --blocker and --reason")
+    ap.add_argument("--engagement", dest="engagement_opt", help="engagement dir (used with --accept)")
+    ap.add_argument("--blocker", help="comma-separated environmental blocker(s) from the closed vocab "
+                                      "(REQUIRED with --accept)")
+    ap.add_argument("--ladder-run", dest="ladder_run",
+                    help="comma-separated escalation technique ids that genuinely ran "
+                         "(REQUIRED for a shallow-clear accept)")
+    ap.add_argument("--reason", help="why this gap is genuinely unclosable here (REQUIRED with --accept)")
+    args = ap.parse_args(argv)
+
+    if args.selftest:
+        selftest()
+        return 0
+    if args.accept:
+        eng = Path(args.engagement_opt or args.engagement or ".")
+        if not eng.is_dir():
+            ap.error(f"engagement dir not found: {eng}")
+        ok, msg = write_accept(eng, args.accept.strip(), blockers=_parse_csv(args.blocker),
+                               ladder_run=_parse_csv(args.ladder_run), reason=args.reason or "")
+        print(msg)
+        return 0 if ok else 2
+    if args.engagement:
+        print(json.dumps(load_and_audit(Path(args.engagement)), indent=2))
+        return 0
+    print(__doc__)
+    return 0
 
 
 if __name__ == "__main__":
     import sys
-    if "--selftest" in sys.argv:
-        selftest()
-    elif len(sys.argv) > 1:
-        res = load_and_audit(Path(sys.argv[1]))
-        print(json.dumps(res, indent=2))
-    else:
-        print(__doc__)
+    sys.exit(main())

@@ -27,11 +27,19 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 1. Model workflows + state machines (from site-summary + crawling the flow) · synth · `workflow_model.md`
 2. Enumerate invariants/assumptions per workflow · `refs/logic_flaw_patterns.md` · `invariants.json`
 3. Design abuse tests per invariant (tamper, reorder, replay, race, skip step, negative/overflow) · synth · (into tests)
-4. Execute abuse tests (interceptor / turbo-intruder for races) · tools · `abuse_tests.jsonl`
+4. Execute abuse tests (interceptor / turbo-intruder for races) · tools · `abuse_tests.jsonl` — if the workflow step is a **non-replayable server action** (see note), source + replay from `proxy-context/http_history.json` with the one field tampered
 5. Confirm the invariant broke WITH impact (money/access/data) · synth · `poc/<id>/`
 6. Rate (CVSS, business impact) + write finding · synth · `findings.json`
 7. Emit report · synth · `report.md`
 8. /REVIEW · `review.md` · 9. /VERIFY · `verify.md`
+
+**Non-replayable server-action writes.** When a workflow step is a Next.js / RSC **server action** (a POST
+with a `Next-Action` header + a bound-state `multipart/form-data` body — a synthesized request returns a 500
+`digest`, so the flow is **not** replayable from scratch), drive it once in a browser through the proxy and
+**source the request from `proxy-context/http_history.json`** (`_contract/proxy.md` §4a), then **replay it
+with the single field under test tampered** (price / quantity / state / step / coupon), leaving the
+bound-state part intact so the server accepts it — instead of hand-building the altered flow.
+`scripts/replay_server_action.py` extracts the entry + marks the tamper slot.
 
 ## Tools
 - **Model/execute:** interceptor (Caido / mitmproxy), turbo-intruder (race/TOCTOU), multi-role `auth.env`

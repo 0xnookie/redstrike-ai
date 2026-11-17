@@ -31,6 +31,14 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`authz_context.json` validate
 6. Emit summary · synth · `summary.md`
 7. /REVIEW SKILL · `review.md`
 
+**Flag non-replayable writes (for the consuming executor).** Where an object reference or a mass-assign
+candidate rides a Next.js / RSC **server action** (a POST with a `Next-Action` header + a bound-state
+`multipart/form-data` body — **not** curl-constructible from scratch), record it as such in
+`objects.json`/`mass_assign.json` and note that the downstream `idor`/`bola-bfla` test must **source the
+request from `proxy-context/http_history.json`** (captured via browser-through-proxy, `_contract/proxy.md`
+§4a) and **replay/tamper** it — swap the id, don't synthesize. The feeder only records this; it performs no
+cross-account access (that's the variants).
+
 ## Tools
 - multi-session interceptor (Caido/mitmproxy with 2+ profiles), `jq`/`grep` over `js-analysis`, request-diff
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`

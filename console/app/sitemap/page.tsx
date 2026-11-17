@@ -9,7 +9,7 @@ import {
 import { useConsole } from "@/lib/store";
 import { useToast } from "@/components/ui/Toast";
 import { cx, isReportable, verdictOf } from "@/lib/format";
-import { SEVERITY, VERDICT, sevMeta } from "@/lib/theme";
+import { SEVERITY, sevMeta, verdictMeta } from "@/lib/theme";
 import type { Finding, HttpExchange } from "@/lib/types";
 import {
   buildSiteMap, subtreeRoutes, sortedChildren, nodeUrl, routeSeverityRank,
@@ -405,7 +405,7 @@ export default function SiteMapPage() {
                           <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
                             <span className="font-mono">{f.id}</span>
                             <span className="uppercase" style={{ color: sevMeta(f.severity).color }}>{SEVERITY[f.severity]?.label ?? f.severity}</span>
-                            {verdictOf(f) && <Pill label={VERDICT[verdictOf(f) as keyof typeof VERDICT].label} color={VERDICT[verdictOf(f) as keyof typeof VERDICT].color} />}
+                            {verdictOf(f) && <Pill label={verdictMeta(verdictOf(f)).label} color={verdictMeta(verdictOf(f)).color} />}
                           </span>
                         </span>
                       </button>
@@ -742,7 +742,7 @@ function RouteDetail({
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
                       <span className="font-mono">{f.id}</span>
                       {f.category?.owasp && <span>· {f.category.owasp}</span>}
-                      {verdictOf(f) && <Pill label={VERDICT[verdictOf(f) as keyof typeof VERDICT].label} color={VERDICT[verdictOf(f) as keyof typeof VERDICT].color} />}
+                      {verdictOf(f) && <Pill label={verdictMeta(verdictOf(f)).label} color={verdictMeta(verdictOf(f)).color} />}
                     </span>
                   </span>
                 </button>

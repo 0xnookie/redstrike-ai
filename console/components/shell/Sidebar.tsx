@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Target, Bug, Workflow, Network, Activity, Share2,
-  Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, PlugZap, FileCode2, type LucideIcon,
+  Bot, FileText, Settings2, ListChecks, ShieldAlert, ListTree, NotebookPen, PlugZap, FileCode2, Waypoints, type LucideIcon,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { useConsole } from "@/lib/store";
@@ -21,6 +21,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { href: "/engagements", label: "Engagements", icon: Target },
       { href: "/findings", label: "Findings", icon: Bug },
       { href: "/chains", label: "Attack chains", icon: Workflow },
+      { href: "/graph", label: "Exploration graph", icon: Waypoints },
       { href: "/assets", label: "Assets & scope", icon: Network },
       { href: "/sitemap", label: "Site map", icon: ListTree },
       { href: "/js-recon", label: "JS Recon", icon: FileCode2 },

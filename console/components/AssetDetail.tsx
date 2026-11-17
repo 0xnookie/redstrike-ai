@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import type { Finding, Diagnostics } from "@/lib/types";
-import { SEVERITY, COVERAGE, VERDICT, TRANSPORT, sevMeta, ink, hexA } from "@/lib/theme";
+import { SEVERITY, COVERAGE, TRANSPORT, sevMeta, verdictMeta, ink, hexA } from "@/lib/theme";
 import { assetHosts, hostOf, verdictOf, isReportable } from "@/lib/format";
 import { transportHostMap, fetchDiagnostics } from "@/lib/data";
 import { Pill, SeverityBadge, Dot } from "@/components/ui/primitives";
@@ -223,7 +223,7 @@ export function AssetDetail({ host, onClose }: { host: string | null; onClose: (
                           <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
                             <span className="uppercase" style={{ color: sevMeta(f.severity).color }}>{SEVERITY[f.severity]?.label ?? f.severity}</span>
                             {f.category?.owasp && <span>· {f.category.owasp}</span>}
-                            {v && <Pill label={VERDICT[v].label} color={VERDICT[v].color} />}
+                            {v && <Pill label={verdictMeta(v).label} color={verdictMeta(v).color} />}
                           </span>
                         </span>
                       </button>
@@ -438,7 +438,7 @@ export function EndpointDetail({ path, onClose }: { path: string | null; onClose
                           <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
                             <span className="uppercase" style={{ color: sevMeta(f.severity).color }}>{SEVERITY[f.severity]?.label ?? f.severity}</span>
                             {f.category?.owasp && <span>· {f.category.owasp}</span>}
-                            {v && <Pill label={VERDICT[v].label} color={VERDICT[v].color} />}
+                            {v && <Pill label={verdictMeta(v).label} color={verdictMeta(v).color} />}
                           </span>
                         </span>
                       </button>

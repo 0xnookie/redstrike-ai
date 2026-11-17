@@ -221,7 +221,8 @@ class TestWriteAndAssemble(unittest.TestCase):
             dg.write(eng, self._rec())
             dg.write(eng, self._rec())
             doc = json.loads((eng / "runtime" / "diagnostics.json").read_text(encoding="utf-8"))
-            self.assertEqual(set(doc.keys()), {"engagement", "generated_at", "runs"})
+            self.assertEqual(set(doc.keys()), {"version", "engagement", "generated_at", "runs"})
+            self.assertEqual(doc["version"], dg.DIAG_SCHEMA_VERSION)
             self.assertEqual(doc["engagement"], "acme-eng")
             self.assertEqual(len(doc["runs"]), 2)
 

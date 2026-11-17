@@ -25,6 +25,9 @@ desktop.ini
 *.key
 secrets.*
 credentials.*
+# engagement test-account credentials (also covered by engagements/.gitignore; belt-and-suspenders)
+creds.json
+auth.env
 
 # ---- Logs ----
 *.log

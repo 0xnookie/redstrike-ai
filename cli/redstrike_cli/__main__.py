@@ -6,12 +6,13 @@ v1 is interactive and human-gated; autonomous headless (-p) is a later milestone
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, diagnostics, engagement, gate, launch, preflight, runloop, ui
+from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, runloop, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
@@ -84,6 +85,21 @@ def cmd_version(args, repo: Path) -> int:
 
 
 def cmd_doctor(args, repo: Path) -> int:
+    # Machine-readable toolchain capability snapshot. Probes the REAL execution environment (WSL on
+    # Windows) for each recon/web capability's primary + fallbacks and reports ok|degraded. With
+    # --engagement it ALSO writes that engagement's runtime/tooling.json (the per-engagement record
+    # the launch path writes automatically). Exit non-zero when any capability is degraded.
+    if args.json:
+        snap = preflight.tooling_snapshot(repo)
+        if args.engagement:
+            eng = resolve_engagement(repo, args.engagement)
+            if not eng:
+                print(ui.err(f"engagement '{args.engagement}' not found under {repo / 'engagements'}"))
+                return 1
+            preflight.write_tooling(eng, snap)
+        print(json.dumps(snap, indent=2))
+        return 0 if snap.get("overall", {}).get("status") == "ok" else 1
+
     if not args.no_banner:
         ui.print_banner("preflight — engine, auth, platform, tools")
     print(ui.rule("launcher preflight"))
@@ -253,6 +269,38 @@ def _warn_no_sandbox() -> None:
         print()
 
 
+def _prelaunch_artifacts(eng_dir: Path, repo: Path) -> None:
+    """At hunt start, produce the derived launch artifacts the executors depend on but that nothing
+    else writes. Called ONCE from `cmd_run` before the interactive/autonomous split, so it covers
+    BOTH modes:
+      • materialize `runtime/auth.env` from the stored test-account creds, so a registered 2nd
+        identity actually reaches the executors (every skill reference to auth.env is a READER);
+      • snapshot the REAL toolchain (WSL on Windows) into `runtime/tooling.json`, so a missing recon
+        primary (httpx/dnsx/subfinder/naabu) that silently falls back to nmap/dig is a recorded
+        health NOTE the diagnostics outcome can read, not an invisible degradation.
+    Best-effort: a failure here never blocks a launch and never prints a secret."""
+    try:
+        n = accounts.account_count(eng_dir)
+        p = accounts.materialize(eng_dir)
+        if p is not None:
+            print(ui.ok(f"auth.env materialized for the executors ({n} "
+                        f"identit{'y' if n == 1 else 'ies'}) · {p}"))
+    except Exception:
+        pass
+    try:
+        snap = preflight.tooling_snapshot(repo)
+        path = preflight.write_tooling(eng_dir, snap)
+        ov = snap.get("overall", {})
+        if ov.get("status") == "degraded":
+            dc = ov.get("degraded_count", 0)
+            print(ui.warn(f"toolchain degraded: {dc} recon capabilit{'y' if dc == 1 else 'ies'} "
+                          f"missing their primary (fallback in use) — see {path}"))
+        else:
+            print(ui.ok(f"toolchain ok — recon primaries present · {path}"))
+    except Exception:
+        pass
+
+
 def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "interactive",
                    loop=None) -> int:
     """Run the mechanical completion + coverage gate after an engine run, then write the per-run
@@ -365,6 +413,9 @@ def cmd_run(args, repo: Path) -> int:
         ui.print_banner(f"engagement {eng_dir.name}" + suffix)
 
     _warn_no_sandbox()
+    # Hunt-start artifacts (auth.env materialize + toolchain snapshot) for BOTH modes — runs here,
+    # before the autonomous split, since _run_autonomous is reached only through this path.
+    _prelaunch_artifacts(eng_dir, repo)
 
     if args.autonomous:
         return _run_autonomous(args, repo, eng_dir, engine)
@@ -568,6 +619,85 @@ def cmd_status(args, repo: Path) -> int:
     return gate.status(repo, eng_dir)
 
 
+def _parse_headers(raw_list) -> dict:
+    out: dict = {}
+    for h in raw_list or []:
+        k, sep, v = h.partition(":")
+        if sep and k.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def cmd_accounts(args, repo: Path) -> int:
+    """Register/list/remove test-account credentials. Secrets go to runtime/creds.json
+    (gitignored, never console-served); a redacted projection is mirrored into the notebook."""
+    eng_dir = resolve_engagement(repo, args.engagement)
+    if not eng_dir:
+        print(ui.err(f"engagement '{args.engagement}' not found under {repo / 'engagements'}"))
+        return 1
+
+    if args.action == "materialize":
+        n = accounts.account_count(eng_dir)
+        p = accounts.materialize(eng_dir)
+        if p is None:
+            print(ui.info("no test accounts to materialize (runtime/creds.json absent/empty)"))
+            return 0
+        print(ui.ok(f"materialized runtime/auth.env ({n} identit{'y' if n == 1 else 'ies'}) "
+                    f"for the executors"))
+        print(ui.kv("auth.env", str(eng_dir / accounts.AUTH_ENV_REL) + "  (gitignored · never served)"))
+        return 0
+
+    if args.action == "list":
+        rows = accounts.summaries(eng_dir)
+        if not rows:
+            print(ui.info("no test accounts registered"))
+            return 0
+        print(ui.rule(f"test accounts · {eng_dir.name}"))
+        for r in rows:
+            ident = f"  {r['identity']}" if r["identity"] else ""
+            print(f"  {ui.style(r['id'], ui.YELLOW)}  {(r['role'] or '—'):<10} "
+                  f"{(r['auth'] or '—'):<16} {(r['status'] or '—'):<8} {r['secret']}{ident}")
+        print(ui.info(f"secrets: {eng_dir / accounts.CREDS_REL}  (gitignored · never served)"))
+        return 0
+
+    if args.action == "rm":
+        if not args.id:
+            print(ui.err("accounts rm needs --id"))
+            return 2
+        ok = accounts.remove(eng_dir, args.id)
+        if ok:
+            # Keep runtime/auth.env in sync with the store; drop it entirely if that was the last id.
+            if accounts.materialize(eng_dir) is None:
+                accounts.clear_auth_env(eng_dir)
+        print(ui.ok(f"removed account '{args.id}'") if ok else ui.warn(f"no account '{args.id}'"))
+        return 0 if ok else 1
+
+    # add
+    if not args.id:
+        print(ui.err("accounts add needs --id"))
+        return 2
+    headers = _parse_headers(args.header)
+    if not (args.password or args.token or args.cookie or headers):
+        print(ui.err("accounts add needs a secret: --password / --token / --cookie / --header 'K: V'"))
+        return 2
+    acct = accounts.build_account(
+        id=args.id, role=args.role or "", tenant=args.tenant or "",
+        identity=args.identity or "", auth=args.auth or "", status=args.status,
+        used_for=args.used_for or "", password=args.password or "", token=args.token or "",
+        cookie=args.cookie or "", headers=headers,
+    )
+    accounts.upsert(eng_dir, acct)
+    accounts.materialize(eng_dir)  # keep runtime/auth.env current so the new identity reaches executors
+    print(ui.ok(f"account '{args.id}' stored"))
+    print(ui.kv("creds", str((eng_dir / accounts.CREDS_REL)) + "  (gitignored · never served)"))
+    print(ui.kv("auth.env", "materialized for the executors (gitignored · never served)"))
+    print(ui.kv("notebook", "redacted projection written to test_accounts[]"))
+    print(ui.kv("role", acct.get("role") or "—"))
+    print(ui.kv("auth", acct.get("auth_method") or "—"))
+    print(ui.kv("secret", accounts.mask_secret(acct)))
+    return 0
+
+
 # --- parser ----------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="redstrike", description="Run Claude Code as a scoped pentest engine.")
@@ -584,6 +714,10 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--core", action="store_true", help="core tool categories only")
     d.add_argument("--all", action="store_true", dest="all_cats", help="all tool categories")
     d.add_argument("--missing", action="store_true", help="list only missing tools")
+    d.add_argument("--json", action="store_true",
+                   help="emit the recon/web toolchain capability snapshot as JSON (probes WSL on Windows)")
+    d.add_argument("--engagement", metavar="ENG",
+                   help="with --json: also write this engagement's runtime/tooling.json")
     d.add_argument("categories", nargs="*", help="specific tool categories (e.g. web recon ad)")
 
     ins = sub.add_parser("install", help="install the offensive tool roster (wraps scripts/install.sh)")
@@ -645,6 +779,24 @@ def build_parser() -> argparse.ArgumentParser:
     ap_.add_argument("--list", action="store_true", help="just list pending deferrals")
     ap_.add_argument("--all", action="store_true", help="approve all pending")
     ap_.add_argument("--id", action="append", metavar="FP", help="approve by fingerprint (prefix ok)")
+
+    acc = sub.add_parser("accounts",
+                         help="register test-account credentials (secrets stay in runtime/creds.json — never committed or served)")
+    acc.add_argument("action", choices=["add", "list", "rm", "materialize"])
+    acc.add_argument("engagement", help="engagement id or path")
+    acc.add_argument("--id", help="stable account id (matches notebook test_accounts[].id)")
+    acc.add_argument("--role", help="e.g. user / admin / attacker / victim")
+    acc.add_argument("--tenant")
+    acc.add_argument("--identity",
+                     help="email / ARN / API scope — stored RAW in creds.json, REDACTED in the notebook")
+    acc.add_argument("--auth", metavar="METHOD",
+                     help="auth method label (password / password+TOTP / API key / cookie session …)")
+    acc.add_argument("--status", choices=list(accounts.STATUSES), default="active")
+    acc.add_argument("--used-for", help="what this identity is for, e.g. 'IDOR victim B'")
+    acc.add_argument("--password")
+    acc.add_argument("--token", help="bearer token")
+    acc.add_argument("--cookie", help="raw Cookie header value")
+    acc.add_argument("--header", action="append", metavar="K: V", help="extra auth header (repeatable)")
     return ap
 
 
@@ -658,6 +810,7 @@ _DISPATCH = {
     "verify": cmd_verify,
     "status": cmd_status,
     "approve": cmd_approve,
+    "accounts": cmd_accounts,
 }
 
 

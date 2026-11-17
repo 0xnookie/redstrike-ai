@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, ShieldAlert, Workflow } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { cvssScore, cvssRating } from "@/lib/cvss";
-import { FEASIBILITY, SEVERITY, roleColor, sevMeta } from "@/lib/theme";
+import { SEVERITY, roleColor, sevMeta, feasMeta } from "@/lib/theme";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { assetHosts, cx } from "@/lib/format";
 import type { Finding, Severity } from "@/lib/types";
 import { Panel, PanelHeader, PanelBody, ViewHead, Pill, SeverityBadge, EmptyState } from "@/components/ui/primitives";
@@ -46,7 +47,7 @@ export default function ChainsPage() {
     let best: Severity | null = null;
     chain?.steps.forEach((s) => {
       const f = findingsById[s.finding_id];
-      if (f && (best === null || SEVERITY[f.severity].rank > SEVERITY[best].rank)) best = f.severity;
+      if (f && (best === null || sevMeta(f.severity).rank > sevMeta(best).rank)) best = f.severity;
     });
     return best;
   }, [chain, findingsById]);
@@ -74,7 +75,7 @@ export default function ChainsPage() {
   const stepF = step ? findingsById[step.finding_id] : undefined;
   const stepScore = stepF?.cvss_vector ? cvssScore(stepF.cvss_vector) : null;
 
-  const fe = chain.feasibility ? FEASIBILITY[chain.feasibility] : null;
+  const fe = chain.feasibility ? feasMeta(chain.feasibility) : null;
   const chainScore = chain.cvss ? cvssScore(chain.cvss) : null;
   const rolesPresent = [...new Set(chain.steps.map((s) => s.role))];
 
@@ -90,7 +91,7 @@ export default function ChainsPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {chains.map((c) => {
           const active = c.id === chain.id;
-          const cfe = c.feasibility ? FEASIBILITY[c.feasibility] : null;
+          const cfe = c.feasibility ? feasMeta(c.feasibility) : null;
           return (
             <button
               key={c.id}
@@ -116,6 +117,7 @@ export default function ChainsPage() {
         })}
       </div>
 
+      <ErrorBoundary label="This attack chain has a malformed field">
       {/* horizontal step flow */}
       <Panel className="mt-5">
         <PanelHeader title={chain.title} sub={chain.id} actions={fe ? <Pill label={fe.label} color={fe.color} dot /> : undefined} />
@@ -260,6 +262,7 @@ export default function ChainsPage() {
           </PanelBody>
         </Panel>
       </div>
+      </ErrorBoundary>
     </>
   );
 }

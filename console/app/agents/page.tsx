@@ -6,10 +6,11 @@ import { Bot, ShieldCheck, Lock, Share2, Cpu } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { useControl, useRunStream } from "@/components/control/ControlProvider";
 import type { RunAgent } from "@/lib/control";
-import { AGENT_STATUS } from "@/lib/theme";
+import { statusMeta } from "@/lib/theme";
 import { cx } from "@/lib/format";
 import type { Agent, AgentTier } from "@/lib/types";
 import { Kpi, ViewHead, Pill, Dot } from "@/components/ui/primitives";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 const TIER_COLOR: Record<AgentTier, string> = {
   "Tier-1": "#f43f5e", "Tier-2": "#fb923c", "Tier-3": "#a78bfa", Feeder: "#38bdf8", Capability: "#22c55e",
@@ -91,11 +92,13 @@ export default function AgentsPage() {
         ))}
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map((a) => (
-          <AgentCard key={a.slug} agent={a} live={liveBySlug.get(a.slug)} />
-        ))}
-      </div>
+      <ErrorBoundary label="An agent card has a malformed status">
+        <div className="mt-5 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((a) => (
+            <AgentCard key={a.slug} agent={a} live={liveBySlug.get(a.slug)} />
+          ))}
+        </div>
+      </ErrorBoundary>
     </>
   );
 }
@@ -105,7 +108,7 @@ export default function AgentsPage() {
 // task, and an animated bar — instead of a separate "working now" panel.
 function AgentCard({ agent: a, live }: { agent: Agent; live?: RunAgent }) {
   const isRunning = !!live || a.status === "running";
-  const st = isRunning ? { color: "#22c55e", label: "Running" } : AGENT_STATUS[a.status];
+  const st = isRunning ? { color: "#22c55e", label: "Running" } : statusMeta(a.status);
   const ratio = a.produced > 0 ? a.accepted / a.produced : 0;
   return (
     <div className={cx("group relative flex flex-col gap-3.5 rounded-[18px] border border-fg/10 p-4 transition hover:border-fg/25", isRunning && "busy-top border-emerald-500/40 bg-emerald-500/[0.03]")}>
