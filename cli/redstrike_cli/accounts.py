@@ -9,19 +9,27 @@ The split (see skills/_contract/notebook.md):
       projection (notebook.py validate() rejects an unredacted identity). creds.json is the
       source of truth; this list is always regenerated from it.
 
-The running agents read their sessions from `auth.env`, which the orchestrator materializes from
-creds.json at hunt start — that step is intentionally NOT done here (store + display only).
+The running agents read their sessions from `auth.env`. `materialize()` (below) deterministically
+writes `runtime/auth.env` from `creds.json` — one shell-sourceable block per identity — so a stored
+2nd identity actually REACHES the executors (every reference to `auth.env` across the skills is a
+READER; before this, nothing wrote it). It is auto-run at hunt start (the `redstrike run` launch
+path) and after each `accounts add/rm`, and can be forced with `redstrike accounts materialize`.
+`auth.env` lands under `runtime/` — gitignored (`.gitignore` + `engagements/.gitignore = '*'`) and NOT
+in the console-served file list — so it is never committed or served.
 
-Stdlib only. Nothing here ever prints a raw secret; display is masked (last-4).
+Stdlib only. Nothing here ever prints a raw secret; display is masked (last-4); `auth.env` itself is
+owner-only (0600 best-effort) and holds the secrets in the clear for the in-scope executors only.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 CREDS_REL = Path("runtime") / "creds.json"
+AUTH_ENV_REL = Path("runtime") / "auth.env"
 NB_NAME = "notebook.json"
 STATUSES = ("active", "expired", "pending", "retired")
 
@@ -39,6 +47,10 @@ def _read_json(p: Path):
 
 def creds_path(eng: Path) -> Path:
     return eng / CREDS_REL
+
+
+def auth_env_path(eng: Path) -> Path:
+    return eng / AUTH_ENV_REL
 
 
 # --------------------------------------------------------------------------- secret store
@@ -206,3 +218,133 @@ def summaries(eng: Path) -> list[dict]:
             "secret": mask_secret(a),
         })
     return out
+
+
+def account_count(eng: Path) -> int:
+    """How many well-formed identities are stored (ids only)."""
+    return sum(1 for a in load_creds(eng).get("accounts", []) if isinstance(a, dict) and a.get("id"))
+
+
+# --------------------------------------------------------------------------- auth.env materializer
+def _ns(acct_id: str, taken: set) -> str:
+    """A shell-identifier namespace for an account id (deterministic): uppercased, every run of
+    non-alphanumerics → '_', a leading digit guarded, de-duplicated against `taken`."""
+    base = re.sub(r"[^A-Za-z0-9]+", "_", (acct_id or "").strip()).strip("_").upper() or "ID"
+    if base[0].isdigit():
+        base = "ID_" + base
+    ns, i = base, 2
+    while ns in taken:
+        ns, i = f"{base}_{i}", i + 1
+    taken.add(ns)
+    return ns
+
+
+def _env_line(key: str, value) -> str:
+    """One shell-sourceable ``KEY="VALUE"`` line. The value is double-quoted and every shell
+    metacharacter escaped so ``source auth.env`` is safe and nothing (not even a newline) can break
+    out of the value — each variable stays on a single line."""
+    v = str(value)
+    v = v.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+    v = v.replace("\r", "").replace("\n", " ")
+    return f'{key}="{v}"'
+
+
+def _identity_pairs(acct: dict) -> list[tuple[str, str]]:
+    """Ordered ``(SUFFIX, value)`` pairs for one identity — only the fields actually present.
+
+    SUFFIXes: ID · ROLE · TENANT · BASE_URL · IDENTITY · PASSWORD · BEARER · API_KEY · COOKIE ·
+    HEADERS (all session/auth headers as ``Name: Value`` pairs joined by a literal ``\\n`` so a
+    consumer can split and pass each as a ``curl -H``). COOKIE/HEADERS mirror the tokens the
+    recon/js-analysis skills document; BEARER is the bare token for ``-H "Authorization: Bearer …"``.
+    """
+    out: list[tuple[str, str]] = [("ID", acct.get("id", ""))]
+    for suf, key in (("ROLE", "role"), ("TENANT", "tenant"), ("BASE_URL", "base_url"),
+                     ("IDENTITY", "identity")):
+        v = acct.get(key)
+        if v:
+            out.append((suf, v))
+    secret = acct.get("secret") or {}
+    session = acct.get("session") or {}
+    if secret.get("password"):
+        out.append(("PASSWORD", secret["password"]))
+    if secret.get("token"):
+        out.append(("BEARER", secret["token"]))
+    if secret.get("api_key"):
+        out.append(("API_KEY", secret["api_key"]))
+    if session.get("cookie"):
+        out.append(("COOKIE", session["cookie"]))
+    headers = session.get("headers") or {}
+    if headers:
+        out.append(("HEADERS", "\\n".join(f"{k}: {v}" for k, v in headers.items())))
+    return out
+
+
+def materialize(eng: Path) -> Path | None:
+    """Deterministically (re)write ``runtime/auth.env`` from ``runtime/creds.json`` so the executors'
+    session material reaches them. One shell-sourceable block per identity, variables namespaced by
+    the account id; the FIRST identity is ALSO exposed under the flat ``COOKIE=`` / ``HEADERS=`` /
+    ``BASE_URL=`` names the recon/js-analysis skills document, so those readers work verbatim.
+
+    stdlib-only · idempotent (same creds → identical bytes; no volatile timestamp) · never prints a
+    secret · owner-only (0600 best-effort). Returns the path written, or None (a no-op) when
+    ``creds.json`` is absent or holds no identities."""
+    data = _read_json(creds_path(eng))
+    accts = data.get("accounts") if isinstance(data, dict) else None
+    if not isinstance(accts, list) or not accts:
+        return None
+
+    lines: list[str] = [
+        "# runtime/auth.env — session material for the Redstrike executors.",
+        "# AUTO-GENERATED from runtime/creds.json (via `redstrike accounts materialize` / at hunt",
+        "# start). Do NOT hand-edit — regenerated each run. gitignored + never console-served; the",
+        "# secrets live here in the clear for the in-scope executors ONLY. `source auth.env` to load.",
+        "# One block per identity (vars namespaced by id); the primary identity is also aliased to the",
+        "# flat COOKIE=/HEADERS=/BASE_URL= names recon + js-analysis read.",
+        "",
+    ]
+    taken: set = set()
+    primary: tuple[dict, list] | None = None
+    for acct in accts:
+        if not isinstance(acct, dict) or not acct.get("id"):
+            continue
+        ns = _ns(str(acct.get("id")), taken)
+        pairs = _identity_pairs(acct)
+        hdr = f"# identity: {acct.get('id')}"
+        if acct.get("role"):
+            hdr += f"  role={acct['role']}"
+        if acct.get("tenant"):
+            hdr += f"  tenant={acct['tenant']}"
+        lines.append(hdr)
+        lines += [_env_line(f"{ns}_{suf}", val) for suf, val in pairs]
+        lines.append("")
+        if primary is None:
+            primary = (acct, pairs)
+
+    if primary is None:
+        return None
+    a0, pairs0 = primary
+    lines.append(f"# primary-identity aliases → {a0.get('id')} (flat names recon + js-analysis read)")
+    lines += [_env_line(suf, val) for suf, val in pairs0 if suf != "ID"]
+
+    content = "\n".join(lines).rstrip("\n") + "\n"
+    p = auth_env_path(eng)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    try:
+        os.chmod(p, 0o600)  # owner-only (best-effort; largely a no-op on Windows ACLs)
+    except Exception:
+        pass
+    return p
+
+
+def clear_auth_env(eng: Path) -> bool:
+    """Remove a stale ``runtime/auth.env`` (e.g. after the last identity is removed). Returns True
+    when a file was deleted. Best-effort; never raises."""
+    p = auth_env_path(eng)
+    try:
+        if p.is_file():
+            p.unlink()
+            return True
+    except Exception:
+        pass
+    return False

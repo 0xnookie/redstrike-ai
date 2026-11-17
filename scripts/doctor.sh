@@ -7,6 +7,7 @@
 #   scripts/doctor.sh ad cloud        # only the named categories
 #   scripts/doctor.sh --missing       # list only what's absent
 #   scripts/doctor.sh --env           # ONLY the runtime-environment preflight
+#   scripts/doctor.sh --json          # recon/web capability snapshot as JSON (ok|degraded per job)
 #
 # Exit 0 = nothing missing in scope; 1 = one or more auto-installable tools missing.
 # `manual` tools (GUI / Windows / vendor installers) are reported but never fail the run.
@@ -21,6 +22,41 @@ WANT=""          # space-separated categories to include; empty = all
 MISSING_ONLY=0
 want_all=1
 ENV_ONLY=0
+JSON_OUT=0
+
+# Recon/web toolchain capability snapshot as JSON — a capability is a JOB (primary + fallbacks), not a
+# bare binary. `ok` = the primary resolves here; `degraded` = it doesn't (a lesser fallback, or
+# nothing, is in use). Mirrors cli preflight.tooling_snapshot so a Linux/WSL operator gets the same
+# shape on the command line. Exit 0 = all primaries present; 1 = at least one capability degraded.
+tooling_json() {
+  caps="subdomain-enum|subfinder|amass,assetfinder,findomain,dnsenum,fierce
+dns-resolve|dnsx|dig,host,nslookup
+http-probe|httpx|curl,wget
+port-scan|naabu|nmap,masscan,rustscan
+content-discovery|ffuf|feroxbuster,gobuster,dirsearch,dirb"
+  degraded=0; first=1
+  printf '{\n  "capabilities": [\n'
+  while IFS='|' read -r cap primary fbs; do
+    [ -z "$cap" ] && continue
+    present_p="false"; status="ok"; fb="null"
+    if command -v "$primary" >/dev/null 2>&1; then
+      present_p="true"
+    else
+      present_p="false"; status="degraded"; degraded=$((degraded+1))
+      for f in $(printf '%s' "$fbs" | tr ',' ' '); do
+        command -v "$f" >/dev/null 2>&1 && { fb="\"$f\""; break; }
+      done
+    fi
+    [ "$first" = 1 ] || printf ',\n'; first=0
+    printf '    {"capability": "%s", "primary": "%s", "present": %s, "fallback": %s, "status": "%s"}' \
+      "$cap" "$primary" "$present_p" "$fb" "$status"
+  done <<EOF
+$caps
+EOF
+  ov="ok"; [ "$degraded" -gt 0 ] && ov="degraded"
+  printf '\n  ],\n  "overall": {"degraded_count": %d, "status": "%s"}\n}\n' "$degraded" "$ov"
+  [ "$degraded" -gt 0 ] && return 1 || return 0
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -28,6 +64,7 @@ while [ $# -gt 0 ]; do
     --all)  want_all=1 ;;
     --missing) MISSING_ONLY=1 ;;
     --env) ENV_ONLY=1 ;;
+    --json) JSON_OUT=1 ;;
     --manifest) MANIFEST="$2"; shift ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed '1d'; exit 0 ;;
@@ -36,6 +73,11 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$JSON_OUT" = 1 ]; then
+  tooling_json
+  exit $?
+fi
 
 if [ "$ENV_ONLY" = 0 ]; then
   [ -f "$MANIFEST" ] || { echo "manifest not found: $MANIFEST" >&2; exit 2; }

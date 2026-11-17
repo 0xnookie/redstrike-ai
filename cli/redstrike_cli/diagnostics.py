@@ -36,6 +36,11 @@ from pathlib import Path
 
 from . import audit as auditmod
 
+# --- schema version ----------------------------------------------------------
+# Bumped to 2 when the optional per-run ``tooling_health`` block was added (toolchain preflight →
+# runtime/tooling.json). Written into the diagnostics document as the drift guard the schema reserves.
+DIAG_SCHEMA_VERSION = 2
+
 # --- outcomes ----------------------------------------------------------------
 PRODUCED = "produced-findings"
 CLEAN = "clean-tested"
@@ -76,10 +81,16 @@ class Diagnostics:
     phase_tally: list = field(default_factory=list)
     gate_summary: dict = field(default_factory=lambda: {
         "coverage": "absent", "surface": "absent", "recall": "n/a", "findings": 0})
+    # OPTIONAL (schema v2): the toolchain-health rollup for this run, or None when no snapshot was
+    # taken (e.g. an interactive close). Kept OPTIONAL so a minimal record still validates and so the
+    # existing pinned field set is unchanged when absent — it is emitted ONLY when present.
+    tooling_health: dict | None = None
 
     def to_record(self) -> dict:
-        """The exact pinned ``runs[]`` entry (ordered, closed shape Phase 2 consumes)."""
-        return {
+        """The exact pinned ``runs[]`` entry (ordered, closed shape Phase 2 consumes). ``tooling_health``
+        is appended ONLY when present, so a run with no tooling snapshot renders the original field set
+        verbatim (backward-compatible)."""
+        rec = {
             "session": self.session,
             "mode": self.mode,
             "started": self.started,
@@ -96,6 +107,9 @@ class Diagnostics:
             "phase_tally": list(self.phase_tally),
             "gate_summary": self.gate_summary,
         }
+        if self.tooling_health is not None:
+            rec["tooling_health"] = self.tooling_health
+        return rec
 
 
 # --- transport rollup (pure) -------------------------------------------------
@@ -167,6 +181,55 @@ def _worst_host_waf(transport_health: dict, worst_host: str | None) -> str | Non
     return None
 
 
+# --- tooling rollup (pure) ---------------------------------------------------
+def tooling_rollup(tooling: dict | None) -> dict | None:
+    """Build the record's optional ``tooling_health`` block from a parsed ``runtime/tooling.json``
+    snapshot (as written by ``preflight.tooling_snapshot``). Normalizes each capability to
+    ``{capability, primary, present, fallback, status}`` and recomputes ``overall`` from the parsed
+    data (never trusts the file's own count).
+
+    Returns None when there is no usable snapshot, so a run with no tooling probe omits the field
+    entirely (schema-optional → the original run-record shape is preserved, backward-compatible)."""
+    if not isinstance(tooling, dict):
+        return None
+    caps_in = tooling.get("capabilities")
+    if not isinstance(caps_in, list) or not caps_in:
+        return None
+    caps: list[dict] = []
+    degraded = 0
+    for c in caps_in:
+        if not isinstance(c, dict):
+            continue
+        status = str(c.get("status", "")).lower()
+        if status not in ("ok", "degraded"):
+            status = "ok" if c.get("present") else "degraded"
+        if status == "degraded":
+            degraded += 1
+        fb = c.get("fallback")
+        caps.append({
+            "capability": str(c.get("capability", "?")),
+            "primary": str(c.get("primary", "")),
+            "present": bool(c.get("present", False)),
+            "fallback": fb if isinstance(fb, str) and fb else None,
+            "status": status,
+        })
+    if not caps:
+        return None
+    probed = tooling.get("generated_at")
+    return {
+        "capabilities": caps,
+        "overall": {"degraded_count": degraded, "status": "degraded" if degraded else "ok"},
+        "probed_at": probed if isinstance(probed, str) and probed else None,
+    }
+
+
+def _degraded_capabilities(tooling_health: dict | None) -> list[dict]:
+    if not isinstance(tooling_health, dict):
+        return []
+    return [c for c in (tooling_health.get("capabilities") or [])
+            if isinstance(c, dict) and str(c.get("status", "")).lower() == "degraded"]
+
+
 # --- coverage/surface extractors (pure) --------------------------------------
 def _coverage_counts(coverage_ledger: dict | None) -> dict:
     out = {"attempted": 0, "skipped": 0, "pending": 0, "blocked": 0, "na": 0, "total": 0}
@@ -218,14 +281,30 @@ def _was_tested(coverage_ledger: dict | None, surface_ledger: dict | None) -> bo
 
 
 # --- outcome classification (pure) -------------------------------------------
+def _recon_is_empty(empty_recon: dict | None, surface_ledger: dict | None) -> bool:
+    """True when recon came up with ~0 live hosts AND ~0 attack surface. Prefers the already-computed
+    ``empty_recon`` extract (hosts_live + surface_discovered); falls back to the surface ledger total
+    when no extract was passed."""
+    if isinstance(empty_recon, dict):
+        return (int(empty_recon.get("hosts_live", 0) or 0) == 0
+                and int(empty_recon.get("surface_discovered", 0) or 0) == 0)
+    if surface_ledger is not None:
+        return _surface_total(surface_ledger) == 0
+    return False
+
+
 def classify_outcome(summary: dict, coverage_ledger: dict | None,
-                     surface_ledger: dict | None, transport_health: dict) -> tuple[str, str | None]:
+                     surface_ledger: dict | None, transport_health: dict,
+                     tooling_health: dict | None = None,
+                     empty_recon: dict | None = None) -> tuple[str, str | None]:
     """Classify a run into one of the four outcomes + a concrete ``degraded_reason`` (None for the
     healthy outcomes).
 
     ``summary`` is a plain dict with: ``findings_count`` (accepted findings), ``engine_rc``,
     ``tool_failures`` (list), ``exceptions`` (list), ``cap_hit`` (bool), ``stop_reason`` (str).
     The ledgers and ``transport_health`` are the already-parsed/already-rolled-up structures.
+    ``tooling_health`` + ``empty_recon`` are OPTIONAL (default None → pre-v2 behavior unchanged): when
+    both are present they enable the tooling-degraded-empty branch below.
     """
     summary = summary or {}
     findings = int(summary.get("findings_count", 0) or 0)
@@ -265,6 +344,22 @@ def classify_outcome(summary: dict, coverage_ledger: dict | None,
             f"{pct}% of requests to {worst or 'the target'} were blocked/challenged "
             f"({waf or 'unidentified WAF/CDN'}) — coverage is UNRELIABLE; empty findings do "
             f"not mean the target is clean"
+        )
+
+    # 3a' — recon came up EMPTY and a recon capability is DEGRADED: the empty surface may be a
+    #       tooling gap (a missing primary silently fell back to a lesser tool), not a clean target.
+    #       PARALLEL to the transport-blocked case — reached only with zero findings (step 1 already
+    #       returned PRODUCED for any run WITH findings), so a tooling degradation can never override
+    #       a findings-present outcome. Needs BOTH the empty-recon signal AND a degraded capability.
+    degraded_caps = _degraded_capabilities(tooling_health)
+    if degraded_caps and _recon_is_empty(empty_recon, surface_ledger):
+        cap = degraded_caps[0]
+        tail = (f", fell back to '{cap['fallback']}'" if cap.get("fallback")
+                else ", and no fallback is available")
+        return DEGRADED, (
+            f"recon found no live hosts or attack surface AND the '{cap['capability']}' capability is "
+            f"degraded (primary '{cap['primary']}' unavailable{tail}) — empty may be a tooling gap, "
+            f"not a clean target (see runtime/tooling.json)"
         )
 
     # 3b — recon discovered no attack surface at all.
@@ -441,11 +536,15 @@ def assemble(eng_dir, *, session: str, mode: str, started: str, ended: str,
     signals = _load_json(eng_dir / "signals.json")
     host_discovery = _load_json(eng_dir / "host_discovery.json")
     recall_audit = _load_json(rt / "recall_audit.json")
+    tooling = _load_json(rt / "tooling.json")
 
     findings_count = accepted_findings_count(findings)
     transport_health = transport_rollup(rate_state)
+    tooling_health = tooling_rollup(tooling)
+    empty = empty_recon(surface_ledger, signals, host_discovery)
     sm = summary_from_run(summary, findings_count, engine_rc)
-    outcome, reason = classify_outcome(sm, coverage_ledger, surface_ledger, transport_health)
+    outcome, reason = classify_outcome(sm, coverage_ledger, surface_ledger, transport_health,
+                                       tooling_health=tooling_health, empty_recon=empty)
 
     return Diagnostics(
         session=session,
@@ -460,9 +559,10 @@ def assemble(eng_dir, *, session: str, mode: str, started: str, ended: str,
         tool_failures=sm["tool_failures"],
         exceptions=sm["exceptions"],
         transport_health=transport_health,
-        empty_recon=empty_recon(surface_ledger, signals, host_discovery),
+        empty_recon=empty,
         phase_tally=phase_tally(coverage_ledger),
         gate_summary=gate_summary(coverage_ledger, surface_ledger, findings_count, recall_audit),
+        tooling_health=tooling_health,
     )
 
 
@@ -483,6 +583,7 @@ def write(eng_dir, record: dict) -> Path:
         runs = []
     runs.append(record)
     doc = {
+        "version": DIAG_SCHEMA_VERSION,
         "engagement": doc.get("engagement") or eng_dir.name,
         "generated_at": _now_iso(),
         "runs": runs,

@@ -74,9 +74,18 @@ unavailable, probe the **real execution environment** (e.g. `wsl bash -lc 'comma
 was read from the wrong shell while the whole toolkit sat in WSL, and nearly closed a host that had an
 unenumerated app on it.)
 
-At engagement start, **detect and record the capabilities the engagement actually has** (into the engagement
-dir), because they decide what is testable:
-- **toolkit location** — which shell/distro/container runs the roster; route tool calls there.
+At engagement start the launcher **runs the toolchain producer** — it probes the **real execution
+environment** (on Windows via `wsl.exe bash -lc 'command -v …'`) for each recon/web **capability** (a JOB:
+subdomain-enum / dns-resolve / http-probe / port-scan / content-discovery), records the per-capability
+result (`primary` present? which `fallback`? `ok`|`degraded`) to **`runtime/tooling.json`**, and surfaces a
+`degraded` capability in the run's outcome diagnostics (`degraded-empty`) instead of letting a missing primary
+fall back silently. Reproduce it anytime with `redstrike doctor --json` (or `scripts/doctor.sh --json`). So:
+**when a capability's primary is missing and you fall back** (e.g. `httpx`→`nmap`, `dnsx`→`dig`,
+`subfinder`→`amass`, `naabu`→`nmap`), **write a one-line degradation note into the feeder's `summary.md`** —
+"http-probe DEGRADED: httpx unavailable, used curl" — so empty/thin results are never read as a clean target.
+
+Still **detect and record the rest of what the engagement actually has**, because it decides what is testable:
+- **toolkit location** — which shell/distro/container runs the roster; route tool calls there (`runtime/tooling.json` records which shell was probed).
 - **interception proxy** — is one connected? If so it is the transport + a discovery source (`proxy.md`).
 - **browser automation** — `chrome-devtools-mcp` / `claude-in-chrome` / `playwright`. **Required** for
   client-rendered surface: SPA/DOM-XSS confirmation, WebSocket/chatbot flows, anything behind JS. When it is
