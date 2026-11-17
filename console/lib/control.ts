@@ -48,6 +48,25 @@ export interface RunBody {
   resume?: boolean;
 }
 
+// Add/remove a test-account credential. On ADD a secret is REQUIRED (one of
+// password / token / cookie / headers) — the raw secret is written only to the
+// engagement's gitignored runtime/creds.json; a redacted projection lands in
+// notebook.json. The endpoint NEVER echoes the raw secret back.
+export interface AccountBody {
+  action: "add" | "remove";
+  id: string;
+  role?: string;
+  tenant?: string;
+  identity?: string;
+  auth?: string;
+  status?: string;
+  used_for?: string;
+  password?: string;
+  token?: string;
+  cookie?: string;
+  headers?: Record<string, string>;
+}
+
 // Shape the CLI-wrapping routes (`init` / `run` / `approve` / `stop`) return.
 export interface CliResult {
   ok: boolean;
@@ -162,6 +181,12 @@ export const initEngagement = (token: string, body: InitBody) =>
 
 export const runEngagement = (token: string, id: string, body: RunBody) =>
   request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/run`, token, { method: "POST", body: JSON.stringify(body) });
+
+// Register (action:"add") or remove (action:"remove") a test-account credential. Mirrors
+// runEngagement's request plumbing; the control plane returns a CliResult-shaped body and
+// never includes the raw secret (its stdout is masked).
+export const addAccount = (token: string, id: string, body: AccountBody) =>
+  request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/accounts`, token, { method: "POST", body: JSON.stringify(body) });
 
 export async function getApprovals(token: string, id: string): Promise<PendingItem[]> {
   // The backend returns the raw approvals_pending.json — a bare array when the file exists,

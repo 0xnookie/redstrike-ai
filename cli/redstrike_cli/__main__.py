@@ -11,7 +11,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, diagnostics, engagement, gate, launch, preflight, runloop, ui
+from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, runloop, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
@@ -568,6 +568,68 @@ def cmd_status(args, repo: Path) -> int:
     return gate.status(repo, eng_dir)
 
 
+def _parse_headers(raw_list) -> dict:
+    out: dict = {}
+    for h in raw_list or []:
+        k, sep, v = h.partition(":")
+        if sep and k.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def cmd_accounts(args, repo: Path) -> int:
+    """Register/list/remove test-account credentials. Secrets go to runtime/creds.json
+    (gitignored, never console-served); a redacted projection is mirrored into the notebook."""
+    eng_dir = resolve_engagement(repo, args.engagement)
+    if not eng_dir:
+        print(ui.err(f"engagement '{args.engagement}' not found under {repo / 'engagements'}"))
+        return 1
+
+    if args.action == "list":
+        rows = accounts.summaries(eng_dir)
+        if not rows:
+            print(ui.info("no test accounts registered"))
+            return 0
+        print(ui.rule(f"test accounts · {eng_dir.name}"))
+        for r in rows:
+            ident = f"  {r['identity']}" if r["identity"] else ""
+            print(f"  {ui.style(r['id'], ui.YELLOW)}  {(r['role'] or '—'):<10} "
+                  f"{(r['auth'] or '—'):<16} {(r['status'] or '—'):<8} {r['secret']}{ident}")
+        print(ui.info(f"secrets: {eng_dir / accounts.CREDS_REL}  (gitignored · never served)"))
+        return 0
+
+    if args.action == "rm":
+        if not args.id:
+            print(ui.err("accounts rm needs --id"))
+            return 2
+        ok = accounts.remove(eng_dir, args.id)
+        print(ui.ok(f"removed account '{args.id}'") if ok else ui.warn(f"no account '{args.id}'"))
+        return 0 if ok else 1
+
+    # add
+    if not args.id:
+        print(ui.err("accounts add needs --id"))
+        return 2
+    headers = _parse_headers(args.header)
+    if not (args.password or args.token or args.cookie or headers):
+        print(ui.err("accounts add needs a secret: --password / --token / --cookie / --header 'K: V'"))
+        return 2
+    acct = accounts.build_account(
+        id=args.id, role=args.role or "", tenant=args.tenant or "",
+        identity=args.identity or "", auth=args.auth or "", status=args.status,
+        used_for=args.used_for or "", password=args.password or "", token=args.token or "",
+        cookie=args.cookie or "", headers=headers,
+    )
+    accounts.upsert(eng_dir, acct)
+    print(ui.ok(f"account '{args.id}' stored"))
+    print(ui.kv("creds", str((eng_dir / accounts.CREDS_REL)) + "  (gitignored · never served)"))
+    print(ui.kv("notebook", "redacted projection written to test_accounts[]"))
+    print(ui.kv("role", acct.get("role") or "—"))
+    print(ui.kv("auth", acct.get("auth_method") or "—"))
+    print(ui.kv("secret", accounts.mask_secret(acct)))
+    return 0
+
+
 # --- parser ----------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="redstrike", description="Run Claude Code as a scoped pentest engine.")
@@ -645,6 +707,24 @@ def build_parser() -> argparse.ArgumentParser:
     ap_.add_argument("--list", action="store_true", help="just list pending deferrals")
     ap_.add_argument("--all", action="store_true", help="approve all pending")
     ap_.add_argument("--id", action="append", metavar="FP", help="approve by fingerprint (prefix ok)")
+
+    acc = sub.add_parser("accounts",
+                         help="register test-account credentials (secrets stay in runtime/creds.json — never committed or served)")
+    acc.add_argument("action", choices=["add", "list", "rm"])
+    acc.add_argument("engagement", help="engagement id or path")
+    acc.add_argument("--id", help="stable account id (matches notebook test_accounts[].id)")
+    acc.add_argument("--role", help="e.g. user / admin / attacker / victim")
+    acc.add_argument("--tenant")
+    acc.add_argument("--identity",
+                     help="email / ARN / API scope — stored RAW in creds.json, REDACTED in the notebook")
+    acc.add_argument("--auth", metavar="METHOD",
+                     help="auth method label (password / password+TOTP / API key / cookie session …)")
+    acc.add_argument("--status", choices=list(accounts.STATUSES), default="active")
+    acc.add_argument("--used-for", help="what this identity is for, e.g. 'IDOR victim B'")
+    acc.add_argument("--password")
+    acc.add_argument("--token", help="bearer token")
+    acc.add_argument("--cookie", help="raw Cookie header value")
+    acc.add_argument("--header", action="append", metavar="K: V", help="extra auth header (repeatable)")
     return ap
 
 
@@ -658,6 +738,7 @@ _DISPATCH = {
     "verify": cmd_verify,
     "status": cmd_status,
     "approve": cmd_approve,
+    "accounts": cmd_accounts,
 }
 
 

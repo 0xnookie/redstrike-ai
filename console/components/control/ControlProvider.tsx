@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/lib/control";
-import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus, OrchState, CoverageLedger } from "@/lib/control";
+import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, AccountBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus, OrchState, CoverageLedger } from "@/lib/control";
 import { ControlError, loadToken, saveToken, ingestRunLine, emptyOrch, getCoverage } from "@/lib/control";
 
 // Connection state machine:
@@ -43,6 +43,7 @@ interface ControlCtx {
   doResume: () => Promise<boolean>;
   doStop: () => Promise<void>;
   doDelete: (id: string) => Promise<boolean>;
+  doAddAccount: (id: string, body: AccountBody) => Promise<CliResult | null>;
   clearEvents: () => void;
   auth: AuthSnapshot | null;
   refreshAuth: () => Promise<void>;
@@ -569,6 +570,33 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     [activeId, refresh, setActiveId],
   );
 
+  // Add or remove a test-account credential (the raw secret is held only in the request body —
+  // the plane writes it to the gitignored runtime/creds.json and never echoes it back). The
+  // caller refreshes the ACTIVE engagement's served files (via the console store) so a new/removed
+  // account shows in notebook.json's redacted projection.
+  const doAddAccount = useCallback(
+    async (id: string, body: AccountBody): Promise<CliResult | null> => {
+      if (!id) {
+        setLastError("Select an engagement first.");
+        return null;
+      }
+      setBusy(true);
+      setLastError("");
+      try {
+        const r = await api.addAccount(tokenRef.current, id, body);
+        if (!r.ok) setLastError((r.stderr || r.error || "account update failed").trim());
+        await refresh();
+        return r;
+      } catch (e) {
+        setLastError(msgOf(e));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
+
   const clearEvents = useCallback(() => {
     pendingEvents.current = []; // don't let a pending flush re-append what was just cleared
     setEvents([]);
@@ -674,6 +702,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
       doResume,
       doStop,
       doDelete,
+      doAddAccount,
       clearEvents,
       auth,
       refreshAuth,
@@ -687,7 +716,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     [
       conn, token, status, engagements, runs, activeId, setActiveId, running, coverage, pending,
       lastError, busy, connect, disconnect, refresh, doInit, doRun, doRunFor, doApprove, doResume,
-      doStop, doDelete, clearEvents, auth, refreshAuth, setProviderAuth, disconnectProvider,
+      doStop, doDelete, doAddAccount, clearEvents, auth, refreshAuth, setProviderAuth, disconnectProvider,
       setModel, startLogin, pollLogin, submitLoginCode,
     ],
   );

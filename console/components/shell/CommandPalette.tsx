@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   Search, CornerDownLeft, LayoutDashboard, Target, Bug, Workflow, Network,
-  Activity, Bot, FileText, Settings2, Moon, RotateCcw, Share2, ListTree, NotebookPen, PlugZap, FileCode2,
+  Activity, Bot, FileText, Settings2, Moon, RotateCcw, Share2, ListTree, NotebookPen, PlugZap, FileCode2, Waypoints,
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { sevMeta } from "@/lib/theme";
@@ -18,6 +18,7 @@ const PAGES = [
   { href: "/engagements", label: "Engagements", icon: Target },
   { href: "/findings", label: "Findings", icon: Bug },
   { href: "/chains", label: "Attack chains", icon: Workflow },
+  { href: "/graph", label: "Exploration graph", icon: Waypoints },
   { href: "/assets", label: "Assets & scope", icon: Network },
   { href: "/sitemap", label: "Site map", icon: ListTree },
   { href: "/js-recon", label: "JS Recon", icon: FileCode2 },
