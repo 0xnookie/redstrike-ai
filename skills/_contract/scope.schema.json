@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/scope.schema.json",
+  "title": "Redstrike Scope Projection",
+  "description": "The machine projection of an engagement's scope that scripts/console.py serves at /e/<id>/scope.json — produced by scope_yaml_to_json() from the canonical signed scope.yaml (or a real runtime/scope.json when present). The console reads target + window + in_scope/out_of_scope to render the engagement header and gate state. Tolerant (a hand-authored scope.json may carry extra keys); this pins the shapes the console depends on so a window or scope block that drifts to the wrong type (which would break header/date rendering) is caught.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "engagement": { "type": "string" },
+    "target": { "type": "string" },
+    "authorized_by": { "type": "string" },
+    "window": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "start": { "type": "string" },
+        "end": { "type": "string" }
+      }
+    },
+    "in_scope": { "$ref": "#/$defs/scope_block" },
+    "out_of_scope": { "$ref": "#/$defs/scope_block" },
+    "rules": { "type": "object" },
+    "notes": { "type": "string" },
+    "status": { "type": "string" },
+    "source": { "type": "string", "description": "where the projection came from, e.g. scope.yaml." }
+  },
+  "$defs": {
+    "scope_block": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "domains": { "type": "array", "items": { "type": "string" } },
+        "cidrs": { "type": "array", "items": { "type": "string" } },
+        "urls": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

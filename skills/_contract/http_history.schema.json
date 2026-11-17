@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/http_history.schema.json",
+  "title": "Redstrike HTTP History",
+  "description": "The proxy-context recon feeder's http_history.json: the connected interception proxy's captured, secret-redacted request/response exchanges, exported so the console Site Map and the executors read REAL traffic instead of re-crawling. Canonical shape is an object wrapping exchanges[]; a legacy flat array of exchanges is also accepted (the console and this schema's anyOf both normalize it). host+path+method are the Site Map merge keys; status/mime/params drive its facets; req/res carry the raw message for the viewer. Tolerant (recon export) — only the exchange shape is pinned, extra keys allowed, an empty exchanges[] is valid (no proxy was connected).",
+  "anyOf": [
+    {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "engagement": { "type": "string" },
+        "generated_at": { "type": "string" },
+        "source": { "type": "string", "description": "caido | burp | mitmproxy | zap | manual." },
+        "exchanges": { "type": "array", "items": { "$ref": "#/$defs/exchange" } }
+      }
+    },
+    {
+      "type": "array",
+      "description": "Legacy flat array of exchanges.",
+      "items": { "$ref": "#/$defs/exchange" }
+    }
+  ],
+  "$defs": {
+    "exchange": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "host": { "type": "string", "description": "hostname (port optional) — a Site Map merge key." },
+        "method": { "type": "string", "description": "HTTP verb — a Site Map merge key." },
+        "path": { "type": "string", "description": "pathname (+ query when meaningful) — a Site Map merge key." },
+        "status": { "type": ["integer", "string"] },
+        "mime": { "type": "string" },
+        "length": { "type": ["integer", "null"] },
+        "ms": { "type": ["integer", "number", "null"] },
+        "ts": { "type": "string" },
+        "params": { "type": "array", "items": { "type": "string" } },
+        "req": { "$ref": "#/$defs/message" },
+        "res": { "$ref": "#/$defs/message" },
+        "note": { "type": "string" },
+        "finding": { "type": "string", "description": "optional linked finding id." }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A request or response half. headers is an array of [name,value] pairs; body is the raw (redacted) message body.",
+      "properties": {
+        "headers": { "type": "array" },
+        "body": { "type": "string" }
+      }
+    }
+  }
+}

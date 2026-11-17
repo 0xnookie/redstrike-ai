@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/content.schema.json",
+  "title": "Redstrike Content Map",
+  "description": "The content-discovery recon feeder's content.json: the crawled/brute-forced surface map (routes, discovered params, notable sinks, crawl method) that seeds the console Site Map and the vuln executors. Content-discovery output varies a lot with the target (locale explosion, API-only surfaces, static sites), so this schema is TOLERANT by design — nothing is required and extra keys are allowed; it type-checks the canonical fields the console reads WHEN present (routes[]/params_discovered[] are arrays, notable_sinks is an object, crawl_method is a string) so a field that drifts to the wrong shape and would break the Site Map is caught, while a legitimately different producer layout still validates clean.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "target": { "type": "string" },
+    "crawl_method": { "type": "string", "description": "how the surface was discovered (sitemap crawl / historical URLs / brute-force / proxy history)." },
+    "method": { "type": "string", "description": "accepted alias some runs emit for crawl_method." },
+    "routes": {
+      "type": "array",
+      "description": "Discovered page/app routes the Site Map renders. Each item is a path string or a {path,...} object.",
+      "items": { "type": ["string", "object"] }
+    },
+    "params_discovered": {
+      "type": "array",
+      "description": "Parameters discovered across the surface (names or {name,...} objects).",
+      "items": { "type": ["string", "object"] }
+    },
+    "notable_sinks": {
+      "type": "object",
+      "description": "Notable sinks/surfaces grouped by kind (the console reads this as a map, not a list)."
+    },
+    "api_endpoints": {
+      "description": "API surface — a grouped object (public/auth/oauth buckets) or a flat list, both tolerated.",
+      "type": ["object", "array"]
+    },
+    "counts": { "type": "object" },
+    "notable": { "type": "array" }
+  }
+}

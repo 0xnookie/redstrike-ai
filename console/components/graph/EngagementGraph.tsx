@@ -6,7 +6,7 @@ import {
   buildEngagementGraph,
   type EngagementGraphInput, type EngagementGraphOptions, type GNode, type GNodeKind,
 } from "@/lib/engagementGraph";
-import { SEVERITY } from "@/lib/theme";
+import { SEVERITY, sevMeta } from "@/lib/theme";
 import { cx } from "@/lib/format";
 import { EmptyState } from "@/components/ui/primitives";
 
@@ -307,7 +307,7 @@ function NodeBox({ n, x, y, w, selected, neighbor, dim, onClick }: {
   n: GNode; x: number; y: number; w: number; selected: boolean; neighbor: boolean; dim: boolean; onClick: () => void;
 }) {
   const [focused, setFocused] = useState(false);
-  const color = n.kind === "finding" && n.severity ? SEVERITY[n.severity].color : KIND[n.kind].color;
+  const color = n.kind === "finding" && n.severity ? sevMeta(n.severity).color : KIND[n.kind].color;
   const sevColor = n.sevRank > 0 ? RANK_COLOR[n.sevRank] : undefined;
   const stroke = selected ? "rgb(var(--fg-strong))"
     : focused ? "rgb(var(--fg) / 0.7)"
@@ -337,7 +337,7 @@ function NodeBox({ n, x, y, w, selected, neighbor, dim, onClick }: {
       <rect x={0} y={0} width={3.5} height={NODE_H} rx={2} style={{ fill: color }} />
       {/* finding severity dot */}
       {n.kind === "finding" && n.severity && (
-        <circle cx={w - 10} cy={NODE_H / 2} r={3.5} style={{ fill: SEVERITY[n.severity].color }} />
+        <circle cx={w - 10} cy={NODE_H / 2} r={3.5} style={{ fill: sevMeta(n.severity).color }} />
       )}
       <text x={11} y={12.5} style={{ font: "600 11px var(--font-mono)", fill: "rgb(var(--fg-strong))" }}>
         {clip(n.label, n.kind === "route" || n.kind === "host" ? 22 : 18)}
@@ -367,7 +367,7 @@ function Inspector({ node, onClose, onFocusHost, onOpenFinding, onOpenHost }: {
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wide text-faint">
-            <span className="h-2 w-2 rounded-[3px]" style={{ background: node.kind === "finding" && node.severity ? SEVERITY[node.severity].color : KIND[node.kind].color }} />
+            <span className="h-2 w-2 rounded-[3px]" style={{ background: node.kind === "finding" && node.severity ? sevMeta(node.severity).color : KIND[node.kind].color }} />
             {KIND[node.kind].label}
           </div>
           <div className="mt-1 break-words font-mono text-sm text-fg-strong">{node.label}</div>

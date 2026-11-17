@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/js_findings.schema.json",
+  "title": "Redstrike JS-Analysis Findings",
+  "description": "The js-analysis recon feeder writes six findings/*.jsonl streams per analyzed site (endpoints, params, apis, secrets, gadgets, libraries), one JSON object per line. scripts/console.py's js_recon_report() folds every site's streams into one js_recon.json payload (sites[].<stream>[]). This schema LOCKS the canonical per-row field names for each stream so a producer that drifts (the real regression was library->name, provider->provider_meta, note->context, count->snippet) is caught at serve time instead of silently blanking the JS Recon view. Each $defs/<row> is additionalProperties:false with the identity key required, so a drifted alias key surfaces as an unexpected-property violation and a missing canonical key as a missing-required one. The console validates each stream row against the matching $def; the root here describes the aggregated js_recon.json envelope.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "sites": { "type": "array", "items": { "$ref": "#/$defs/site" } },
+    "totals": { "type": "object" },
+    "site_count": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "site": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "site": { "type": "string" },
+        "counts": { "type": "object" },
+        "truncated": { "type": "object" },
+        "summary_md": { "type": "string" },
+        "has_report": { "type": "boolean" },
+        "endpoints": { "type": "array", "items": { "$ref": "#/$defs/endpoint" } },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
+        "apis": { "type": "array", "items": { "$ref": "#/$defs/api" } },
+        "secrets": { "type": "array", "items": { "$ref": "#/$defs/secret" } },
+        "gadgets": { "type": "array", "items": { "$ref": "#/$defs/gadget" } },
+        "libraries": { "type": "array", "items": { "$ref": "#/$defs/library" } }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "description": "request path/URL the JS calls (CANONICAL identity key)." },
+        "kind": { "type": "string", "description": "xhr | fetch | websocket | form | link ..." },
+        "method": { "type": "string", "description": "HTTP verb(s), e.g. GET or GET/POST." },
+        "guard": { "type": "string", "description": "auth-state | guarded | public | unknown." },
+        "state": { "type": "string", "description": "live | inferred | dead." },
+        "note": { "type": "string" }
+      }
+    },
+    "param": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "parameter name (CANONICAL identity key)." },
+        "context": { "type": "string", "description": "what the param is for (CANONICAL — NOT `note`)." },
+        "kind": { "type": "string", "description": "query | body | header | path | cookie." },
+        "source_file": { "type": "string" },
+        "line": { "type": "integer" },
+        "likely_vuln": { "type": "string" }
+      }
+    },
+    "api": {
+      "type": "object",
+      "required": ["api"],
+      "additionalProperties": false,
+      "properties": {
+        "api": { "type": "string", "description": "API base/pattern, e.g. /api/builder/* (CANONICAL identity key)." },
+        "group": { "type": "string" },
+        "version": { "type": "string" },
+        "ops": { "type": "array", "items": { "type": "string" } },
+        "note": { "type": "string" }
+      }
+    },
+    "secret": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "description": "secret class, e.g. public-client-id (CANONICAL identity key)." },
+        "match_redacted": { "type": "string", "description": "the matched token with the sensitive span masked (already redacted at source)." },
+        "provider_meta": { "type": "string", "description": "which provider/service the secret belongs to (CANONICAL — NOT `provider`)." },
+        "source_file": { "type": "string" },
+        "line": { "type": "integer" },
+        "severity": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "gadget": {
+      "type": "object",
+      "required": ["sink"],
+      "additionalProperties": false,
+      "properties": {
+        "sink": { "type": "string", "description": "the dangerous sink, e.g. innerHTML / eval (CANONICAL identity key)." },
+        "snippet": { "type": "string", "description": "the relevant code/context around the sink (CANONICAL — NOT `count`)." },
+        "category": { "type": "string", "description": "dom | proto | redirect | storage ..." },
+        "origin_check": { "type": "string" },
+        "source_file": { "type": "string" },
+        "line": { "type": "integer" }
+      }
+    },
+    "library": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "library/framework name (CANONICAL — NOT `library`)." },
+        "version": { "type": "string" },
+        "outdated": { "type": "string", "description": "yes | no | unknown." },
+        "cves": { "type": "array", "items": { "type": "string" } },
+        "note": { "type": "string" },
+        "source_file": { "type": "string" }
+      }
+    }
+  }
+}

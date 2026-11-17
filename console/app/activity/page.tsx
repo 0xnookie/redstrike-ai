@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useConsole } from "@/lib/store";
-import { VERDICT } from "@/lib/theme";
+import { verdictMeta } from "@/lib/theme";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { fmtDateTime, relTime, cx } from "@/lib/format";
 import type { ActivityKind } from "@/lib/types";
 import { Card, PageHeader, Pill, SeverityBadge } from "@/components/ui/primitives";
@@ -34,7 +35,7 @@ export default function ActivityPage() {
         ))}
       </div>
 
-      <Card className="p-5">
+      <ErrorBoundary label="An activity event has a malformed field"><Card className="p-5">
         {events.length === 0 && (
           <p className="py-12 text-center text-sm text-muted">No activity yet — load an engagement with reviewed findings.</p>
         )}
@@ -58,7 +59,7 @@ export default function ActivityPage() {
                     <span className="font-mono text-[11px] text-muted">{e.actor}</span>
                     {e.refId && <span className="font-mono text-[11px] text-brand">{e.refId}</span>}
                     {e.severity && <SeverityBadge severity={e.severity} dot={false} />}
-                    {e.verdict && <Pill label={VERDICT[e.verdict].label} color={VERDICT[e.verdict].color} dot />}
+                    {e.verdict && <Pill label={verdictMeta(e.verdict).label} color={verdictMeta(e.verdict).color} dot />}
                   </div>
                   {e.detail && <p className="mt-1.5 text-sm text-muted">{e.detail}</p>}
                 </div>
@@ -66,7 +67,7 @@ export default function ActivityPage() {
             );
           })}
         </ol>
-      </Card>
+      </Card></ErrorBoundary>
     </>
   );
 }

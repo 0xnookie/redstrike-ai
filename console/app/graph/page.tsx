@@ -6,6 +6,7 @@ import { useConsole } from "@/lib/store";
 import { buildEngagementGraph, type EngagementGraphInput } from "@/lib/engagementGraph";
 import { EngagementGraph } from "@/components/graph/EngagementGraph";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead } from "@/components/ui/primitives";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 export default function GraphPage() {
   const {
@@ -48,7 +49,9 @@ export default function GraphPage() {
           sub="scope → host → endpoint → finding → chain"
         />
         <PanelBody flush>
-          <EngagementGraph input={input} onOpenFinding={onOpenFinding} onOpenHost={openHost} />
+          <ErrorBoundary label="The engagement graph hit a malformed node field">
+            <EngagementGraph input={input} onOpenFinding={onOpenFinding} onOpenHost={openHost} />
+          </ErrorBoundary>
         </PanelBody>
       </Panel>
     </>

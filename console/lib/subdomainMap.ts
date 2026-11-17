@@ -9,7 +9,7 @@
 
 import type { Notebook, Asset, Service, Finding, Engagement, Severity } from "./types";
 import { isReportable, assetHosts } from "./format";
-import { SEVERITY } from "./theme";
+import { sevMeta } from "./theme";
 
 export type MMRecord = {
   host: string;
@@ -77,7 +77,7 @@ function findingsByHost(findings: Finding[]): Map<string, { n: number; sev: Seve
       if (!cur) m.set(host, { n: 1, sev: f.severity });
       else {
         cur.n += 1;
-        if (SEVERITY[f.severity].rank > SEVERITY[cur.sev].rank) cur.sev = f.severity;
+        if (sevMeta(f.severity).rank > sevMeta(cur.sev).rank) cur.sev = f.severity;
       }
     }
   }

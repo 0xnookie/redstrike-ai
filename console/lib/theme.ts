@@ -60,13 +60,15 @@ export const COVERAGE = {
 } as const;
 
 /** transport health (runtime/diagnostics.json) — could the run REACH the host at all.
- *  A DISTINCT dimension/token ("transport-blocked"), deliberately NOT the finding-verdict "blocked"
- *  amber (#f59e0b): a dedicated fuchsia hue so a WAF-blocked host never reads like a demonstration-
- *  limited finding. Keyed by the transport classification. */
+ *  A WARNING dimension, so the hues are warning hues: degraded = amber (#f59e0b, matching the
+ *  rest of the "degraded/limited" severity in this theme) and blocked = a stronger orange
+ *  (#ea580c) so a WAF-blocked host escalates past a merely-degraded one. Both legible in dark +
+ *  light; a warning is amber/orange, NEVER purple/violet (purple is reserved for categorical roles,
+ *  e.g. ROLE_COLOR.pivot). Keyed by the transport classification. */
 export const TRANSPORT: Record<TransportClass, { label: string; color: string }> = {
   healthy: { label: "Reachable", color: "#22c55e" },
-  degraded: { label: "Transport degraded", color: "#c084fc" },
-  blocked: { label: "Transport blocked", color: "#d946ef" },
+  degraded: { label: "Transport degraded", color: "#f59e0b" },
+  blocked: { label: "Transport blocked", color: "#ea580c" },
 };
 export function transportMeta(s?: string) {
   return TRANSPORT[(s as TransportClass) ?? "healthy"] ?? TRANSPORT.healthy;
@@ -80,4 +82,27 @@ export const roleColor = (r: string) => ROLE_COLOR[r] ?? "#9ca3af";
 
 export function sevMeta(s?: string) {
   return SEVERITY[(s as Severity) ?? "info"] ?? SEVERITY.info;
+}
+
+/* ---- guarded enum-map accessors ------------------------------------------------
+ * Index the plain-object maps above but NEVER throw on an out-of-enum value: a
+ * malformed/legacy field (e.g. severity "bogus", a verdict typo) used to blow up the
+ * whole route when `MAP[x].field` dereferenced `undefined`. These return a real meta
+ * object always — the known entry, or a neutral slate fallback that keeps the raw text
+ * as its label so it still reads honestly. Mirror of sevMeta; use these at render sites
+ * instead of `MAP[value].field`. */
+const UNKNOWN_META = { label: "Unknown", color: "#94a3b8" };
+const fallbackMeta = (v?: string) => (v ? { label: String(v), color: UNKNOWN_META.color } : UNKNOWN_META);
+
+export function verdictMeta(v?: string) {
+  return VERDICT[v as Verdict] ?? fallbackMeta(v);
+}
+export function feasMeta(f?: string) {
+  return FEASIBILITY[f as ChainFeasibility] ?? fallbackMeta(f);
+}
+export function confMeta(c?: string) {
+  return CONFIDENCE[c as Confidence] ?? fallbackMeta(c);
+}
+export function statusMeta(s?: string) {
+  return AGENT_STATUS[s as AgentStatus] ?? AGENT_STATUS.idle;
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { X, Copy, Check, Globe } from "lucide-react";
 import type { Finding } from "@/lib/types";
 import { cvssScore } from "@/lib/cvss";
-import { sevMeta, VERDICT } from "@/lib/theme";
+import { sevMeta, verdictMeta } from "@/lib/theme";
 import { fmtDate, verdictOf, assetHosts } from "@/lib/format";
 import { useConsole } from "@/lib/store";
 import { Pill, SeverityBadge, ConfidenceBadge } from "@/components/ui/primitives";
@@ -65,7 +65,7 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <SeverityBadge severity={f.severity} />
-              {v && <Pill label={VERDICT[v].label} color={VERDICT[v].color} dot />}
+              {v && <Pill label={verdictMeta(v).label} color={verdictMeta(v).color} dot />}
               <ConfidenceBadge confidence={f.confidence} />
             </div>
             <h2 className="mt-2 text-lg font-semibold leading-tight">{f.title}</h2>
@@ -145,7 +145,7 @@ export function FindingDrawer({ finding, onClose }: { finding: Finding | null; o
         {f.review?.verdict && (
           <Field label="Reviewer">
             <div className="flex flex-wrap items-center gap-2">
-              <Pill label={VERDICT[f.review.verdict].label} color={VERDICT[f.review.verdict].color} dot />
+              <Pill label={verdictMeta(f.review.verdict).label} color={verdictMeta(f.review.verdict).color} dot />
               <span className="font-mono text-xs text-muted">{f.review.reviewer}</span>
               {f.review.reviewed_at && <span className="text-xs text-muted">· {fmtDate(f.review.reviewed_at)}</span>}
             </div>

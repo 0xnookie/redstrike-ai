@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Plus, ArrowUpRight, Bug, Workflow, Network, ShieldCheck, ShieldAlert, AlertTriangle, X } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { reportable, severityCounts, severityChartData, groupByCategory, groupByAsset, verificationStats, maxCvss } from "@/lib/stats";
-import { SEVERITY, VERDICT, TRANSPORT, sevMeta, hexA } from "@/lib/theme";
+import { SEVERITY, VERDICT, TRANSPORT, sevMeta, verdictMeta, hexA } from "@/lib/theme";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { fmtDate, relTime, cx } from "@/lib/format";
 import { cvssScore } from "@/lib/cvss";
 import { fetchDiagnostics, latestRun } from "@/lib/data";
@@ -20,8 +21,12 @@ export default function DashboardPage() {
   // runtime/diagnostics.json is component-local (not carried by the shared store): fetch it for the
   // active engagement so the reliability banner reflects the latest run.
   const [diagnostics, setDiagnostics] = useState<Diagnostics | undefined>(undefined);
+  // the stale-run NOTE (shown when findings are loaded but the latest diagnostics run is degraded)
+  // is dismissible; reset the dismissal when the active engagement changes.
+  const [noteDismissed, setNoteDismissed] = useState(false);
   useEffect(() => {
     let live = true;
+    setNoteDismissed(false);
     fetchDiagnostics(activeId).then((d) => { if (live) setDiagnostics(d); });
     return () => { live = false; };
   }, [activeId]);
@@ -57,7 +62,13 @@ export default function DashboardPage() {
   const feed = useMemo(() => activity.slice().reverse().slice(0, 7), [activity]);
 
   // Reliability banner (runtime/diagnostics.json): a degraded/blocked run must NOT read as a green 100%.
-  // Shown only when the latest run produced nothing for an environmental reason — empty ≠ clean.
+  // Shown only when the LATEST run (latestRun → runs[runs.length-1]) is degraded/failed/transport-blocked.
+  // Reconciled with the actually-loaded findings: the latest diagnostics entry can be a stale CLI-init run
+  // (degraded-empty, findings_count 0) while findings_consolidated.json already carries results from a later
+  // completed pass. Two tones:
+  //   • "alert" — genuinely empty (NO loaded findings): the real red/amber "produced nothing / inconclusive"
+  //               banner, so an empty degraded run never reads as a clean bill of health.
+  //   • "note"  — findings ARE loaded: demote to a muted, amber, dismissible note — never "produced nothing".
   const reliability = useMemo(() => {
     const run = latestRun(diagnostics);
     if (!run) return null;
@@ -65,6 +76,20 @@ export default function DashboardPage() {
     const transportBlocked = overall?.status === "blocked";
     const outcome = run.outcome;
     if (!(transportBlocked || outcome === "degraded-empty" || outcome === "failed")) return null;
+
+    // Findings loaded from findings_consolidated.json → the latest degraded diagnostics run is stale,
+    // not an empty assessment. Demote to a muted amber note (findings_count 0 AND no loaded findings
+    // is what keeps the real "produced nothing" banner).
+    if (findings.length > 0) {
+      const kind = transportBlocked ? "transport-blocked" : outcome === "failed" ? "failed" : "degraded/empty";
+      return {
+        tone: "note" as const,
+        color: TRANSPORT.degraded.color,
+        headline: "Latest diagnostics run is stale",
+        detail: `findings shown are from a later completed pass (latest run: ${kind})`,
+      };
+    }
+
     const color = transportBlocked ? TRANSPORT.blocked.color : outcome === "failed" ? "#ef4444" : TRANSPORT.degraded.color;
     const headline = transportBlocked
       ? "Transport blocked — produced nothing"
@@ -73,8 +98,8 @@ export default function DashboardPage() {
     const meta = transportBlocked && overall?.worst_host
       ? `${overall.worst_host}${overall.block_rate != null ? ` · ${Math.round((overall.block_rate ?? 0) * 100)}% blocked` : ""}`
       : "";
-    return { color, headline, detail: meta ? `${reason} — ${meta}` : reason };
-  }, [diagnostics]);
+    return { tone: "alert" as const, color, headline, detail: meta ? `${reason} — ${meta}` : reason };
+  }, [diagnostics, findings]);
 
   return (
     <>
@@ -96,8 +121,8 @@ export default function DashboardPage() {
         }
       />
 
-      {/* Reliability banner — a degraded/blocked run says "produced nothing", never a false green 100% */}
-      {reliability && (
+      {/* Reliability banner — an EMPTY degraded/blocked run says "produced nothing", never a false green 100% */}
+      {reliability && reliability.tone === "alert" && (
         <div
           className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-3"
           style={{ borderColor: hexA(reliability.color, "66"), background: hexA(reliability.color, "14") }}
@@ -110,6 +135,27 @@ export default function DashboardPage() {
               {reliability.detail} — results are inconclusive, not a clean bill of health.
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Stale-run note — findings ARE loaded, so the degraded latest run is just stale: muted, amber, dismissible */}
+      {reliability && reliability.tone === "note" && !noteDismissed && (
+        <div
+          className="mt-4 flex items-start gap-3 rounded-xl border px-4 py-2.5"
+          style={{ borderColor: hexA(reliability.color, "40"), background: hexA(reliability.color, "0d") }}
+          role="status"
+        >
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" style={{ color: reliability.color }} />
+          <div className="min-w-0 flex-1 text-[13px] text-muted">
+            <span className="font-medium text-fg">{reliability.headline}</span> — {reliability.detail}.
+          </div>
+          <button
+            onClick={() => setNoteDismissed(true)}
+            className="shrink-0 rounded p-0.5 text-faint transition hover:text-fg"
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -168,6 +214,7 @@ export default function DashboardPage() {
       </div>
 
       {/* top issues · most exposed assets · agent activity */}
+      <ErrorBoundary fallback={<div className="mt-5 rounded-xl border border-line p-6 text-center text-sm text-muted">A panel on this row hit a malformed finding field and was skipped.</div>}>
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <Panel>
           <PanelHeader
@@ -235,7 +282,7 @@ export default function DashboardPage() {
                 <div className="mt-0.5 flex items-center justify-between gap-2">
                   <span className="truncate text-[13px] text-muted">{e.title}</span>
                   {e.verdict ? (
-                    <Pill label={VERDICT[e.verdict].label} color={VERDICT[e.verdict].color} />
+                    <Pill label={verdictMeta(e.verdict).label} color={verdictMeta(e.verdict).color} />
                   ) : (
                     <span className="shrink-0 font-mono text-[11px] text-faint">{e.actor}</span>
                   )}
@@ -245,6 +292,7 @@ export default function DashboardPage() {
           </ul>
         </Panel>
       </div>
+      </ErrorBoundary>
 
       {/* what's new in cyber — global CVE feed + spinning globe */}
       <div className="mt-5">

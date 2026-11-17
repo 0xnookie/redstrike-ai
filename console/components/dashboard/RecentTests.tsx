@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowUpRight, FlaskConical } from "lucide-react";
 import { Card, EmptyState, Dot } from "@/components/ui/primitives";
 import { relTime } from "@/lib/format";
-import { SEVERITY } from "@/lib/theme";
+import { SEVERITY, sevMeta } from "@/lib/theme";
 import type { TestRun } from "@/lib/types";
 
 const STATUS: Record<TestRun["status"], { label: string; color: string }> = {
@@ -34,8 +34,8 @@ export function RecentTests({ tests }: { tests: TestRun[] }) {
       ) : (
         <ul className="divide-y divide-line">
           {recent.map((t) => {
-            const st = STATUS[t.status];
-            const sev = t.topSeverity ? SEVERITY[t.topSeverity] : SEVERITY.info;
+            const st = STATUS[t.status] ?? STATUS.queued;
+            const sev = t.topSeverity ? sevMeta(t.topSeverity) : SEVERITY.info;
             return (
               <li key={t.id} className="flex items-center gap-3 py-2.5">
                 <Dot color={st.color} pulse={t.status === "running"} />

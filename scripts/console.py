@@ -49,6 +49,13 @@ ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "console"
 OUT = CONSOLE / "out"
 
+# scripts/ on sys.path so the shared structural validator imports whether this file is run as a
+# script (python scripts/console.py) or imported as a module (e.g. by the tests).
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+import structvalidate  # noqa: E402
+
 # canonical name -> candidate filenames the skills may use (first match wins, shallowest)
 WANTED = {
     "findings_consolidated.json": ["findings_consolidated.json"],
@@ -179,6 +186,145 @@ def js_recon_report(engagement: Path) -> dict:
     sites.sort(key=lambda s: s["site"])
     totals = {n: sum(s["counts"].get(n, 0) for s in sites) for n in _JS_STREAMS}
     return {"sites": sites, "totals": totals, "site_count": len(sites)}
+
+
+# --- serve-time structural validation (Fix #5) ------------------------------
+# Producers can drift from the _contract schemas (the js-analysis library->name /
+# provider->provider_meta / note->context / count->snippet regression blanked the JS Recon view).
+# scripts/validate.py only lints the schema FILES + review.md wiring; the runtime gate validates
+# findings.json only; this console served everything RAW. So we validate each served artifact
+# against its _contract schema here and attach a NON-FATAL `_contract_violations[]` to the payload
+# the frontend can surface, dropping only structurally-unusable rows so one bad row can't blank the
+# whole view (degraded, not blank).
+CONTRACT = ROOT / "skills" / "_contract"
+
+# canonical served name -> (schema file, lenient). The authored, drift-locking schemas (js streams,
+# content) run strict so a drifted alias key / missing canonical key is caught. The pre-existing
+# schemas validate LENIENTLY: type/enum/range of the fields that are PRESENT only — a benign extra
+# key or a concurrently-added field never flags, but a genuinely wrong shape (cve_intel.source not an
+# array, epss outside 0..1, reachable not an enum value) still does. diagnostics is lenient on
+# purpose: its schema is being extended concurrently, so unknown/optional fields must be tolerated.
+_SV_CONFIG = {
+    "findings_consolidated.json": ("findings_consolidated.schema.json", True),
+    "host_discovery.json": ("host_discovery.schema.json", True),
+    "attack_chains.json": ("attack_chain.schema.json", True),
+    "coverage_ledger.json": ("coverage_ledger.schema.json", True),
+    "cve_intel.json": ("cve_intel.schema.json", True),
+    "content.json": ("content.schema.json", False),
+    "http_history.json": ("http_history.schema.json", True),
+    "notebook.json": ("notebook.schema.json", True),
+    "diagnostics.json": ("diagnostics.schema.json", True),
+    "scope.json": ("scope.schema.json", True),
+    "js_recon.json": ("js_findings.schema.json", False),
+}
+
+# js_recon stream key -> the $defs entry in js_findings.schema.json each row validates against.
+_JS_STREAM_DEF = {
+    "endpoints": "endpoint", "params": "param", "apis": "api",
+    "secrets": "secret", "gadgets": "gadget", "libraries": "library",
+}
+
+
+def _json_bytes(obj) -> bytes:
+    return json.dumps(obj, default=str).encode("utf-8")
+
+
+def _attach(obj, violations):
+    """Attach `_contract_violations` to a dict payload (always present — even when empty — so the key
+    is a stable contract the frontend can read). A non-dict payload passes through unchanged."""
+    if isinstance(obj, dict):
+        obj["_contract_violations"] = violations
+    return obj
+
+
+def _validate_rows(rows, schema, def_name, path_prefix, lenient, sink):
+    """Validate each row against #/$defs/<def_name>, prefixing its violation paths with
+    `<path_prefix>[i]`. DROP a row that isn't an object (coerce — so one unusable row can't break a
+    .map over the stream); keep rows that merely have field violations (recorded, still rendered).
+    Returns the kept rows."""
+    if not isinstance(rows, list) or not isinstance(schema, dict):
+        return rows
+    sub = {"$defs": schema.get("$defs", {}), "$ref": f"#/$defs/{def_name}"}
+    kept = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            sink.append({"path": f"{path_prefix}[{i}]", "expected": "object",
+                         "got": structvalidate.typename(row)})
+            continue
+        for v in structvalidate.validate(row, sub, lenient=lenient):
+            tail = f".{v['path']}" if v["path"] else ""
+            sink.append({"path": f"{path_prefix}[{i}]{tail}",
+                         "expected": v["expected"], "got": v["got"]})
+        kept.append(row)
+    return kept
+
+
+def _validate_js_recon(obj):
+    """Validate each site's six findings streams against the js_findings $defs (STRICT: the canonical
+    field names are locked, so library->name / provider->provider_meta drift is caught)."""
+    schema = structvalidate.load_schema(CONTRACT, "js_findings.schema.json") or {}
+    violations = []
+    if isinstance(obj, dict) and isinstance(obj.get("sites"), list):
+        for si, site in enumerate(obj["sites"]):
+            if not isinstance(site, dict):
+                continue
+            for stream, dn in _JS_STREAM_DEF.items():
+                if isinstance(site.get(stream), list):
+                    site[stream] = _validate_rows(
+                        site[stream], schema, dn, f"sites[{si}].{stream}", False, violations)
+    return _attach(obj, violations)
+
+
+def _validate_findings(obj):
+    """Normalize to the `{findings:[...]}` object form the frontend also accepts, validate the
+    envelope (lenient) + each finding against finding.schema $defs/finding (lenient), dropping a
+    non-object finding so one bad row can't blank the report."""
+    env = structvalidate.load_schema(CONTRACT, "findings_consolidated.schema.json")
+    fsch = structvalidate.load_schema(CONTRACT, "finding.schema.json")
+    violations = []
+    if isinstance(obj, list):
+        obj = {"findings": obj}
+    if not isinstance(obj, dict):
+        return _attach({"findings": []}, violations)
+    if env is not None:
+        violations.extend(structvalidate.validate(obj, env, lenient=True))
+    if isinstance(obj.get("findings"), list):
+        obj["findings"] = _validate_rows(obj["findings"], fsch, "finding", "findings", True, violations)
+    return _attach(obj, violations)
+
+
+def _validate_history(obj):
+    """Normalize a legacy flat array to `{exchanges:[...]}` and validate each exchange (lenient)."""
+    schema = structvalidate.load_schema(CONTRACT, "http_history.schema.json")
+    violations = []
+    if isinstance(obj, list):
+        obj = {"exchanges": obj}
+    if not isinstance(obj, dict):
+        return _attach({"exchanges": []}, violations)
+    if isinstance(obj.get("exchanges"), list):
+        obj["exchanges"] = _validate_rows(obj["exchanges"], schema, "exchange", "exchanges", True, violations)
+    return _attach(obj, violations)
+
+
+def _validate(name: str, obj):
+    """Validate a served artifact against its _contract schema and return the (possibly normalized)
+    payload with a NON-FATAL `_contract_violations[]` attached. Never raises; an unmapped artifact or
+    a missing schema passes the payload through untouched so validation can never blank a view."""
+    if obj is None:
+        return obj
+    if name == "js_recon.json":
+        return _validate_js_recon(obj)
+    if name == "findings_consolidated.json":
+        return _validate_findings(obj)
+    if name == "http_history.json":
+        return _validate_history(obj)
+    cfg = _SV_CONFIG.get(name)
+    if cfg is None:
+        return obj
+    schema_file, lenient = cfg
+    schema = structvalidate.load_schema(CONTRACT, schema_file)
+    violations = structvalidate.validate(obj, schema, lenient=lenient) if schema is not None else []
+    return _attach(obj, violations)
 
 
 def _ctype_for(p: Path) -> str:
@@ -507,11 +653,11 @@ def make_handler(target: Path):
                 return None
             if name == "scope.json":
                 scope = scope_for(eng)
-                return ("json", json.dumps(scope, default=str).encode("utf-8")) if scope else None
+                return ("json", _json_bytes(_validate("scope.json", scope))) if scope else None
             if name == "js_analysis.json":
-                return ("json", json.dumps(js_analysis_manifest(eng), default=str).encode("utf-8"))
+                return ("json", _json_bytes(js_analysis_manifest(eng)))  # file listing — no _contract schema
             if name == "js_recon.json":
-                return ("json", json.dumps(js_recon_report(eng), default=str).encode("utf-8"))
+                return ("json", _json_bytes(_validate("js_recon.json", js_recon_report(eng))))
             if name.startswith("js/"):
                 base = _js_dir(eng)
                 if not base:
@@ -524,15 +670,28 @@ def make_handler(target: Path):
                 return None
             if name == "findings_consolidated.json":
                 files = files_for(eng)
-                findings, is_cons = engagement_findings(eng, files)
-                if is_cons:
-                    src = files.get(name)
-                    return ("file", src) if src else None
-                if findings:  # live per-skill union — show findings before `reporting` runs
-                    return ("json", json.dumps({"findings": findings}, default=str).encode("utf-8"))
-                return None
+                cons_path = files.get(name)
+                # Prefer the consolidated report (keep ALL its keys — target / attack_chains /
+                # severity_counts the frontend reads), else the live per-skill union (shown before
+                # `reporting` runs). Both go through the validator.
+                raw = _read_json(cons_path) if cons_path else None
+                if not isinstance(raw, (list, dict)):
+                    findings, _ = engagement_findings(eng, files)
+                    if not findings:
+                        return None
+                    raw = {"findings": findings}
+                return ("json", _json_bytes(_validate("findings_consolidated.json", raw)))
+            # every other canonical artifact: load + validate + serve JSON (was raw file). An
+            # artifact with no _contract schema, or one that won't parse as JSON, falls back to the
+            # raw file so nothing is ever hidden by validation.
             src = files_for(eng).get(name)
-            return ("file", src) if src else None
+            if not src:
+                return None
+            if name in _SV_CONFIG:
+                obj = _read_json(src)
+                if obj is not None:
+                    return ("json", _json_bytes(_validate(name, obj)))
+            return ("file", src)
         return None
 
     class Handler(http.server.SimpleHTTPRequestHandler):

@@ -6,7 +6,8 @@ import { Network, Globe, Server, Link2, Boxes, Radio, Search, X, ShieldCheck, Sh
 import { useConsole } from "@/lib/store";
 import { cx, fmtDate, hostOf, isReportable, assetHosts } from "@/lib/format";
 import type { Asset, AssetKind, Service, Severity } from "@/lib/types";
-import { COVERAGE, SEVERITY } from "@/lib/theme";
+import { COVERAGE, SEVERITY, sevMeta } from "@/lib/theme";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Kpi, Pill, Dot, ViewHead, Panel, PanelHeader, PanelBody, Segmented } from "@/components/ui/primitives";
 import { Progress } from "@/components/ui/charts";
 import { AssetMap } from "@/components/AssetMap";
@@ -40,10 +41,10 @@ export default function AssetsPage() {
     const m = new Map<string, Severity>();
     for (const f of findings) {
       if (f.composite) continue;
-      const rank = SEVERITY[f.severity]?.rank ?? 0;
+      const rank = sevMeta(f.severity).rank;
       for (const h of assetHosts(f.asset)) {
         const cur = m.get(h);
-        if (!cur || rank > SEVERITY[cur].rank) m.set(h, f.severity);
+        if (!cur || rank > sevMeta(cur).rank) m.set(h, f.severity);
       }
     }
     return m;
@@ -60,8 +61,8 @@ export default function AssetsPage() {
       .filter((a) => !q || `${a.value} ${a.kind} ${(a.tech ?? []).join(" ")} ${a.server ?? ""} ${a.title ?? ""}`.toLowerCase().includes(q))
       .map((a) => ({ asset: a, sev: sevOf(a) }))
       .sort((x, y) => {
-        const rx = x.sev ? SEVERITY[x.sev].rank : 0;
-        const ry = y.sev ? SEVERITY[y.sev].rank : 0;
+        const rx = x.sev ? sevMeta(x.sev).rank : 0;
+        const ry = y.sev ? sevMeta(y.sev).rank : 0;
         return ry - rx || y.asset.findings - x.asset.findings || x.asset.value.localeCompare(y.asset.value);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,6 +198,7 @@ export default function AssetsPage() {
       </div>
 
       {/* asset inventory table */}
+      <ErrorBoundary label="The asset inventory has a malformed row" fallback={<Panel tall className="mt-3"><div className="py-12 text-center text-sm text-muted">The asset inventory couldn&apos;t render a malformed row.</div></Panel>}>
       <Panel tall className="mt-3">
         <PanelHeader title="Inventory" sub={`${rows.length} of ${assets.length}`} />
         <div className="scroll-thin overflow-x-auto">
@@ -220,6 +222,7 @@ export default function AssetsPage() {
           {rows.length === 0 && <div className="py-12 text-center text-sm text-muted">No assets match.</div>}
         </div>
       </Panel>
+      </ErrorBoundary>
 
       {/* ports & services (from host discovery) — preserved, restyled */}
       <Panel className="mt-5">
@@ -351,7 +354,7 @@ function AssetRow({ asset: a, sev, onOpen }: { asset: Asset; sev: Severity | nul
       <td className="px-5 py-3">
         {a.findings > 0 ? (
           <span className="inline-flex items-center gap-1.5 tabular-nums text-fg">
-            <Dot color={sev ? SEVERITY[sev].color : "rgb(var(--muted))"} /> {a.findings}
+            <Dot color={sev ? sevMeta(sev).color : "rgb(var(--muted))"} /> {a.findings}
           </span>
         ) : (
           <span className="text-faint">0</span>
@@ -364,7 +367,7 @@ function AssetRow({ asset: a, sev, onOpen }: { asset: Asset; sev: Severity | nul
 
 /* small colored bar: worst finding severity on the asset (muted track when none) */
 function RiskBar({ sev }: { sev: Severity | null }) {
-  const m = sev ? SEVERITY[sev] : null;
+  const m = sev ? sevMeta(sev) : null;
   return (
     <div className="flex items-center gap-2" title={m ? `Worst finding: ${m.label}` : "No findings"}>
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-line">

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, EngagementStatus, ApiEndpoint, JsFile, JsRecon, ContentMap, HttpHistory, Notebook } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, CveIntelEntry, EngagementStatus, ApiEndpoint, JsFile, JsRecon, ContentMap, HttpHistory, Notebook, Severity, Confidence } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
   deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
@@ -141,6 +141,73 @@ function apiEndpointsOf(host: any): ApiEndpoint[] {
     .filter((e: ApiEndpoint) => e.host || e.url);
 }
 
+/* ---- per-artifact ingest normalizer (defense-in-depth) --------------------------------
+ * Loaded engagement JSON is produced by many independent skills + hand-edited runs, so a field
+ * can arrive in the wrong shape: a severity typo, a `source` scalar where an array is expected,
+ * a non-array `steps`, a row that isn't an object. Rather than let that reach a leaf component and
+ * throw (the cve-intel blank-screen class), each loaded artifact is coerced to the reader's expected
+ * shape HERE and rows too malformed to use are dropped. This generalizes the cve-intel
+ * sourcesOf()/epssOf() coercers to every artifact. It's the first line of defense; the guarded enum
+ * accessors (lib/theme.ts) + the render-time ErrorBoundary are the backstop. A separate agent owns
+ * the serve-time validator + the schemas; this is the CLIENT resilience half. */
+const SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
+const CONFIDENCES = new Set(["confirmed", "probable", "tentative"]);
+const FEASIBILITIES = new Set(["demonstrated", "plausible", "theoretical"]);
+
+const isObj = (v: any): boolean => !!v && typeof v === "object" && !Array.isArray(v);
+const strOr = (v: any, fallback = ""): string => (typeof v === "string" ? v : v == null ? fallback : String(v));
+const strArray = (v: any): string[] | undefined => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : undefined);
+
+/** Coerce one loaded finding to the Finding shape; null → drop (unusable row, no id). */
+function normFinding(f: any): Finding | null {
+  if (!isObj(f) || typeof f.id !== "string" || !f.id) return null;
+  return {
+    ...f,
+    id: f.id,
+    title: strOr(f.title, f.id),
+    asset: strOr(f.asset),
+    severity: (SEVERITIES.has(f.severity) ? f.severity : "info") as Severity,
+    potential_severity: SEVERITIES.has(f.potential_severity) ? (f.potential_severity as Severity) : undefined,
+    confidence: (CONFIDENCES.has(f.confidence) ? f.confidence : "tentative") as Confidence,
+    evidence: Array.isArray(f.evidence) ? f.evidence : [],
+    reproduction: Array.isArray(f.reproduction) ? f.reproduction.filter((x: any) => typeof x === "string") : [],
+    references: strArray(f.references),
+    attack_mapping: strArray(f.attack_mapping),
+    review: isObj(f.review) ? f.review : undefined,
+  } as Finding;
+}
+
+/** Coerce one loaded attack chain; null → drop. Guarantees `steps` is always an array. */
+function normChain(c: any): AttackChain | null {
+  if (!isObj(c) || typeof c.id !== "string" || !c.id) return null;
+  const steps = Array.isArray(c.steps)
+    ? c.steps.filter(isObj).map((s: any) => ({ ...s, finding_id: strOr(s.finding_id), role: strOr(s.role) }))
+    : [];
+  return {
+    ...c,
+    id: c.id,
+    title: strOr(c.title, c.id),
+    steps,
+    feasibility: FEASIBILITIES.has(c.feasibility) ? c.feasibility : undefined,
+    preconditions: strArray(c.preconditions),
+  } as AttackChain;
+}
+
+/** Coerce one loaded CVE-intel entry; null → drop. Generalizes sourcesOf()/epssOf(). */
+function normCveEntry(e: any): CveIntelEntry | null {
+  if (!isObj(e) || typeof e.cve !== "string" || !e.cve) return null;
+  const epssN = typeof e.epss === "number" ? e.epss : typeof e.epss === "string" ? parseFloat(e.epss) : NaN;
+  return {
+    ...e,
+    cve: e.cve,
+    source: Array.isArray(e.source) ? e.source.filter(Boolean) : e.source ? [String(e.source)] : undefined,
+    epss: Number.isFinite(epssN) ? epssN : undefined,
+  } as CveIntelEntry;
+}
+
+const normCveEntries = (arr: any): CveIntelEntry[] | undefined =>
+  Array.isArray(arr) ? arr.map(normCveEntry).filter((e): e is CveIntelEntry => e !== null) : undefined;
+
 /** Assemble a dataset from an engagement's parsed canonical files. */
 function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any, contentFile?: any, historyFile?: any, notebookFile?: any, jsReconFile?: any): Dataset {
   let findings: Finding[] = [];
@@ -158,8 +225,15 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, in
   if (chainsFile && Array.isArray(chainsFile.chains)) chains = chainsFile.chains as AttackChain[];
   else if (cons && Array.isArray(cons.attack_chains) && cons.attack_chains[0]?.steps) chains = cons.attack_chains as AttackChain[];
 
+  // normalize loaded rows to the reader's shape + drop unusable ones, so a malformed field
+  // (bad severity, non-array steps, a non-object row) never reaches a leaf render and throws
+  findings = findings.map(normFinding).filter((f): f is Finding => f !== null);
+  chains = chains.map(normChain).filter((c): c is AttackChain => c !== null);
+
   const coverage = cover && Array.isArray(cover.categories) ? (cover as CoverageLedger) : undefined;
-  const cveIntel = intel && (Array.isArray(intel.cves) || Array.isArray(intel.entries)) ? (intel as CveIntel) : undefined;
+  const cveIntel = intel && (Array.isArray(intel.cves) || Array.isArray(intel.entries))
+    ? ({ ...intel, cves: normCveEntries(intel.cves), entries: normCveEntries(intel.entries) } as CveIntel)
+    : undefined;
 
   let services: Service[] = [];
   let assets: Asset[] = [];

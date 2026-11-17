@@ -10,6 +10,7 @@ import { SEVERITY, hexA } from "@/lib/theme";
 import {
   ViewHead, Kpi, Panel, PanelHeader, PanelBody, EmptyState, Pill, Select,
 } from "@/components/ui/primitives";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import type {
   JsReconSite, JsEndpoint, JsParam, JsApi, JsSecret, JsGadget, JsLibrary,
 } from "@/lib/types";
@@ -188,7 +189,9 @@ export default function JsReconPage() {
           }
         />
         <PanelBody flush>
-          <TabBody tab={tab} site={site} />
+          <ErrorBoundary label={`A ${tab} row has a malformed field`}>
+            <TabBody tab={tab} site={site} />
+          </ErrorBoundary>
         </PanelBody>
       </Panel>
     </>
@@ -267,7 +270,7 @@ function TabBody({ tab, site }: { tab: Tab; site: JsReconSite }) {
         {(rows as JsSecret[]).map((r, i) => (
           <tr key={i} className="hover:bg-card2/50">
             <Td><span className="text-sm text-fg">{r.type}</span>{r.provider_meta ? <div className="text-[11px] text-faint">{r.provider_meta}</div> : null}</Td>
-            <Td><span className="break-all font-mono text-[12px] text-muted">{r.match_redacted || "‹redacted›"}</span>{r.entropy != null ? <span className="ml-2 text-[11px] text-faint">H={r.entropy.toFixed(1)}</span> : null}</Td>
+            <Td><span className="break-all font-mono text-[12px] text-muted">{r.match_redacted || "‹redacted›"}</span>{typeof r.entropy === "number" ? <span className="ml-2 text-[11px] text-faint">H={r.entropy.toFixed(1)}</span> : null}</Td>
             <Td>{r.severity ? <Pill label={r.severity} color={sevColor(r.severity)} dot /> : <span className="text-faint">—</span>}</Td>
             <Td><Src file={r.source_file} line={r.line} /></Td>
           </tr>
@@ -296,7 +299,7 @@ function TabBody({ tab, site }: { tab: Tab; site: JsReconSite }) {
   return (
     <Table head={<><Th>Library</Th><Th>Version</Th><Th>CVEs</Th><Th>Source</Th></>}>
       {(rows as JsLibrary[]).map((r, i) => {
-        const cves = r.cves ?? [];
+        const cves = Array.isArray(r.cves) ? r.cves : [];
         return (
           <tr key={i} className="hover:bg-card2/50">
             <Td><span className="text-sm text-fg">{r.name}</span></Td>
