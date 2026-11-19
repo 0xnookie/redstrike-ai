@@ -12,7 +12,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, runloop, ui
+from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, reasoning_trace, runloop, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
@@ -329,9 +329,28 @@ def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "in
         _emit_diagnostics(eng_dir, res, prep=prep, mode=mode, gate_rc=grc, loop=loop)
     except Exception:
         pass
+    # Reasoning-provenance trace (runtime/reasoning_trace.json): a persisted, entity-keyed lineage of
+    # HOW findings came to be (goal -> intent/hypothesis -> fact/evidence -> finding), for the console's
+    # exploration graph. Strictly additive + crash-safe; a failure degrades (one warning) but never
+    # alters the exit code or aborts the run.
+    _emit_reasoning_trace(eng_dir)
     if grc != 0 and rc == 0:
         return grc
     return rc
+
+
+def _emit_reasoning_trace(eng_dir: Path) -> None:
+    """Derive + persist the reasoning-provenance trace. Best-effort: a write error is SURFACED (a
+    warning, never a silent no-op per the diagnostics discipline) but is non-fatal — the run and the
+    graph work without it."""
+    try:
+        trace = reasoning_trace.assemble(eng_dir)
+        path = reasoning_trace.write(eng_dir, trace)
+        n_find = sum(1 for n in trace.get("nodes", []) if n.get("kind") == reasoning_trace.FINDING)
+        print(ui.info(f"reasoning trace: {path}  ({len(trace.get('nodes', []))} nodes · {n_find} findings)"))
+    except Exception as exc:  # noqa: BLE001 — surface, don't abort
+        print(ui.warn(f"reasoning trace: could not write runtime/reasoning_trace.json ({exc}) — "
+                      f"the exploration-graph provenance overlay will be absent this run"))
 
 
 def _emit_diagnostics(eng_dir: Path, res, *, prep, mode: str, gate_rc: int, loop=None) -> None:

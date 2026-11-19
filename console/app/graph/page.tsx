@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Network, Bug, Workflow, Waypoints } from "lucide-react";
 import { useConsole } from "@/lib/store";
+import { fetchReasoningTrace } from "@/lib/data";
 import { buildEngagementGraph, type EngagementGraphInput } from "@/lib/engagementGraph";
+import type { ReasoningTrace } from "@/lib/types";
 import { EngagementGraph } from "@/components/graph/EngagementGraph";
 import { Panel, PanelHeader, PanelBody, Kpi, ViewHead } from "@/components/ui/primitives";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
@@ -11,14 +13,25 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 export default function GraphPage() {
   const {
     findings, chains, services, assets, content, hostRaw, history,
-    activeEngagement, openFinding, openHost,
+    activeEngagement, activeId, openFinding, openHost,
   } = useConsole();
+
+  // The reasoning-provenance trace is component-local (served from runtime/reasoning_trace.json),
+  // like diagnostics — the shared store doesn't carry it. Absent/failed fetch → undefined → the
+  // overlay stays hidden and the existing view is unchanged.
+  const [trace, setTrace] = useState<ReasoningTrace | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    setTrace(undefined);
+    if (activeId) void fetchReasoningTrace(activeId).then((t) => { if (live) setTrace(t); });
+    return () => { live = false; };
+  }, [activeId]);
 
   const input: EngagementGraphInput = useMemo(() => ({
     target: activeEngagement?.target,
     engagementName: activeEngagement?.name,
-    assets, services, findings, chains, content, hostRaw, history,
-  }), [activeEngagement, assets, services, findings, chains, content, hostRaw, history]);
+    assets, services, findings, chains, content, hostRaw, history, trace,
+  }), [activeEngagement, assets, services, findings, chains, content, hostRaw, history, trace]);
 
   // headline totals (full build — every surface + producer)
   const totals = useMemo(

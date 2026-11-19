@@ -12,18 +12,25 @@
 // tested and so the view stays a thin renderer over it. Reuses buildSiteMap for the
 // route↔finding linking rather than re-deriving it.
 
-import type { Asset, AttackChain, ContentMap, Finding, HttpHistory, Service, Severity } from "./types";
+import type { Asset, AttackChain, ContentMap, Finding, HttpHistory, ReasoningTrace, Service, Severity, TraceNode } from "./types";
 import { SEVERITY } from "./theme";
 import { assetHosts, hostOf } from "./format";
 import { buildSiteMap, type SiteRoute } from "./siteMap";
 
-export type GNodeKind = "scope" | "host" | "service" | "route" | "finding" | "chain" | "agent";
-export type GEdgeRel = "scope" | "surface" | "finding" | "chain" | "agent";
+// The surface spine (scope…chain/agent) plus the optional REASONING-PROVENANCE band (goal/intent/fact),
+// which overlays HOW a finding came to be. The provenance band sits to the RIGHT of the finding column
+// so a finding reads outward into its lineage — finding → fact (evidence) → intent (hypothesis) → goal.
+export type GNodeKind = "scope" | "host" | "service" | "route" | "finding" | "chain" | "agent" | "fact" | "intent" | "goal";
+export type GEdgeRel = "scope" | "surface" | "finding" | "chain" | "agent" | "provenance";
 
 /** Layer index per kind — the graph reads left→right along this spine. */
 export const KIND_COL: Record<GNodeKind, number> = {
   scope: 0, host: 1, service: 2, route: 2, finding: 3, chain: 4, agent: 4,
+  // provenance band (only present when showProvenance / lineageFinding is set)
+  fact: 5, intent: 6, goal: 7,
 };
+/** The provenance columns, inner→outer, laid out after the surface spine + col-4 sinks. */
+const PROV_COLS = [5, 6, 7];
 
 export interface GNode {
   id: string;
@@ -58,6 +65,7 @@ export interface EngagementGraphInput {
   content?: ContentMap;
   hostRaw?: unknown;
   history?: HttpHistory;
+  trace?: ReasoningTrace;  // runtime/reasoning_trace.json — the reasoning-provenance overlay
 }
 export interface EngagementGraphOptions {
   allRoutes?: boolean;    // include endpoints with no finding (full surface), not just ones that matter
@@ -65,6 +73,11 @@ export interface EngagementGraphOptions {
   showAgents?: boolean;   // include the producing executor skills as nodes
   sevMin?: number;        // minimum severity rank for a finding to appear (0 = all)
   focusHost?: string | null;
+  // reasoning-provenance overlay: show the goal→intent→fact lineage behind each visible finding.
+  // Off by default so the existing surface view is unchanged. `lineageFinding` restricts the WHOLE
+  // graph to a single finding's root→finding slice ("Why this finding"), implying showProvenance.
+  showProvenance?: boolean;
+  lineageFinding?: string | null;
 }
 
 const uniq = <T,>(a: T[]): T[] => Array.from(new Set(a));
@@ -77,6 +90,14 @@ export function producerOf(f: Finding): string | undefined {
   if (!r) return undefined;
   const slug = r.replace(/-verify$/, "").replace(/^redstrike-/, "").trim();
   return slug || undefined;
+}
+
+/** Subtitle for a provenance node — the kind read naturally ("hypothesis" / "evidence" / "goal"). */
+function provSub(tn: TraceNode): string | undefined {
+  if (tn.kind === "goal") return "goal";
+  if (tn.kind === "intent") return "hypothesis";
+  if (tn.kind === "fact") return tn.meta && (tn.meta as Record<string, unknown>).ruled_out ? "ruled out" : "evidence";
+  return undefined;
 }
 
 /** Short endpoint label for a route node (last path segment, or the full short path). */
@@ -93,6 +114,8 @@ export function buildEngagementGraph(
   opts: EngagementGraphOptions = {},
 ): EngagementGraph {
   const { allRoutes = false, showServices = false, showAgents = false, sevMin = 0, focusHost = null } = opts;
+  const lineageFinding = opts.lineageFinding || null;
+  const showProvenance = !!opts.showProvenance || !!lineageFinding; // a lineage slice implies the overlay
   const focus = focusHost ? norm(focusHost) : null;
 
   const nonComposite = input.findings.filter((f) => !f.composite);
@@ -235,6 +258,66 @@ export function buildEngagementGraph(
     }
   }
 
+  // ---- reasoning-provenance overlay (goal → intent → fact → finding) ----
+  // Adds the lineage BEHIND each visible finding from the persisted trace. Strictly additive + safe:
+  // only nodes that are an ancestor of a VISIBLE finding are added (no orphans, no dangling edges),
+  // and every endpoint goes through link()'s guard, so an absent/partial/malformed trace is a no-op.
+  if (showProvenance && input.trace && Array.isArray(input.trace.nodes)) {
+    const traceById = new Map<string, TraceNode>();
+    for (const tn of input.trace.nodes) if (tn && typeof tn.id === "string" && tn.id) traceById.set(tn.id, tn);
+
+    // the trace's finding-nodes that map to a visible graph finding = the lineage anchors
+    const anchors: TraceNode[] = [];
+    for (const tn of traceById.values()) {
+      if (tn.kind === "finding" && tn.finding_id && visFindingIds.has(tn.finding_id)
+        && nodeById.has("find:" + tn.finding_id)
+        && (!lineageFinding || tn.finding_id === lineageFinding)) anchors.push(tn);
+    }
+
+    // walk each anchor's parent chain UP (finding → fact → intent → goal), collecting the ancestors.
+    // Single-parent walk, so a slice never bleeds into a sibling finding under the same intent.
+    const keep = new Set<string>();
+    for (const a of anchors) {
+      let cur: TraceNode | undefined = a;
+      const guard = new Set<string>();
+      while (cur && cur.parent && !guard.has(cur.id)) {
+        guard.add(cur.id);
+        const parent = traceById.get(cur.parent);
+        if (!parent) break;
+        if (parent.kind === "goal" || parent.kind === "intent" || parent.kind === "fact") keep.add(parent.id);
+        cur = parent;
+      }
+    }
+
+    // the graph node id a trace id maps to (finding → the existing find: node, else a prov: node)
+    const gid = (tid: string): string | undefined => {
+      const tn = traceById.get(tid);
+      if (!tn) return undefined;
+      if (tn.kind === "finding") return tn.finding_id && visFindingIds.has(tn.finding_id) ? "find:" + tn.finding_id : undefined;
+      return keep.has(tid) ? "prov:" + tid : undefined;
+    };
+
+    for (const tid of keep) {
+      const tn = traceById.get(tid)!;
+      const kind = tn.kind as GNodeKind; // goal | intent | fact (never finding here)
+      add({
+        id: "prov:" + tid, kind, label: tn.label || tid, sub: provSub(tn),
+        col: KIND_COL[kind], row: 0, sevRank: 0,
+        meta: { producer: tn.producer, category: tn.category, evidence: tn.evidence_ref ?? undefined, kind },
+      });
+    }
+
+    // edges, drawn low-col → high-col so they render left→right regardless of the stored direction
+    for (const e of input.trace.edges ?? []) {
+      if (!e || typeof e.source !== "string" || typeof e.target !== "string") continue;
+      const a = gid(e.source), b = gid(e.target);
+      if (!a || !b) continue;
+      const na = nodeById.get(a), nb = nodeById.get(b);
+      if (!na || !nb) continue;
+      if (na.col <= nb.col) link(a, b, "provenance"); else link(b, a, "provenance");
+    }
+  }
+
   // ---- worst-severity roll-up onto surface + host nodes ----
   const bump = (id: string | undefined, rank: number) => { if (!id) return; const n = nodeById.get(id); if (n && rank > n.sevRank) n.sevRank = rank; };
   for (const f of visFindings) {
@@ -252,7 +335,7 @@ export function buildEngagementGraph(
     else if (n.kind === "finding") { const p = spineParent.get(n.id); if (p) pushChild(p, n.id); }
   }
   // deterministic sibling order: severity desc, then kind, then label
-  const kindOrder: Record<GNodeKind, number> = { scope: 0, host: 1, service: 2, route: 3, finding: 4, chain: 5, agent: 6 };
+  const kindOrder: Record<GNodeKind, number> = { scope: 0, host: 1, service: 2, route: 3, finding: 4, chain: 5, agent: 6, fact: 7, intent: 8, goal: 9 };
   const orderChildren = (ids: string[]) =>
     ids.slice().sort((a, b) => {
       const na = nodeById.get(a)!, nb = nodeById.get(b)!;
@@ -297,13 +380,63 @@ export function buildEngagementGraph(
     sinkPrev = r;
   }
 
+  // provenance band: place fact(5) → intent(6) → goal(7) in column order. Each node takes the mean
+  // row of its already-placed neighbours (in a lower column — findings for facts, facts for intents,
+  // intents for goals), then a per-column spread prevents collisions. Mirrors the col-4 sink pass.
+  const provAdj = new Map<string, string[]>();
+  const pushAdj = (a: string, b: string) => { const l = provAdj.get(a); if (l) l.push(b); else provAdj.set(a, [b]); };
+  for (const e of edges) if (e.rel === "provenance") { pushAdj(e.source, e.target); pushAdj(e.target, e.source); }
+  for (const col of PROV_COLS) {
+    const colNodes = nodes.filter((n) => n.col === col);
+    if (!colNodes.length) continue;
+    for (const n of colNodes) {
+      const rs = (provAdj.get(n.id) ?? []).map((id) => rowOf.get(id)).filter((v): v is number => v != null);
+      rowOf.set(n.id, rs.length ? rs.reduce((s, x) => s + x, 0) / rs.length : slot++);
+    }
+    colNodes.sort((a, b) => (rowOf.get(a.id)! - rowOf.get(b.id)!) || a.label.localeCompare(b.label));
+    let prev = -Infinity;
+    for (const n of colNodes) { const r = Math.max(rowOf.get(n.id)!, prev + SINK_GAP); rowOf.set(n.id, r); prev = r; }
+  }
+
   for (const n of nodes) n.row = rowOf.get(n.id) ?? 0;
 
-  // true vertical extent (spread sinks can reach past `slot`); feeds the view's fit signature.
-  const maxRow = nodes.reduce((m, n) => Math.max(m, n.row), 0);
-  const stats = { scope: 0, host: 0, service: 0, route: 0, finding: 0, chain: 0, agent: 0, worstSev: 0,
-    rows: nodes.length ? Math.max(Math.ceil(slot), Math.ceil(maxRow) + 1) : 0 } as EngagementGraph["stats"];
-  for (const n of nodes) { stats[n.kind]++; if (n.sevRank > stats.worstSev) stats.worstSev = n.sevRank; }
+  // ---- "Why this finding" lineage slice: restrict the whole graph to one finding's lineage ----
+  // Keep that finding, its surface ancestors (route/host/scope), and its provenance ancestors walked
+  // STRICTLY upward by column (finding→fact→intent→goal) so the slice never bleeds into a sibling
+  // finding that shares an intent. A no-op (full graph) when the finding isn't present.
+  let outNodes = nodes, outEdges = edges;
+  if (lineageFinding) {
+    const target = "find:" + lineageFinding;
+    if (nodeById.has(target)) {
+      const keepIds = new Set<string>([target]);
+      const sp = spineParent.get(target);
+      if (sp) {
+        keepIds.add(sp);
+        const spn = nodeById.get(sp);
+        if (spn?.kind === "route" && spn.host) keepIds.add("host:" + spn.host);
+      }
+      const tn = nodeById.get(target);
+      if (tn?.host && nodeById.has("host:" + tn.host)) keepIds.add("host:" + tn.host);
+      if (nodeById.has(scopeId)) keepIds.add(scopeId);
+      // provenance ancestors — walk only to strictly-higher columns (toward the goal)
+      const stack = [target];
+      while (stack.length) {
+        const cur = stack.pop()!;
+        const curCol = nodeById.get(cur)?.col ?? 0;
+        for (const nb of provAdj.get(cur) ?? []) {
+          if ((nodeById.get(nb)?.col ?? 0) > curCol && !keepIds.has(nb)) { keepIds.add(nb); stack.push(nb); }
+        }
+      }
+      outNodes = nodes.filter((n) => keepIds.has(n.id));
+      outEdges = edges.filter((e) => keepIds.has(e.source) && keepIds.has(e.target));
+    }
+  }
 
-  return { nodes, edges, stats };
+  // true vertical extent (spread sinks can reach past `slot`); feeds the view's fit signature.
+  const maxRow = outNodes.reduce((m, n) => Math.max(m, n.row), 0);
+  const stats = { scope: 0, host: 0, service: 0, route: 0, finding: 0, chain: 0, agent: 0, fact: 0, intent: 0, goal: 0, worstSev: 0,
+    rows: outNodes.length ? Math.max(Math.ceil(slot), Math.ceil(maxRow) + 1) : 0 } as EngagementGraph["stats"];
+  for (const n of outNodes) { stats[n.kind]++; if (n.sevRank > stats.worstSev) stats.worstSev = n.sevRank; }
+
+  return { nodes: outNodes, edges: outEdges, stats };
 }

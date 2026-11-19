@@ -67,6 +67,7 @@ WANTED = {
     "http_history.json": ["http_history.json"],
     "notebook.json": ["notebook.json"],
     "diagnostics.json": ["diagnostics.json"],
+    "reasoning_trace.json": ["reasoning_trace.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -214,6 +215,7 @@ _SV_CONFIG = {
     "http_history.json": ("http_history.schema.json", True),
     "notebook.json": ("notebook.schema.json", True),
     "diagnostics.json": ("diagnostics.schema.json", True),
+    "reasoning_trace.json": ("reasoning_trace.schema.json", True),
     "scope.json": ("scope.schema.json", True),
     "js_recon.json": ("js_findings.schema.json", False),
 }

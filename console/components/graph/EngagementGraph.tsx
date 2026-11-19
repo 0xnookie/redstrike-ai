@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
-import { Search, Plus, Minus, Maximize2, X, Crosshair, ExternalLink } from "lucide-react";
+import { Search, Plus, Minus, Maximize2, X, Crosshair, ExternalLink, GitBranch } from "lucide-react";
 import {
   buildEngagementGraph,
   type EngagementGraphInput, type EngagementGraphOptions, type GNode, type GNodeKind,
@@ -19,13 +19,19 @@ const KIND: Record<GNodeKind, { color: string; label: string; w: number }> = {
   finding: { color: "#fb7185", label: "Finding", w: 198 },
   chain: { color: "#fb923c", label: "Chain", w: 174 },
   agent: { color: "#34d399", label: "Agent", w: 150 },
+  // reasoning-provenance band (shown behind the "Reasoning" toggle / a lineage slice)
+  fact: { color: "#c084fc", label: "Evidence", w: 210 },
+  intent: { color: "#f472b6", label: "Hypothesis", w: 200 },
+  goal: { color: "#fbbf24", label: "Goal", w: 172 },
 };
-const COL_X = [0, 212, 436, 696, 952];
+const COL_X = [0, 212, 436, 696, 952, 1200, 1452, 1704];
 const ROW_H = 40;
 const NODE_H = 28;
 const PAD = 48;
+/** provenance node kinds — their legend chips appear only when the overlay is on. */
+const PROV_KINDS: GNodeKind[] = ["fact", "intent", "goal"];
 
-const EDGE_TINT: Record<string, string> = { chain: "#fb923c", agent: "#34d399" };
+const EDGE_TINT: Record<string, string> = { chain: "#fb923c", agent: "#34d399", provenance: "#c084fc" };
 
 /* severity rank → color, precomputed once (vs. an Object.values(SEVERITY).find per node per render) */
 const RANK_COLOR: Record<number, string> = Object.fromEntries(Object.values(SEVERITY).map((s) => [s.rank, s.color]));
@@ -44,16 +50,28 @@ export function EngagementGraph({ input, onOpenFinding, onOpenHost }: Engagement
   const [allRoutes, setAllRoutes] = useState(() => input.findings.filter((f) => !f.composite).length === 0);
   const [showServices, setShowServices] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
+  const [showProvenance, setShowProvenance] = useState(false);
+  const [lineageFinding, setLineageFinding] = useState<string | null>(null);
   const [sevMin, setSevMin] = useState(0);
   const [focusHost, setFocusHost] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selId, setSelId] = useState<string | null>(null);
 
+  // the trace only matters if it actually carries provenance nodes — gate the controls on it so the
+  // "Reasoning" affordances don't appear for an engagement with no trace.
+  const hasTrace = !!input.trace && Array.isArray(input.trace.nodes) && input.trace.nodes.length > 0;
+
   const opts: EngagementGraphOptions = useMemo(
-    () => ({ allRoutes, showServices, showAgents, sevMin, focusHost }),
-    [allRoutes, showServices, showAgents, sevMin, focusHost],
+    () => ({ allRoutes, showServices, showAgents, sevMin, focusHost, showProvenance, lineageFinding }),
+    [allRoutes, showServices, showAgents, sevMin, focusHost, showProvenance, lineageFinding],
   );
   const graph = useMemo(() => buildEngagementGraph(input, opts), [input, opts]);
+
+  // Drop a stale "Why this finding" slice if the active engagement no longer has that finding
+  // (e.g. the user switched engagements while a lineage slice was open).
+  useEffect(() => {
+    if (lineageFinding && !input.findings.some((f) => f.id === lineageFinding)) setLineageFinding(null);
+  }, [input.findings, lineageFinding]);
 
   const pos = useMemo(() => {
     const m = new Map<string, { x: number; y: number; w: number }>();
@@ -249,9 +267,18 @@ export function EngagementGraph({ input, onOpenFinding, onOpenHost }: Engagement
         <Toggle label="All endpoints" on={allRoutes} onClick={() => setAllRoutes((v) => !v)} />
         <Toggle label="Services" on={showServices} onClick={() => setShowServices((v) => !v)} />
         <Toggle label="Agents" on={showAgents} onClick={() => setShowAgents((v) => !v)} />
+        {hasTrace && (
+          <Toggle label="Reasoning" on={showProvenance || !!lineageFinding}
+            onClick={() => { if (lineageFinding) setLineageFinding(null); else setShowProvenance((v) => !v); }} />
+        )}
         {focusHost && (
           <button onClick={() => setFocusHost(null)} className="btn-ghost !h-8" title="Clear host focus">
             <Crosshair size={13} /> {focusHost} <X size={12} />
+          </button>
+        )}
+        {lineageFinding && (
+          <button onClick={() => setLineageFinding(null)} className="btn-ghost !h-8" title="Clear lineage slice">
+            <GitBranch size={13} /> Why {lineageFinding} <X size={12} />
           </button>
         )}
         <div className="ml-auto flex items-center gap-1.5">
@@ -283,19 +310,26 @@ export function EngagementGraph({ input, onOpenFinding, onOpenHost }: Engagement
             onFocusHost={sel.host ? () => { setFocusHost(sel.host!); } : undefined}
             onOpenFinding={sel.findingId && onOpenFinding ? () => onOpenFinding(sel.findingId!) : undefined}
             onOpenHost={sel.hostName && onOpenHost ? () => onOpenHost(sel.hostName!) : undefined}
+            onWhy={hasTrace && sel.kind === "finding" && sel.findingId
+              ? () => { setLineageFinding(sel.findingId!); setSelId(null); } : undefined}
           />
         )}
       </div>
 
       {/* legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3 text-[12px] text-muted">
-        {(["scope", "host", "service", "route", "finding", "chain", "agent"] as GNodeKind[]).map((k) => (
+        {([
+          "scope", "host", "service", "route", "finding", "chain", "agent",
+          ...((showProvenance || lineageFinding) ? PROV_KINDS : []),
+        ] as GNodeKind[]).map((k) => (
           <span key={k} className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: KIND[k].color }} /> {KIND[k].label}
           </span>
         ))}
         <span className="ml-auto font-mono text-[11px] text-faint">
-          {graph.stats.host} hosts · {graph.stats.route} endpoints · {graph.stats.finding} findings · {graph.stats.chain} chains
+          {lineageFinding
+            ? `lineage of ${lineageFinding} · ${graph.stats.fact + graph.stats.intent + graph.stats.goal} reasoning steps`
+            : `${graph.stats.host} hosts · ${graph.stats.route} endpoints · ${graph.stats.finding} findings · ${graph.stats.chain} chains${(showProvenance && (graph.stats.fact || graph.stats.intent)) ? ` · ${graph.stats.fact + graph.stats.intent + graph.stats.goal} reasoning` : ""}`}
         </span>
       </div>
     </div>
@@ -353,9 +387,9 @@ function NodeBox({ n, x, y, w, selected, neighbor, dim, onClick }: {
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 /* ------------------------------------------------------------- inspector --- */
-function Inspector({ node, onClose, onFocusHost, onOpenFinding, onOpenHost }: {
+function Inspector({ node, onClose, onFocusHost, onOpenFinding, onOpenHost, onWhy }: {
   node: GNode; onClose: () => void;
-  onFocusHost?: () => void; onOpenFinding?: () => void; onOpenHost?: () => void;
+  onFocusHost?: () => void; onOpenFinding?: () => void; onOpenHost?: () => void; onWhy?: () => void;
 }) {
   const rows = Object.entries(node.meta ?? {}).filter(([, v]) => v != null && v !== "");
   return (
@@ -386,6 +420,7 @@ function Inspector({ node, onClose, onFocusHost, onOpenFinding, onOpenHost }: {
         </dl>
       )}
       <div className="mt-3 flex flex-wrap gap-1.5">
+        {onWhy && <button onClick={onWhy} className="btn-ghost !h-8" title="Show this finding's reasoning lineage"><GitBranch size={13} /> Why this finding</button>}
         {onOpenFinding && <button onClick={onOpenFinding} className="btn-ghost !h-8"><ExternalLink size={13} /> Open finding</button>}
         {onOpenHost && <button onClick={onOpenHost} className="btn-ghost !h-8"><ExternalLink size={13} /> Open host</button>}
         {onFocusHost && node.kind === "host" && <button onClick={onFocusHost} className="btn-ghost !h-8"><Crosshair size={13} /> Focus subtree</button>}
