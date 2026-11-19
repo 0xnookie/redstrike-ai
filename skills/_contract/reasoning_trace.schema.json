@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/reasoning_trace.schema.json",
+  "title": "Redstrike Engagement Reasoning-Provenance Trace",
+  "description": "Persisted, entity-keyed lineage of HOW findings came to be (runtime/reasoning_trace.json): a graph of reasoning steps — goal (objective) -> intent (hypothesis) -> fact (evidence) -> finding — where every node has a stable id and each finding node CROSS-REFERENCES an existing finding id (finding_id) so a consumer can link the trace to the finding it explains. Unlike the ephemeral free-text run stream, this is durable and keyed to stable entities, so it can drive the console's exploration-graph provenance overlay. Strictly additive + crash-safe: an absent/partial trace never breaks a run or the graph. Produced by cli/redstrike_cli/reasoning_trace.py after the post-run gate.",
+  "type": "object",
+  "required": ["nodes", "edges"],
+  "properties": {
+    "version": { "type": "integer", "description": "trace schema version (drift guard). Current: 1." },
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string", "description": "ISO-8601 timestamp of the last write (the trace is re-derived in full each run)." },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "label"],
+      "properties": {
+        "id": { "type": "string", "description": "stable node id (e.g. goal:root, intent:<category>, fact:<finding_id>, finding:<finding_id>)." },
+        "kind": {
+          "enum": ["goal", "intent", "fact", "finding"],
+          "description": "goal=objective; intent=hypothesis; fact=evidence; finding=a produced finding."
+        },
+        "label": { "type": "string" },
+        "parent": { "type": ["string", "null"], "description": "the upstream node id this derives from (null for the root goal)." },
+        "finding_id": { "type": "string", "description": "the EXISTING finding id this node cross-references (fact + finding nodes)." },
+        "category": { "type": "string", "description": "the coverage category id the intent/fact belongs to." },
+        "producer": { "type": "string", "description": "the executor skill slug behind this step." },
+        "evidence_ref": { "type": ["string", "null"], "description": "a path to the evidence artifact backing a fact." },
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+        "status": { "type": "string" },
+        "accepted": { "type": "boolean" },
+        "ts": { "type": "string" },
+        "meta": { "type": "object" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "source", "target", "rel"],
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string", "description": "upstream node id." },
+        "target": { "type": "string", "description": "downstream node id." },
+        "rel": {
+          "enum": ["spawns", "yields", "proves", "derived_from"],
+          "description": "spawns=goal->intent; yields=intent->fact; proves=fact->finding; derived_from=fact->intent (a prior fact motivated a deeper hypothesis)."
+        }
+      }
+    }
+  }
+}

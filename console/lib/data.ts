@@ -15,7 +15,7 @@
 //                       and derive activity + agent stats from the real findings.
 
 import type {
-  ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service, Diagnostics, DiagnosticsRun, TransportClass,
+  ConsoleData, Engagement, Finding, Agent, ActivityEvent, Asset, Service, Diagnostics, DiagnosticsRun, TransportClass, ReasoningTrace,
 } from "./types";
 import { assetHosts, isReportable, verdictOf } from "./format";
 
@@ -411,6 +411,26 @@ export async function fetchDiagnostics(id: string): Promise<Diagnostics | undefi
     if (!res.ok) return undefined;
     const j = await res.json();
     return j && typeof j === "object" && Array.isArray(j.runs) ? (j as Diagnostics) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Fetch one engagement's runtime/reasoning_trace.json (component-local, like fetchDiagnostics: the
+ * shared store doesn't carry it — only the exploration graph consumes it). Returns undefined when
+ * nothing is served / no file / a parse error / a shape that isn't a trace, so the graph's provenance
+ * overlay simply stays empty. Validates the {nodes,edges} shape before returning.
+ */
+export async function fetchReasoningTrace(id: string): Promise<ReasoningTrace | undefined> {
+  if (!id) return undefined;
+  try {
+    const res = await fetch(`/e/${id}/reasoning_trace.json`, { cache: "no-store" });
+    if (!res.ok) return undefined;
+    const j = await res.json();
+    return j && typeof j === "object" && Array.isArray(j.nodes) && Array.isArray(j.edges)
+      ? (j as ReasoningTrace)
+      : undefined;
   } catch {
     return undefined;
   }

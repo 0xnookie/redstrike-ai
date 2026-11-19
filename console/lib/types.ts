@@ -318,6 +318,38 @@ export interface Diagnostics {
   runs?: DiagnosticsRun[];
 }
 
+// runtime/reasoning_trace.json — a persisted, entity-keyed lineage of HOW findings came to be
+// (schema owned by the producer: skills/_contract/reasoning_trace.schema.json). A graph of reasoning
+// steps — goal (objective) → intent (hypothesis) → fact (evidence) → finding — where finding nodes
+// CROSS-REFERENCE existing finding ids (finding_id) so the console can link trace → finding. Powers
+// the exploration graph's provenance overlay + the "Why this finding" lineage slice. Additive +
+// crash-safe: absent/partial trace never breaks the graph.
+export type TraceNodeKind = "goal" | "intent" | "fact" | "finding";
+export type TraceEdgeRel = "spawns" | "yields" | "proves" | "derived_from";
+export interface TraceNode {
+  id: string;
+  kind: TraceNodeKind;
+  label: string;
+  parent?: string | null;
+  finding_id?: string;        // the EXISTING finding id a fact/finding node cross-references
+  category?: string;
+  producer?: string;
+  evidence_ref?: string | null;
+  severity?: Severity;
+  status?: string;
+  accepted?: boolean;
+  ts?: string;
+  meta?: Record<string, unknown>;
+}
+export interface TraceEdge { id: string; source: string; target: string; rel: TraceEdgeRel; }
+export interface ReasoningTrace {
+  version?: number;
+  engagement?: string;
+  generated_at?: string;
+  nodes: TraceNode[];
+  edges: TraceEdge[];
+}
+
 // Per-engagement CVE intelligence (cve_intel.json from the cve-intelligence capability):
 // detected components mapped to version-matched CVEs, KEV/EPSS-prioritized (scripts/cve_prioritize.py).
 // Distinct from the global CveFeed above — this is THIS target's surface. Some runs emit the entry
