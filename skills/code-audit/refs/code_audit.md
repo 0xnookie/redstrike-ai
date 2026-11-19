@@ -18,7 +18,48 @@ You cannot judge authorization or business logic without a model of intent. Buil
   be gated (money movement, role change, data export, deploy, impersonation, file write/exec).
 Suggested `app_model.json` shape (object): `{ "entry_points": [{file,line,symbol,method,route,auth_expected}],
 "trust_boundaries": [...], "auth_model": {mechanism, role_repr, guard_sites:[...]}, "data_stores": [...],
-"privileged_ops": [{op, guarded_by, file, line}] }`.
+"privileged_ops": [{op, guarded_by, file, line}], "high_risk_files": ["path", {file, reason}] }`. The
+`high_risk_files` list is where you record files you deem high-risk during modeling (crypto, deserializer, auth
+middleware, raw-query builder) that no `source-audit` lead points at — so the surface inventory below folds them
+in too.
+
+## 1b. Inventory the FULL surface + close every element (completeness, not just per-lead) → surface ledger
+Per-LEAD closure (section 2) alone lets the audit finish having only looked at the leads `source-audit` happened
+to route — silently missing entry points / sinks / files no lead covered. That is the recall leak this step
+closes. REUSE the same surface-ledger mechanism the recon feeders use (`scripts/surface.py`), do not reinvent it:
+- **Enumerate** — after the app model, `python scripts/surface.py --plan --engagement <engagement>` reads
+  `app_model.json` (entry points, privileged ops, `high_risk_files`) + `source-audit/source_context.json`
+  (candidates `sa-*`, structural facts `sf-*`, chain candidates `scc-*`) and writes one ledger row per
+  element — kinds `entry-point` / `source-lead` / `high-risk-file`, all routed to the `code-audit` consumer. The
+  high-risk-file set is DERIVED from the leads/entry points, so it is bounded by the surface, not by repo size.
+  `--plan` is idempotent: re-run it whenever you add an entry point / high-risk file to `app_model.json` or find
+  new surface mid-audit — it preserves progress and appends only the new elements.
+- **Close each element** — as you finish reasoning about an element, mark it:
+  `scripts/surface.py --mark <id> --status tested --by code-audit --reason "<closure>: …"` where the closure is
+  `confirmed` / `ruled-out` / `open-proof-gap` (mirrors the `analysis.jsonl` closure), OR
+  `--mark <id> --status skipped --reason "<why not reasoned about>"` (e.g. generated/vendored code out of scope).
+  An element left `discovered` is one you never looked at — a **RECALL GAP**, not a skip.
+- **Gate before done** — `scripts/surface.py --validate --engagement <engagement> --routed-to code-audit --strict`
+  must pass (exit 0). The `--routed-to code-audit` slice means you gate only YOUR surface, so in a combined
+  grey+white-box engagement a sibling executor's still-pending black-box surface in the same shared ledger does
+  not block you (and vice-versa). The report-time engagement gate validates the WHOLE ledger strict.
+- **Honest coverage** — `--validate --json` reports a `coverage` figure (`pct` closed, `open_gaps`). Put that
+  figure in `report.md`. If the repo can't be fully covered in one pass, say so explicitly (coverage %, what's
+  pending) — never present partial coverage as complete.
+
+### Large-repo robustness (so a huge repo doesn't cause silent skips)
+A 29k-file monolith cannot be read end-to-end in one pass, and "ran out of budget" must never silently become
+"clean". Make enumeration systematic and reasoning risk-prioritized + chunked:
+- The surface ledger is the work-list: it enumerates a BOUNDED, de-duplicated set (entry points + routed leads +
+  their files), not every file — so even a massive repo yields a finite inventory to close.
+- Order by risk: reachable, auth-reachable, or taint-reachable entry points + leads first; then authz-sensitive
+  files (routes/guards/id-reads/mass-assign/writable/exec paths); then the rest. Close the ledger in that order.
+- Chunk the reasoning (per module / per entry-point cluster) and persist progress via `--mark` after each chunk,
+  so an interrupted run resumes from the ledger instead of restarting or silently dropping the tail.
+- If you genuinely cannot close every element, STOP and report partial coverage: the unclosed elements stay
+  `discovered` and the `--validate` gate surfaces them as RECALL GAPs — a truthful "partial" beats a false "clean".
+- Re-convergence: surface found mid-audit (a new entry point, a new sink, an internal host from an SSRF lead) is
+  appended to `app_model.json` / `reconvergence/inbox.jsonl` and re-planned, so the inventory grows to a fixpoint.
 
 ## 2. Inter-procedural, framework-aware taint (confirm/refute each lead) → `analysis.jsonl`
 A grep/taint scanner marks a sink "present" or "reachable" intra-file; it misses cross-file/cross-function flow,

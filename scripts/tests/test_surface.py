@@ -270,6 +270,135 @@ class LoadReconSurfaces(unittest.TestCase):
             self.assertTrue({"sink", "header", "form", "upload", "auth-flow"}.issubset(kinds), kinds)
 
 
+class LoadSourceSurfaces(unittest.TestCase):
+    """White-box / source surface: load_source_surfaces reads app_model.json (entry points + privileged
+    ops) and source_context.json (candidates + structural facts + chain candidates), enumerates EVERY one
+    plus a bounded set of high-risk files derived from them, all routed to the code-audit consumer — so a
+    code-audit run cannot silently finish having only looked at the leads source-audit happened to route."""
+
+    def _build(self, eng: pathlib.Path):
+        ca = eng / "code-audit"
+        ca.mkdir(parents=True)
+        (ca / "app_model.json").write_text(json.dumps({
+            "entry_points": [
+                {"file": "src/api.py", "line": 42, "symbol": "get_order", "method": "GET", "route": "/orders/{id}"},
+                {"file": "src/jobs.py", "line": 7, "symbol": "consume_queue", "kind": "queue-consumer"},
+            ],
+            "privileged_ops": [{"op": "role-change", "file": "src/admin.py", "line": 11, "guarded_by": "none"}],
+            "high_risk_files": ["src/crypto.py", {"file": "src/deserialize.py", "reason": "pickle load"}],
+        }), encoding="utf-8")
+        sa = eng / "source-audit"
+        sa.mkdir(parents=True)
+        (sa / "source_context.json").write_text(json.dumps({
+            "target": "t", "generated_at": "2026-01-01T00:00:00Z",
+            "candidates": [
+                {"id": "sa-001", "file": "src/db.py", "line": 88, "category": "sqli", "route": "sqli-inband"},
+                {"id": "sa-002", "file": "src/render.py", "line": 5, "category": "ssti", "route": "ssti"},
+            ],
+            "structural": [
+                {"id": "sf-001", "kind": "missing-ownership-check", "file": "src/api.py", "line": 42},
+                {"id": "sf-002", "kind": "route", "file": "src/web.py", "line": 3},
+            ],
+            "chain_candidates": [
+                {"id": "scc-001", "title": "IDOR + mass-assign -> privesc", "route_sequence": ["idor", "privesc"]},
+            ],
+        }), encoding="utf-8")
+
+    def test_enumerates_full_source_surface(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._build(eng)
+            items = sf.load_source_surfaces(eng)
+            by_kind = {}
+            for it in items:
+                by_kind.setdefault(it["kind"], set()).add(it["value"])
+            # every entry point (incl. a non-HTTP queue consumer)
+            self.assertTrue(any("get_order @ src/api.py:42" in v for v in by_kind["entry-point"]))
+            self.assertTrue(any("consume_queue @ src/jobs.py:7" in v for v in by_kind["entry-point"]))
+            # every source-audit lead: candidates + structural facts + chain candidate + privileged op
+            leads = by_kind["source-lead"]
+            self.assertTrue(any("sa-001" in v for v in leads))
+            self.assertTrue(any("sa-002" in v for v in leads))
+            self.assertTrue(any("sf-001 missing-ownership-check" in v for v in leads))
+            self.assertTrue(any("scc-001" in v for v in leads))
+            self.assertTrue(any("priv-op role-change" in v for v in leads))
+            # high-risk files derived from the surface (bounded by the leads, not the repo size)
+            self.assertIn("src/db.py", by_kind["high-risk-file"])
+            self.assertIn("src/api.py", by_kind["high-risk-file"])
+            self.assertIn("src/admin.py", by_kind["high-risk-file"])
+            # files code-audit itself flagged high-risk during modeling (string + {file,...} forms)
+            self.assertIn("src/crypto.py", by_kind["high-risk-file"])
+            self.assertIn("src/deserialize.py", by_kind["high-risk-file"])
+
+    def test_all_route_to_code_audit_and_plan_clean(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._build(eng)
+            items = sf.load_source_surfaces(eng)
+            good, bad = sf.partition_items(items)
+            self.assertEqual(bad, [])  # every item has a valid kind
+            led = sf.plan_from_items("demo", items)
+            for s in led["surfaces"]:
+                self.assertEqual(s["routed_to"], ["code-audit"])
+            # a freshly-planned source ledger is all-discovered -> a code-audit-scoped gap until closed
+            self.assertFalse(sf.validate(led, routed_to="code-audit")[0])
+
+    def test_source_plan_is_idempotent(self):
+        # stable ids: re-loading + re-merging the same artifacts adds nothing (progress-preserving).
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._build(eng)
+            items = sf.load_source_surfaces(eng)
+            led = sf.plan_from_items("demo", items)
+            merged = sf.merge_plan(led, sf.load_source_surfaces(eng))
+            self.assertEqual(merged["_last_merge_added"], 0)
+
+    def test_missing_artifacts_yield_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(sf.load_source_surfaces(pathlib.Path(d)), [])
+
+
+class WhiteBoxGating(unittest.TestCase):
+    """A white-box executor gates its OWN slice of a shared ledger (routed_to) and reports an honest
+    coverage figure, so partial coverage is explicit instead of a partial pass dressed up as complete."""
+
+    def _mixed(self):
+        return sf.plan_from_items("demo", [
+            {"kind": "param", "value": "q"},                               # black-box, a sibling owns it
+            {"kind": "entry-point", "value": "h @ app.py:1"},              # code-audit
+            {"kind": "source-lead", "value": "sa-001 sqli @ db.py:2"},     # code-audit
+        ])
+
+    def test_routed_scope_isolates_consumer(self):
+        led = self._mixed()
+        self.assertFalse(sf.validate(led)[0])                       # whole ledger fails (param untested)
+        ok, _l, msgs = sf.validate(led, routed_to="code-audit")
+        self.assertFalse(ok)                                        # code-audit has its own untested leads
+        self.assertTrue(all("param:" not in m for m in msgs))      # but NOT blamed for the sibling's param
+        for s in led["surfaces"]:
+            if "code-audit" in (s.get("routed_to") or []):
+                s["status"] = "tested"
+        self.assertTrue(sf.validate(led, routed_to="code-audit")[0])  # its slice is now closed
+        self.assertFalse(sf.validate(led)[0])                        # the param still fails the full gate
+
+    def test_coverage_pct_partial(self):
+        led = self._mixed()
+        for s in led["surfaces"]:
+            if s["kind"] == "entry-point":
+                s["status"] = "tested"
+        cov = sf.coverage_stats(led, routed_to="code-audit")
+        self.assertEqual(cov["total"], 2)
+        self.assertEqual(cov["closed"], 1)
+        self.assertEqual(cov["open_gaps"], 1)
+        self.assertEqual(cov["pct"], 50)
+
+    def test_surface_gaps_scoped(self):
+        led = self._mixed()
+        gaps = sf.surface_gaps(led, routed_to="code-audit")
+        self.assertTrue(gaps)
+        self.assertTrue(all(g["category"] == "code-audit" for g in gaps))
+
+
 class SchemaConformance(unittest.TestCase):
     def test_planned_ledger_matches_schema_keys(self):
         import json

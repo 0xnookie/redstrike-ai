@@ -4,6 +4,8 @@
 
 - [ ] A — App model
   - [ ] A.1 `app_model.json` valid, non-empty JSON object (entry points / boundaries / auth / data / privileged ops)
+- [ ] S — Surface inventory (completeness)
+  - [ ] S.1 engagement-level `../surface_ledger.json` present + schema-valid (the white-box surface was enumerated). Closure (every element tested/reasoned-skipped) is the `--routed-to code-audit --strict` gate verify.md enforces.
 - [ ] B — Analysis
   - [ ] B.1 `analysis.jsonl` each line valid JSON (MAY be empty when the repo has no candidates to trace)
 - [ ] C — Chains
@@ -27,6 +29,7 @@
   "skill": "code-audit",
   "artifacts": [
     { "id": "A.1", "path": "app_model.json", "type": "json" },
+    { "id": "S.1", "path": "../surface_ledger.json", "type": "json", "schema": "skills/_contract/surface_ledger.schema.json" },
     { "id": "B.1", "path": "analysis.jsonl", "type": "jsonl", "allow_empty": true },
     { "id": "C.1", "path": "chains.jsonl", "type": "jsonl", "allow_empty": true },
     { "id": "D.1", "path": "fuzz_targets.jsonl", "type": "jsonl", "allow_empty": true },

@@ -9,6 +9,11 @@
 ## Model
 - [ ] App model built: entry points, trust boundaries, auth/session model, data stores, privileged ops → app_model.json
 
+## Surface inventory (completeness — not just per-lead)
+- [ ] Full white-box surface enumerated into the surface ledger: EVERY entry point + EVERY source_context.json lead (candidate/structural/chain/priv-op) + EVERY high-risk file (`python scripts/surface.py --plan --engagement <engagement>`)
+- [ ] Large repo handled: risk-prioritized, chunked reasoning plan so size never causes a silent skip (no element dropped for scale)
+- [ ] Each surface element closed: marked `tested` (confirmed/ruled-out/open-proof-gap) OR `skipped` with an explicit reason — nothing silently untested (`surface.py --mark`)
+
 ## Reason (beyond grep)
 - [ ] Inter-procedural taint: each lead traced source→sink across files/functions; sanitizers/guards/auto-escape on the path named
 - [ ] Each lead closed confirmed / ruled-out / open-proof-gap (a grep hit with no traced path is REFUTED, not kept)
@@ -33,6 +38,11 @@
 - [ ] poc/ per finding (trace + PoC sketch / dynamic evidence)
 - [ ] report.md
 
+## Completeness gate + re-convergence
+- [ ] Surface found mid-audit folded in (app_model.json / reconvergence/inbox.jsonl) and re-planned — no un-routed mid-audit discovery
+- [ ] `python scripts/surface.py --validate --engagement <engagement> --routed-to code-audit --strict` passes — every entry point / lead / high-risk file `tested` or reasoned-`skipped`
+- [ ] Any remaining `discovered` element reported as an explicit RECALL GAP (partial coverage: coverage %, what's pending) — never a silent clean, never partial-as-complete
+
 ## Gates
 - [ ] /REVIEW SKILL (mechanical) passes
-- [ ] /VERIFY (semantic) — every finding accepted or rejected with reason
+- [ ] /VERIFY (semantic) — every finding accepted or rejected with reason; reviewer confirms surface-ledger closure (coverage rubric)
