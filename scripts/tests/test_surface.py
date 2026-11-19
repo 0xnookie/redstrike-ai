@@ -285,6 +285,17 @@ class LoadSourceSurfaces(unittest.TestCase):
                 {"file": "src/jobs.py", "line": 7, "symbol": "consume_queue", "kind": "queue-consumer"},
             ],
             "privileged_ops": [{"op": "role-change", "file": "src/admin.py", "line": 11, "guarded_by": "none"}],
+            "state_ops": [
+                {"op": "redeem-coupon", "invariant": "single-use", "file": "src/coupon.py", "line": 30,
+                 "concurrency_control": "none"},
+                {"op": "withdraw", "invariant": "balance-never-negative", "file": "src/wallet.py", "line": 70},
+            ],
+            "authz_routes": [
+                {"method": "POST", "route": "/api/admin/import", "required_privilege": "admin",
+                 "authz": "none", "file": "src/admin.py", "line": 11},
+                {"method": "GET", "route": "/api/orders/{id}", "required_privilege": "owner",
+                 "file": "src/api.py", "line": 42},
+            ],
             "high_risk_files": ["src/crypto.py", {"file": "src/deserialize.py", "reason": "pickle load"}],
         }), encoding="utf-8")
         sa = eng / "source-audit"
@@ -329,6 +340,28 @@ class LoadSourceSurfaces(unittest.TestCase):
             # files code-audit itself flagged high-risk during modeling (string + {file,...} forms)
             self.assertIn("src/crypto.py", by_kind["high-risk-file"])
             self.assertIn("src/deserialize.py", by_kind["high-risk-file"])
+
+    def test_enumerates_state_ops_and_authz_routes(self):
+        # the two first-class enumerated surfaces grep can't see: a state-changing op + its invariant,
+        # and a route x required-privilege cell — each a ledger row routed to code-audit.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._build(eng)
+            items = sf.load_source_surfaces(eng)
+            by_kind = {}
+            for it in items:
+                by_kind.setdefault(it["kind"], set()).add(it["value"])
+            # state-op carries the operation AND the invariant it must hold, at file:line
+            states = by_kind.get("state-op", set())
+            self.assertTrue(any("redeem-coupon [inv: single-use] @ src/coupon.py:30" in v for v in states), states)
+            self.assertTrue(any("withdraw [inv: balance-never-negative] @ src/wallet.py:70" in v for v in states))
+            # authz-route carries the method+route AND the required privilege (one matrix cell), at file:line
+            routes = by_kind.get("authz-route", set())
+            self.assertTrue(any("POST /api/admin/import [priv: admin] @ src/admin.py:11" in v for v in routes), routes)
+            self.assertTrue(any("GET /api/orders/{id} [priv: owner] @ src/api.py:42" in v for v in routes))
+            # their files fold into the bounded high-risk-file inventory too
+            self.assertIn("src/coupon.py", by_kind["high-risk-file"])
+            self.assertIn("src/wallet.py", by_kind["high-risk-file"])
 
     def test_all_route_to_code_audit_and_plan_clean(self):
         with tempfile.TemporaryDirectory() as d:

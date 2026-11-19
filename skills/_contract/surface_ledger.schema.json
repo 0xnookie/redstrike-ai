@@ -19,8 +19,8 @@
       "properties": {
         "id": { "type": "string", "description": "stable id (e.g. kind:hash-of-value)." },
         "kind": {
-          "enum": ["endpoint", "param", "identity", "form", "api-operation", "sink", "header", "upload", "auth-flow", "entry-point", "source-lead", "high-risk-file"],
-          "description": "what kind of surface element this is. The last three are the white-box / source-audit surface (entry point, source_context.json lead, high-risk file) the code-audit executor consumes."
+          "enum": ["endpoint", "param", "identity", "form", "api-operation", "sink", "header", "upload", "auth-flow", "entry-point", "source-lead", "high-risk-file", "state-op", "authz-route"],
+          "description": "what kind of surface element this is. The last five are the white-box / source-audit surface the code-audit executor consumes: entry-point, source_context.json lead, high-risk file, plus two FIRST-CLASS enumerated surfaces grep/taint cannot assert — state-op (a state-changing operation + the invariant it must hold, for the business-logic/concurrency TOCTOU pass) and authz-route (a route x its required-privilege cell, for the authorization-matrix pass)."
         },
         "value": { "type": "string", "description": "the element itself (path, param name, identity label, sink location, entry-point symbol@file:line, source-lead id, high-risk file path...)." },
         "discovered_by": { "type": "string", "description": "recon source that found it (host-discovery/content-discovery/js-analysis/authz-context...)." },

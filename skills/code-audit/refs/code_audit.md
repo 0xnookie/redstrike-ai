@@ -18,22 +18,30 @@ You cannot judge authorization or business logic without a model of intent. Buil
   be gated (money movement, role change, data export, deploy, impersonation, file write/exec).
 Suggested `app_model.json` shape (object): `{ "entry_points": [{file,line,symbol,method,route,auth_expected}],
 "trust_boundaries": [...], "auth_model": {mechanism, role_repr, guard_sites:[...]}, "data_stores": [...],
-"privileged_ops": [{op, guarded_by, file, line}], "high_risk_files": ["path", {file, reason}] }`. The
-`high_risk_files` list is where you record files you deem high-risk during modeling (crypto, deserializer, auth
-middleware, raw-query builder) that no `source-audit` lead points at — so the surface inventory below folds them
-in too.
+"privileged_ops": [{op, guarded_by, file, line}], "state_ops": [{op, invariant, file, line,
+concurrency_control}], "authz_routes": [{method, route, required_privilege, authz, file, line}],
+"high_risk_files": ["path", {file, reason}] }`. The `high_risk_files` list is where you record files you deem
+high-risk during modeling (crypto, deserializer, auth middleware, raw-query builder) that no `source-audit` lead
+points at — so the surface inventory below folds them in too. `state_ops` and `authz_routes` are the two
+FIRST-CLASS enumerated surfaces of sections 3a/3b — you fill them while modeling so the business-logic-invariant
+pass and the authorization-matrix pass each become an enumerated, gated work-list (not sink-driven leads).
 
 ## 1b. Inventory the FULL surface + close every element (completeness, not just per-lead) → surface ledger
 Per-LEAD closure (section 2) alone lets the audit finish having only looked at the leads `source-audit` happened
 to route — silently missing entry points / sinks / files no lead covered. That is the recall leak this step
 closes. REUSE the same surface-ledger mechanism the recon feeders use (`scripts/surface.py`), do not reinvent it:
 - **Enumerate** — after the app model, `python scripts/surface.py --plan --engagement <engagement>` reads
-  `app_model.json` (entry points, privileged ops, `high_risk_files`) + `source-audit/source_context.json`
-  (candidates `sa-*`, structural facts `sf-*`, chain candidates `scc-*`) and writes one ledger row per
-  element — kinds `entry-point` / `source-lead` / `high-risk-file`, all routed to the `code-audit` consumer. The
-  high-risk-file set is DERIVED from the leads/entry points, so it is bounded by the surface, not by repo size.
-  `--plan` is idempotent: re-run it whenever you add an entry point / high-risk file to `app_model.json` or find
-  new surface mid-audit — it preserves progress and appends only the new elements.
+  `app_model.json` (entry points, privileged ops, **`state_ops`**, **`authz_routes`**, `high_risk_files`) +
+  `source-audit/source_context.json` (candidates `sa-*`, structural facts `sf-*`, chain candidates `scc-*`) and
+  writes one ledger row per element — kinds `entry-point` / `source-lead` / `high-risk-file` / **`state-op`**
+  (a state-changing op + the invariant it must hold, §3a) / **`authz-route`** (a route × its required
+  privilege, §3b), all routed to the `code-audit` consumer. `state-op` and `authz-route` make the two
+  invariant/matrix passes FIRST-CLASS enumerated surfaces — gated and coverage-tracked exactly like a sink lead,
+  so a skipped invariant or an un-enumerated route is a visible RECALL GAP, not a silent miss (grep cannot see
+  "no lock" or "no authz annotation"). The high-risk-file set is DERIVED from the leads/entry points/state-ops/
+  authz-routes, so it is bounded by the surface, not by repo size. `--plan` is idempotent: re-run it whenever you
+  add an entry point / state-op / authz-route / high-risk file to `app_model.json` or find new surface
+  mid-audit — it preserves progress and appends only the new elements.
 - **Close each element** — as you finish reasoning about an element, mark it:
   `scripts/surface.py --mark <id> --status tested --by code-audit --reason "<closure>: …"` where the closure is
   `confirmed` / `ruled-out` / `open-proof-gap` (mirrors the `analysis.jsonl` closure), OR
@@ -103,6 +111,79 @@ open-proof-gap", confidence, runtime_guard_uncertainty, lead_ref}`.
   where concurrent requests break the invariant.
 - **Mass assignment** — a bind/merge of request body straight into a model/record with no allow-list, letting a
   client set fields it shouldn't (role, owner, price, flags). → confirm reachable sink + unguarded field set.
+
+## 3a. Business-logic & concurrency invariants (the "break an intended invariant" pass) → `state-op` surface
+Sections 2–3 are sink-driven: they start from a value flowing to a dangerous sink. The two sharpest logic bugs
+have NO sink and NO pattern — an unauthenticated redemption-limit check with no lock, a price re-trusted from the
+client — so grep/taint are blind to them. This pass is NOT lead-driven: you ENUMERATE the app's state-changing
+operations and, for each, the invariant it must hold, then try to break it. Record each as a `state_ops` row in
+`app_model.json` so it becomes an enumerated, gated `state-op` surface element (one ledger row to close), not a
+lucky find.
+- **Enumerate the state-changing operations.** Walk the entry points + privileged/data-store writes and list
+  every operation that MUTATES shared or valuable state: redeem / apply-coupon or voucher, checkout / pay /
+  refund, transfer / withdraw / top-up, place or cancel order, book / reserve / consume stock, register /
+  change-email, change-role / grant, vote / rate, increment a counter or quota, consume a one-time token
+  (reset / invite / OTP), finalize a workflow step. Each gets a `state_ops` row `{op, invariant, file, line,
+  concurrency_control}`.
+- **Name the invariant each MUST hold.** Pick from (at least): **single-use** (a token/coupon redeems once);
+  **redemption / usage limit** (≤ N uses per user/order/global); **quota** (≤ the plan/tier allowance); **stock**
+  (never oversell below 0); **price-integrity** (server-side price, total = Σ line items, no negative / rounding
+  gain); **ownership** (the actor owns the object it mutates); **idempotency** (a replay / double-submit does not
+  double-apply); **monotonic counter** (a sequence/balance only moves the intended direction, never negative).
+- **Try to break it — three recurring ways:**
+  1. **Check-then-act without a lock / atomic conditional update / unique constraint → TOCTOU / race.** The code
+     reads the current state (remaining uses, balance, stock), decides it is OK, then writes — with the read and
+     the write in separate statements/transactions and no row lock (`SELECT … FOR UPDATE`), no atomic
+     conditional update (`UPDATE … WHERE remaining > 0`), no unique constraint, no idempotency key. Concurrent
+     requests each pass the check before any writes land, so the invariant breaks (coupon redeemed N times, limit
+     exceeded, balance goes negative). The absence of the lock/atomic-update/constraint on the write path IS the
+     finding — confirm the window by reading the two code points, and demonstrate with the `race-condition` skill
+     (concurrent requests, before/after state, serial baseline does NOT reproduce). An UNAUTHENTICATED such
+     operation is worse — it needs no account to hammer.
+  2. **Double-spend / replay.** The same token / nonce / request can be submitted twice because it is not marked
+     consumed atomically with its effect (or not marked at all) — reset tokens, gift-card codes, idempotency-less
+     payment capture, one-time invites.
+  3. **Client-trusted value not re-derived server-side.** Price, total, discount %, quantity sign, user_id,
+     role, tier, `is_admin`, currency — taken from the request and used in the decision instead of being looked
+     up / recomputed from server state. Negative quantity, zero/negative price, a discount re-applied, a tier the
+     client named — each breaks the invariant with no "injection" anywhere.
+- **Close it** like any element: `confirmed` (the invariant is breakable — cite the check line + the write line +
+  the missing control) / `ruled-out` (a lock / atomic update / unique constraint / server-side re-derivation
+  holds it — cite it) / `open-proof-gap`. Then `surface.py --mark <state-op id> --status tested …`. A state-op
+  left `discovered` is a RECALL GAP — an invariant you never reasoned about.
+
+## 3b. Authorization matrix (two-identity + role-matrix reasoning) → `authz-route` surface
+Missing authorization is an ABSENCE — there is no annotation to grep for, and a central ACL backstop can hide a
+route that bypasses it. So build the matrix explicitly and enumerate it: every route/handler × the privilege it
+SHOULD require. Record each cell as an `authz_routes` row in `app_model.json` so it becomes a gated `authz-route`
+surface element — the matrix is now a work-list you must close, not a hope that a lead happened to cover the
+unguarded route.
+- **Enumerate every route/handler × its required privilege.** For each entry point, write the cell
+  `{method, route, required_privilege, authz, file, line}`: who is SUPPOSED to be able to call it (public /
+  authenticated-any / owner / role:X / admin), and WHERE the check that enforces that actually is (middleware /
+  decorator / attribute / per-handler / ORM or data-access-layer scope / **none**). Include framework/default-based ACL:
+  routes a framework guards by convention or by a default-deny list, and — critically — the routes that OPT OUT
+  of it or were never added to it.
+- **Flag the two absences that matter:**
+  1. **A state-changing or sensitive route with NO authz** (missing BFLA / function-level check) — a privileged
+     op reachable by a lower role (or unauthenticated) because the guard is absent, on the wrong route, or
+     opted-out. Cross-check `auth_model.guard_sites` and the framework's default ACL against each cell: a
+     sensitive cell whose `authz` resolves to nothing is the finding.
+  2. **A route that BYPASSES the central authz backstop.** Many frameworks enforce authorization at a choke
+     point — a data-access-layer write/read ACL, a policy middleware, a permission-checked service facade. A
+     handler that reaches the same effect by a DIFFERENT path — calling the underlying service/repository
+     directly, enqueuing a job, or issuing raw SQL — SKIPS that backstop and its ACL. Enumerate, for each
+     sensitive op, whether the handler goes THROUGH the choke point or AROUND it; an around-path with no local
+     guard is the finding (this is exactly the missing-ACL BFLA grep/taint can't see — the backstop makes the
+     code "look" protected).
+- **Two-identity + role-matrix reasoning.** Judge each cell against ≥2 identities (e.g. a low-priv user and the
+  resource owner / an admin): can identity A invoke a cell reserved for B? That difference, demonstrated, is the
+  BFLA/privesc PoC (hand the dynamic proof to `bola-bfla` / `privesc`; object-level ownership to `idor`). Keep
+  object-level (does A reach B's object) distinct from function-level (does A reach an admin FUNCTION at all).
+- **Close it:** `confirmed` (cite the route + the absent/bypassed guard + the two-identity reasoning) /
+  `ruled-out` (an effective guard covers the cell — cite its site) / `open-proof-gap`, then
+  `surface.py --mark <authz-route id> --status tested …`. An `authz-route` left `discovered` is a RECALL GAP — a
+  matrix cell you never checked.
 
 ## 4. Chaining confirmed weaknesses → `chains.jsonl`
 Compose CONFIRMED findings (not candidates) into higher-impact kill-chains, **each leg a confirmed finding**:

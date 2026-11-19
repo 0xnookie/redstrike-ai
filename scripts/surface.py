@@ -76,6 +76,11 @@ KIND_ROUTES = {
     "entry-point":   ["code-audit"],   # route/handler/CLI/job/queue-consumer/webhook from app_model.json
     "source-lead":   ["code-audit"],   # a source_context.json candidate / structural fact / chain candidate
     "high-risk-file": ["code-audit"],  # a file hosting attack surface (sink / entry point / authz-sensitive)
+    # two FIRST-CLASS enumerated white-box surfaces grep/taint cannot see (no pattern asserts "no lock" or
+    # "no authz annotation") — enumerated from the app model, each PROVEN by the code-audit executor:
+    "state-op":      ["code-audit"],   # a state-changing op + the invariant it must hold (single-use / limit /
+                                       #   quota / stock / price / ownership / idempotency) — TOCTOU/double-spend pass
+    "authz-route":   ["code-audit"],   # a route/handler x its required privilege (one authorization-matrix cell)
 }
 
 # The CLOSED set of surface kinds — identical to surface_ledger.schema.json $defs/surface/kind/enum.
@@ -448,11 +453,15 @@ def load_source_surfaces(eng: Path) -> list:
     """Enumerate the WHITE-BOX / source surface for a code-audit engagement (best-effort; missing = skipped).
 
     This is the source-access counterpart of load_recon_surfaces: it reads the two white-box artifacts
-      * <eng>/code-audit/app_model.json   — the app model (entry points + privileged ops)
+      * <eng>/code-audit/app_model.json   — the app model (entry points + privileged ops + state_ops +
+        authz_routes)
       * <eng>/source-audit/source_context.json — the routed candidate map (sinks/leads + structural facts
         + chain candidates)
-    and enumerates EVERY entry point, EVERY source-audit lead, and EVERY high-risk file (a file that hosts
-    any of that surface) so none can be silently skipped. Values carry the element's stable id / location so
+    and enumerates EVERY entry point, EVERY source-audit lead, EVERY high-risk file (a file that hosts any of
+    that surface), EVERY state-changing operation + the invariant it must hold (`state-op`), and EVERY route x
+    required-privilege cell (`authz-route`) — the last two being FIRST-CLASS enumerated surfaces grep cannot
+    assert ("no lock" / "no authz annotation") — so none can be silently skipped. Values carry the element's
+    stable id / location so
     the SAME element is one row across re-plans. All route to the `code-audit` consumer. The high-risk-file
     set is derived FROM the leads/entry points (not from the whole tree), so a huge repo (29k files) yields
     a bounded, risk-prioritized file inventory — never one row per repo file."""
@@ -487,6 +496,38 @@ def load_source_surfaces(eng: Path) -> list:
         op = po.get("op") or "privileged-op"
         add("source-lead", f"priv-op {op} @ {loc}" if loc else f"priv-op {op}", "code-audit:app-model")
         note_file(po.get("file"))
+    # --- state-changing operations + the invariant each must hold (business-logic / concurrency pass) ---
+    # A FIRST-CLASS enumerated surface: grep cannot assert "this check-then-act has no lock". The executor
+    # enumerates each state-changing op and its invariant (single-use / redemption-or-usage limit / quota /
+    # stock / price-integrity / ownership / idempotency / monotonic counter) into app_model.state_ops, so EACH
+    # is a ledger row to prove against TOCTOU / double-spend / a client-trusted value not re-derived server-side.
+    for so in am.get("state_ops", []) or []:
+        if not isinstance(so, dict):
+            add("state-op", so, "code-audit:app-model")
+            continue
+        loc = _loc(so.get("file"), so.get("line"))
+        op = so.get("op") or so.get("operation") or "state-op"
+        inv = so.get("invariant") or so.get("invariants") or "?"
+        add("state-op", f"{op} [inv: {inv}] @ {loc}" if loc else f"{op} [inv: {inv}]", "code-audit:app-model")
+        note_file(so.get("file"))
+    # --- authorization matrix: every route/handler x its required privilege (one cell each) ---
+    # A FIRST-CLASS enumerated surface: grep cannot assert "this route has NO authz annotation". The executor
+    # enumerates the route x required-privilege matrix (incl. framework/default-based ACL) into
+    # app_model.authz_routes, so EACH state-changing / sensitive cell is a ledger row to prove carries an
+    # effective guard — including a route that bypasses a central authz backstop (service / queue / raw SQL).
+    for ar in am.get("authz_routes", []) or []:
+        if not isinstance(ar, dict):
+            add("authz-route", ar, "code-audit:app-model")
+            continue
+        loc = _loc(ar.get("file"), ar.get("line"))
+        route = ar.get("route") or ar.get("path") or ar.get("handler") or "route"
+        method = (ar.get("method") or "").strip()
+        label = (f"{method} {route}").strip()
+        priv = (ar.get("required_privilege") or ar.get("privilege") or ar.get("required_role")
+                or ar.get("role") or "?")
+        add("authz-route", f"{label} [priv: {priv}] @ {loc}" if loc else f"{label} [priv: {priv}]",
+            "code-audit:app-model")
+        note_file(ar.get("file"))
     # files code-audit itself flags high-risk during modeling (crypto / deserializer / auth middleware)
     # that no source-audit lead points at — declared in app_model so a re-plan folds them in.
     for hrf in am.get("high_risk_files", []) or []:
@@ -654,6 +695,15 @@ def selftest() -> None:
     assert route_surface("source-lead") == ["code-audit"]
     assert route_surface("high-risk-file") == ["code-audit"]
     assert {"entry-point", "source-lead", "high-risk-file"}.issubset(VALID_KINDS)
+    # the two first-class enumerated white-box surfaces grep can't see (state-op / authz-route) route to
+    # the same code-audit consumer and are in the kind enum (drift-guarded against the schema above).
+    assert route_surface("state-op") == ["code-audit"]
+    assert route_surface("authz-route") == ["code-audit"]
+    assert {"state-op", "authz-route"}.issubset(VALID_KINDS)
+    _invp = plan_from_items("demo", [{"kind": "state-op", "value": "redeem [inv: single-use] @ c.py:9"},
+                                     {"kind": "authz-route", "value": "POST /admin/import [priv: admin] @ a.py:4"}])
+    assert all(s["routed_to"] == ["code-audit"] for s in _invp["surfaces"]) and len(_invp["surfaces"]) == 2
+    assert not validate(_invp, routed_to="code-audit")[0]  # fresh -> an untested code-audit gap until closed
 
     # a mixed ledger: an untested black-box param AND an untested source-lead. Scoping validate to
     # code-audit gates ONLY its slice (the param gap is a sibling's problem, not code-audit's).

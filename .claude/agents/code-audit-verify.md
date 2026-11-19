@@ -21,10 +21,16 @@ paths (`C:/...`) for engagement files.
    look clean while surface went untested. Resolve the engagement dir `ENG` (the parent of `OUT`) and run
    `python scripts/surface.py --validate --engagement ENG --routed-to code-audit --strict` (expect exit 0).
    - A MISSING/empty `ENG/surface_ledger.json`, or any `discovered` (untested, unskipped) `entry-point` /
-     `source-lead` / `high-risk-file`, is a **RECALL GAP**: set `rubric.coverage: fail` and bounce the run
-     (`needs-evidence`) with the gap(s) NAMED — the audit skipped surface with no reason. This holds even when
-     every reported finding is individually sound, and makes a clean/empty `findings.json` a FAIL unless the
-     ledger is closed.
+     `source-lead` / `high-risk-file` / `state-op` / `authz-route`, is a **RECALL GAP**: set
+     `rubric.coverage: fail` and bounce the run (`needs-evidence`) with the gap(s) NAMED — the audit skipped
+     surface with no reason. This holds even when every reported finding is individually sound, and makes a
+     clean/empty `findings.json` a FAIL unless the ledger is closed.
+   - **The business-logic-invariant pass (§3a) and the authorization-matrix pass (§3b) must have RUN.** A ledger
+     that enumerates sinks/entry-points but carries ZERO `state-op` rows against an app with state-changing
+     operations, or ZERO `authz-route` rows against an app with privileged/sensitive routes — with no stated
+     reason — is a RECALL GAP (`rubric.coverage: fail`): the two passes that catch an unauthenticated TOCTOU race
+     and a missing-ACL BFLA (the leads grep/taint are blind to) were skipped. A reasoned "enumerated, none
+     breakable/all guarded — cite why" closes them; a silent absence does not.
    - The ONLY clean exception is EXPLICIT partial coverage: the open gaps are reported in `report.md` with a
      coverage % and what's pending. Then `rubric.coverage: pass` with the partial figure noted (partial ≠
      complete; never let partial coverage pass as complete).
@@ -48,6 +54,9 @@ paths (`C:/...`) for engagement files.
      over-claim; a finding resting entirely on an unproven runtime assumption ⇒ `needs-evidence`.
    - **Chains from confirmed legs** — every `chains.jsonl` leg finding-id resolves to a confirmed `findings.json`
      entry; a padded/unconfirmed leg invalidates that chain.
+   - **Invariant + authz-matrix passes ran** — `state-op` and `authz-route` elements were ENUMERATED and closed
+     (§3a/§3b), not just sinks chased; their absence against an app that plainly has state-changing ops and
+     privileged routes is a `rubric.coverage: fail` (see step 3), independent of per-finding soundness.
    - **Benign + scope + approval** — any dynamic PoC/fuzz-harness run was benign, authorized/sandboxed, approved.
 6. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}`
    block into each finding (reviewer `code-audit-verify`), carrying the engagement-level `rubric.coverage`

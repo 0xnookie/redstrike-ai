@@ -16,10 +16,16 @@ authorized source repository.
    Model the app (entry points / trust boundaries / auth model / data stores / privileged ops → `app_model.json`).
    **Inventory the FULL white-box surface** into the engagement surface ledger —
    `python scripts/surface.py --plan --engagement <engagement>` enumerates every entry point (from
-   `app_model.json`) + every `source_context.json` lead + every high-risk file as surface routed to
-   `code-audit` (idempotent; re-run as you find more). Then
-   run inter-procedural framework-aware taint + non-grep class reasoning (authz / logic / crypto / races /
-   mass-assign) to CONFIRM or refute each lead by reading the real code path (`analysis.jsonl`), close each
+   `app_model.json`) + every `source_context.json` lead + every high-risk file + every state-changing
+   op×invariant (`state-op`, from `app_model.state_ops`) + every route×required-privilege cell (`authz-route`,
+   from `app_model.authz_routes`) as surface routed to `code-audit` (idempotent; re-run as you find more). Then
+   run inter-procedural framework-aware taint + non-grep class reasoning to CONFIRM or refute each lead by
+   reading the real code path (`analysis.jsonl`) — INCLUDING the two first-class enumerated passes grep/taint
+   can't see: the **business-logic & concurrency invariant** pass (§3a — break each `state-op`'s invariant:
+   check-then-act with no lock/atomic update/unique constraint = TOCTOU, double-spend, client-trusted values
+   re-derived server-side) and the **authorization matrix** pass (§3b — each `authz-route` cell: a
+   state-changing/sensitive route with NO authz, or one that bypasses a central authz backstop via a
+   service/queue/raw-SQL call) — close each
    candidate confirmed / ruled-out / open-proof-gap per `skills/_contract/counterevidence.md`, and as you close
    each surface element MARK it (`scripts/surface.py --mark <id> --status tested --by code-audit --reason "…"`,
    or `--status skipped --reason "…"` — nothing silently untested). Chain confirmed
@@ -35,7 +41,8 @@ authorized source repository.
 4. **Completeness gate + re-convergence:** fold in surface found mid-audit (append to `app_model.json` /
    `<engagement>/reconvergence/inbox.jsonl`, then re-run the `--plan`), then
    `python scripts/surface.py --validate --engagement <engagement> --routed-to code-audit --strict` → every
-   entry point / lead / high-risk file must be `tested` or reasoned-`skipped`. Any remaining `discovered`
+   entry point / lead / high-risk file / state-op / authz-route must be `tested` or reasoned-`skipped`. Any
+   remaining `discovered`
    element is a RECALL GAP — close it, or report it as EXPLICIT partial coverage (coverage %, what's pending) in
    `report.md`. Never present partial coverage as complete; never claim clean over untested surface.
 5. **Coverage:** copy your filled checklist into `<engagement>/code-audit/checklist.md`.

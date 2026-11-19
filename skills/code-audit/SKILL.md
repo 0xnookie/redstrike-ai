@@ -30,8 +30,9 @@ honest coverage figure. DONE = `checklist.md` `- [x]` · `review.md` PASS · the
 - **A full surface inventory, every element closed** — the completeness guarantee. Per-LEAD closure alone lets
   the audit finish having only looked at the leads `source-audit` happened to route, silently missing entry
   points / sinks / files no lead covered. So enumerate the WHOLE white-box surface — EVERY entry point, EVERY
-  `source_context.json` lead (candidate + structural fact + chain candidate + privileged op), and EVERY
-  high-risk file — into the engagement **surface ledger** (`scripts/surface.py --plan`, reusing the same
+  `source_context.json` lead (candidate + structural fact + chain candidate + privileged op), EVERY high-risk
+  file, EVERY state-changing op×invariant (`state-op`, §3a) and EVERY route×required-privilege cell
+  (`authz-route`, §3b) — into the engagement **surface ledger** (`scripts/surface.py --plan`, reusing the same
   mechanism recon feeders use), and drive each element to `tested` (= closed `confirmed/ruled-out/
   open-proof-gap`) or `skipped` with an explicit reason. A surface element discovered but never looked at (and
   not skipped with a reason) is a **RECALL GAP**, surfaced honestly — never a silent clean.
@@ -68,11 +69,11 @@ do not have; never dilute a genuinely traced, demonstrable finding into a mere f
 ## Steps  (action · tool · output)
 1. Resolve repo (`scope.source.local_path`, default `engagements/<id>/source/`) + RoE/approval gate · `roe-gate.md` · `logs/`
 2. Model the app: entry points · trust boundaries · auth/session model · data stores · privileged ops (+ any `high_risk_files` you flag) · read + `refs/code_audit.md` · `app_model.json`
-3. **Surface inventory** — enumerate the FULL white-box surface (every entry point + every `source_context.json` lead + every high-risk file) into the engagement surface ledger · `python scripts/surface.py --plan --engagement <engagement>` (idempotent; reads `app_model.json` + `source-audit/source_context.json`) · `../surface_ledger.json`
+3. **Surface inventory** — enumerate the FULL white-box surface (every entry point + every `source_context.json` lead + every high-risk file + every state-changing op×invariant `state-op` + every route×required-privilege `authz-route`) into the engagement surface ledger · `python scripts/surface.py --plan --engagement <engagement>` (idempotent; reads `app_model.json` incl. `state_ops`/`authz_routes` + `source-audit/source_context.json`) · `../surface_ledger.json`
 4. Ingest `source-audit/source_context.json` leads (candidates + `chain_candidates[]` + `structural[]`) · `jq` · (into analysis)
 5. **Risk-prioritized, chunked plan** — order the surface by risk (reachable entry points + taint-reachable leads + authz-sensitive files first) and, for a large repo, split into bounded reasoning chunks so no element is skipped for size · `refs/code_audit.md` · `logs/`
 6. Inter-procedural, framework-aware taint — trace each lead source→sink across files/functions; name every sanitizer/guard/auto-escape on the path; confirm or REFUTE · code reading + `refs/code_audit.md` · `analysis.jsonl`
-7. Reason about non-grep classes (authz object/function-level, logic invariants, insecure defaults, crypto/deser misuse, SSRF, traversal, injection, races, mass assignment) against the app model · reasoning · `analysis.jsonl`
+7. Reason about non-grep classes (authz object/function-level, logic invariants, insecure defaults, crypto/deser misuse, SSRF, traversal, injection, races, mass assignment) against the app model — INCLUDING the two enumerated-surface passes: **business-logic & concurrency invariants** (§3a — break each `state-op`'s invariant: check-then-act without a lock/atomic update/unique constraint = TOCTOU, double-spend, client-trusted value) and the **authorization matrix** (§3b — each `authz-route` cell: a state-changing/sensitive route with NO authz, or one bypassing a central authz backstop) · reasoning · `analysis.jsonl`
 8. Counterevidence pass — close each candidate `confirmed / ruled-out / open-proof-gap` (negative control where feasible) · `_contract/counterevidence.md` · `analysis.jsonl`
 9. **Mark each surface element** as you close it — `surface.py --mark <id> --status tested --by code-audit --reason "<closure>: …"` (confirmed/ruled-out/open-proof-gap), or `--status skipped --reason "<why not reasoned-about>"` · `scripts/surface.py` · `../surface_ledger.json`
 10. (Approval) Demonstrate — write the PoC sketch, or run a benign dynamic PoC against an authorized/sandboxed instance · harness · `poc/<id>/`

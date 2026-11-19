@@ -10,7 +10,7 @@
 - [ ] App model built: entry points, trust boundaries, auth/session model, data stores, privileged ops → app_model.json
 
 ## Surface inventory (completeness — not just per-lead)
-- [ ] Full white-box surface enumerated into the surface ledger: EVERY entry point + EVERY source_context.json lead (candidate/structural/chain/priv-op) + EVERY high-risk file (`python scripts/surface.py --plan --engagement <engagement>`)
+- [ ] Full white-box surface enumerated into the surface ledger: EVERY entry point + EVERY source_context.json lead (candidate/structural/chain/priv-op) + EVERY high-risk file + EVERY state-changing op×invariant (`state-op`, from app_model.state_ops) + EVERY route×required-privilege cell (`authz-route`, from app_model.authz_routes) (`python scripts/surface.py --plan --engagement <engagement>`)
 - [ ] Large repo handled: risk-prioritized, chunked reasoning plan so size never causes a silent skip (no element dropped for scale)
 - [ ] Each surface element closed: marked `tested` (confirmed/ruled-out/open-proof-gap) OR `skipped` with an explicit reason — nothing silently untested (`surface.py --mark`)
 
@@ -18,6 +18,8 @@
 - [ ] Inter-procedural taint: each lead traced source→sink across files/functions; sanitizers/guards/auto-escape on the path named
 - [ ] Each lead closed confirmed / ruled-out / open-proof-gap (a grep hit with no traced path is REFUTED, not kept)
 - [ ] Non-grep classes reasoned vs the app model: authz (object + function-level), logic invariants, insecure defaults, crypto/deser misuse, SSRF, path traversal, injection, race conditions, mass assignment
+- [ ] **Business-logic-invariant pass ran (§3a):** state-changing ops enumerated into app_model.state_ops, each with the invariant it must hold (single-use/limit/quota/stock/price/ownership/idempotency), checked for check-then-act-without-lock (TOCTOU/race), double-spend, and client-trusted values re-derived server-side — every `state-op` element closed (no state-op left `discovered`)
+- [ ] **Authorization-matrix pass ran (§3b):** every route/handler × its required privilege enumerated into app_model.authz_routes (incl. framework/default ACL), flagging any state-changing/sensitive route with NO authz AND any route that bypasses a central authz backstop (service/queue/raw-SQL around the framework ACL), via two-identity + role-matrix reasoning — every `authz-route` element closed (no authz-route left `discovered`)
 - [ ] Counterevidence pass run (negative control where feasible); runtime-guard uncertainty recorded per candidate
 
 ## Demonstrate (white-box evidence standard)
@@ -40,7 +42,7 @@
 
 ## Completeness gate + re-convergence
 - [ ] Surface found mid-audit folded in (app_model.json / reconvergence/inbox.jsonl) and re-planned — no un-routed mid-audit discovery
-- [ ] `python scripts/surface.py --validate --engagement <engagement> --routed-to code-audit --strict` passes — every entry point / lead / high-risk file `tested` or reasoned-`skipped`
+- [ ] `python scripts/surface.py --validate --engagement <engagement> --routed-to code-audit --strict` passes — every entry point / lead / high-risk file / state-op / authz-route `tested` or reasoned-`skipped`
 - [ ] Any remaining `discovered` element reported as an explicit RECALL GAP (partial coverage: coverage %, what's pending) — never a silent clean, never partial-as-complete
 
 ## Gates

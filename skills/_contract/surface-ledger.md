@@ -24,7 +24,14 @@ reads `code-audit/app_model.json` + `source-audit/source_context.json` and enume
 - `source-lead` — a `source_context.json` candidate (`sa-*`) / structural fact (`sf-*`) / chain candidate
   (`scc-*`) / privileged op;
 - `high-risk-file` — a file hosting any of that surface (derived from the leads/entry points, so it is bounded
-  by the surface, not by repo size — a 29k-file repo still yields a finite inventory).
+  by the surface, not by repo size — a 29k-file repo still yields a finite inventory);
+- `state-op` — a state-changing operation + the invariant it must hold (single-use / limit / quota / stock /
+  price-integrity / ownership / idempotency), enumerated into `app_model.state_ops`; the business-logic &
+  concurrency pass (check-then-act without a lock = TOCTOU, double-spend, client-trusted value). A FIRST-CLASS
+  enumerated surface grep can't see ("no lock" is not a pattern);
+- `authz-route` — a route/handler × its required privilege (one authorization-matrix cell), enumerated into
+  `app_model.authz_routes`; flags a state-changing/sensitive route with NO authz, or one that bypasses a central
+  authz backstop. A FIRST-CLASS enumerated surface grep can't see ("no authz annotation" is an absence).
 `code-audit` closes each (`--mark … --status tested --reason "<confirmed|ruled-out|open-proof-gap>: …"`, or a
 reasoned `skipped`) and gates its OWN slice with `--validate --routed-to code-audit --strict`, so in a combined
 grey+white-box engagement it isn't blocked by a sibling's pending black-box surface in the same shared ledger.
