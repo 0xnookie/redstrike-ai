@@ -688,6 +688,23 @@
       "notes": "ORPHAN-NOW-WIRED: route when a manifest/lockfile (incl. recovered backups) is found"
     },
     {
+      "id": "code-audit",
+      "name": "White-box code audit",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "code-audit"
+      ],
+      "baseline": false,
+      "triggers": [
+        "source:available"
+      ],
+      "skip_reason": "no authorized source access (white-box) granted",
+      "notes": "white-box executor: proves source-audit leads by inter-procedural reasoning (not grep) + source-informed fuzz-target hand-off to fuzzing; runs after source-audit when scope.source is present"
+    },
+    {
       "id": "cve-intelligence",
       "name": "Component -> CVE mapping",
       "owasp": "A06",

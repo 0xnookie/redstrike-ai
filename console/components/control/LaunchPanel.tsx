@@ -4,14 +4,14 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Rocket, Plus, FolderOpen, ShieldCheck, ShieldQuestion, Zap, Loader2, Square,
-  ChevronDown, Gauge, Bot,
+  ChevronDown, Gauge, Bot, GitBranch,
 } from "lucide-react";
 import { useControl } from "./ControlProvider";
 import { Panel, PanelHeader, PanelBody, Pill, Select } from "@/components/ui/primitives";
 import { cx } from "@/lib/format";
 import { useToast } from "@/components/ui/Toast";
 
-type Mode = "existing" | "new";
+type Mode = "existing" | "new" | "audit";
 type Depth = "quick" | "standard" | "deep";
 
 // Depth presets — pick an intent instead of hand-tuning the run ceilings.
@@ -59,7 +59,7 @@ function Seg<T extends string>({
 }
 
 export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLaunched?: () => void } = {}) {
-  const { engagements, activeId, setActiveId, running, busy, doInit, doRun, doRunFor, doStop, auth, lastError } = useControl();
+  const { engagements, activeId, setActiveId, running, busy, doInit, doAudit, doRun, doRunFor, doStop, auth, lastError } = useControl();
   const toast = useToast();
   const [mode, setMode] = useState<Mode>(engagements.length ? "existing" : "new");
 
@@ -70,6 +70,10 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
   const [cidrs, setCidrs] = useState("");
   const [windowDays, setWindowDays] = useState("");
   const [confirm, setConfirm] = useState(false);
+
+  // white-box source audit (→ redstrike audit <repo_url>)
+  const [repoUrl, setRepoUrl] = useState("");
+  const [branch, setBranch] = useState("");
 
   // run settings (shared by both modes → redstrike run)
   const [depth, setDepthState] = useState<Depth>("standard");
@@ -141,7 +145,31 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
     if (ok) { toast(`Run launched on ${activeId}`); onLaunched?.(); }
   };
 
+  // Audit a repository: the SAME authorization gate (confirm) applies; the plane clones + scaffolds
+  // a source-granted engagement and launches it. We adopt the launched engagement id as active.
+  const auditBody = () => ({
+    repo_url: repoUrl.trim(),
+    authorized_by: authorizedBy.trim(),
+    confirm_authorization: confirm,
+    ...(branch.trim() ? { branch: branch.trim() } : {}),
+    ...(client.trim() ? { client: client.trim() } : {}),
+    ...(windowDays ? { window_days: parseInt(windowDays, 10) } : {}),
+    ...runConfig(),
+  });
+
+  const auditRepo = async () => {
+    const r = await doAudit(auditBody());
+    if (r?.ok) {
+      const id = r.engagement || "";
+      setMode("existing");
+      if (id) setActiveId(id);
+      toast(id ? `Source audit launched on ${id}` : "Source engagement scaffolded");
+      onLaunched?.();
+    }
+  };
+
   const canInit = client.trim() && toList(domains).length > 0 && authorizedBy.trim() && confirm;
+  const canAudit = repoUrl.trim() && authorizedBy.trim() && confirm;
   const canRun = !!activeId && !running;
   const modelReady = !auth || Object.values(auth.providers).some((p) => p.connected);
 
@@ -229,9 +257,14 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
   const ghostBtn =
     "inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3.5 text-sm font-medium text-fg transition hover:border-fg/30";
 
+  const MODES: { m: Mode; label: string; icon: LucideIcon }[] = [
+    { m: "existing", label: "Run existing", icon: FolderOpen },
+    { m: "new", label: "New engagement", icon: Plus },
+    { m: "audit", label: "Audit a repository", icon: GitBranch },
+  ];
   const modeToggle = (
-    <div className="inline-flex rounded-lg border border-line bg-card2 p-0.5">
-      {(["existing", "new"] as Mode[]).map((m) => (
+    <div className="inline-flex flex-wrap rounded-lg border border-line bg-card2 p-0.5">
+      {MODES.map(({ m, label, icon: Icon }) => (
         <button
           key={m}
           onClick={() => setMode(m)}
@@ -240,8 +273,8 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
             mode === m ? "bg-brand text-brand-fg" : "text-muted hover:text-fg",
           )}
         >
-          {m === "existing" ? <FolderOpen size={13} /> : <Plus size={13} />}
-          {m === "existing" ? "Run existing" : "New engagement"}
+          <Icon size={13} />
+          {label}
         </button>
       ))}
     </div>
@@ -282,6 +315,41 @@ export function LaunchPanel({ bare = false, onLaunched }: { bare?: boolean; onLa
           </button>
           <button onClick={() => void createOnly()} disabled={!canInit || busy} className={cx(ghostBtn, (!canInit || busy) && "cursor-not-allowed opacity-60")}>
             <Plus size={14} /> Create only
+          </button>
+        </div>
+        {lastError && <p className="text-xs text-rose-400">{lastError}</p>}
+      </div>
+    ) : mode === "audit" ? (
+      /* ---------- audit a repository: paste a URL → white-box source audit ---------- */
+      <div className="space-y-3.5">
+        <Field label="Repository URL" hint="http(s):// or git:// — cloned read-only, no code is executed">
+          <input className={inputCls} value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://example.com/acme/payments.git" />
+        </Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Branch" hint="optional">
+            <input className={inputCls} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="default branch" />
+          </Field>
+          <Field label="Authorized by">
+            <input className={inputCls} value={authorizedBy} onChange={(e) => setAuthorizedBy(e.target.value)} placeholder="appsec@acme / auth-ref" />
+          </Field>
+        </div>
+
+        {runSettings(false)}
+
+        <label className="flex items-start gap-2.5 rounded-lg border border-line bg-card2 p-3">
+          <input type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} className="mt-0.5 h-4 w-4 accent-brand" />
+          <span className="flex items-center gap-1.5 text-xs text-muted">
+            <ShieldCheck size={14} className="shrink-0 text-emerald-400" />
+            I confirm written authorization to audit this source is on file (mirrors{" "}
+            <code className="rounded bg-card px-1 py-0.5 text-[10px]">--i-confirm-authorization</code>).
+          </span>
+        </label>
+
+        {modelHint}
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button onClick={() => void auditRepo()} disabled={!canAudit || busy} className={cx(primaryBtn, (!canAudit || busy) && "cursor-not-allowed opacity-60")}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <GitBranch size={14} />} Clone &amp; audit {supervise ? "supervised" : "autonomous"}
           </button>
         </div>
         {lastError && <p className="text-xs text-rose-400">{lastError}</p>}

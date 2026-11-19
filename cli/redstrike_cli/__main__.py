@@ -12,7 +12,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, reasoning_trace, runloop, ui
+from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, reasoning_trace, runloop, source_audit, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import scope as scopemod
@@ -233,6 +233,108 @@ def cmd_init(args, repo: Path) -> int:
     print()
     print(ui.info(f"review scope.yaml, then: redstrike run {eng_dir.name}"))
     return 0
+
+
+def cmd_audit(args, repo: Path) -> int:
+    """Paste a repo URL → a white-box source-audit engagement. Clone the repo (shallow, untrusted —
+    no code executed) into engagements/<id>/source/, scaffold a source-granted scope.yaml carrying
+    the shared `source:` block + the authorization record, then launch the run the SAME way
+    `redstrike run` does (unless --no-launch). Mirrors `init`'s authorization gate."""
+    if not args.no_banner:
+        ui.print_banner("white-box source audit")
+
+    # 1) Validate/normalize the URL up front — fail before any prompt or filesystem work.
+    try:
+        url = source_audit.normalize_url(args.repo_url)
+    except ValueError as e:
+        print(ui.err(f"invalid repository URL: {e}"))
+        return 2
+
+    # 2) Authorization gate (same assertion the init flow records).
+    authorized_by = args.authorized_by
+    confirmed = args.i_confirm_authorization
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if interactive and not authorized_by:
+        print(ui.rule("authorization & scope intake"))
+        authorized_by = _ask("  authorized_by (contact + written-auth reference): ")
+    if not authorized_by:
+        print(ui.err("missing --authorized-by (who authorized this source audit)"))
+        return 2
+    if not confirmed:
+        if interactive:
+            ans = _ask(
+                "\n  Confirm: written authorization to audit this source is on file and the window is valid? [y/N] "
+            ).lower()
+            confirmed = ans in ("y", "yes")
+        if not confirmed:
+            print(ui.err("authorization NOT confirmed — refusing to clone/scaffold (pass --i-confirm-authorization)."))
+            return 2
+
+    # 3) Resolve the engagement id + dir; refuse to clobber an existing one unless --force.
+    client = args.client or source_audit.repo_name_from_url(url)
+    eid = engagement.engagement_id(client)
+    eng_dir = repo / "engagements" / eid
+    source_dir = eng_dir / "source"
+    if (eng_dir / "scope.yaml").exists() and not args.force:
+        print(ui.err(f"engagement already exists: {eng_dir.relative_to(repo)} (use --force to overwrite)"))
+        return 1
+
+    # 4) Clone the (untrusted) repo. Only this invocation's fresh artifacts are cleaned up on failure.
+    created_dir = not eng_dir.exists()
+    if args.force and source_dir.exists():
+        import shutil as _shutil
+        _shutil.rmtree(source_dir, ignore_errors=True)
+    eng_dir.mkdir(parents=True, exist_ok=True)
+    print(ui.info(f"cloning {url} → {source_dir.relative_to(repo)}  (shallow · untrusted · no code executed)…"))
+    try:
+        info = source_audit.clone(url, source_dir, branch=args.branch, timeout=args.clone_timeout)
+    except source_audit.CloneError as e:
+        # Surface the failure (never a silent no-op) and remove only what this run created.
+        print(ui.err(f"clone failed: {e}"))
+        import shutil as _shutil
+        if created_dir:
+            _shutil.rmtree(eng_dir, ignore_errors=True)
+        else:
+            _shutil.rmtree(source_dir, ignore_errors=True)
+        return 1
+    print(ui.ok(f"cloned · commit {info['commit'][:12]} · branch {info['branch'] or '(detached)'}"))
+
+    # 5) Scaffold the source-granted scope.yaml. The repo URL is recorded as the in-scope target so
+    #    the shared launch gate (authorization + a target + a window) is satisfied unchanged.
+    source_block = source_audit.build_source_block(url, "source/", info["commit"], info["branch"])
+    fields = engagement.build_fields(
+        client=client,
+        authorized_by=authorized_by,
+        domains=[],
+        urls=[url],
+        window=engagement.default_window(args.window_days),
+        source=source_block,
+        notes="White-box source audit of the cloned repository. Written authorization on file before the window opens.",
+    )
+    try:
+        engagement.scaffold(repo, fields, operator=_operator(), force=args.force)
+    except FileExistsError as e:
+        print(ui.err(str(e)))
+        import shutil as _shutil
+        # Don't leave this run's clone behind to wedge the next `redstrike audit` of the same repo.
+        _shutil.rmtree(eng_dir if created_dir else source_dir, ignore_errors=True)
+        return 1
+    print(ui.ok(f"source-granted engagement scaffolded: {eng_dir.relative_to(repo)}"))
+    print(ui.kv("scope", str((eng_dir / "scope.yaml").relative_to(repo))))
+    print(ui.kv("authz", authorized_by))
+    print(ui.kv("source", f"{url} @ {info['commit'][:12]} ({info['branch'] or 'detached'})"))
+    print(ui.kv("local", str(source_dir.relative_to(repo))))
+    print(f"engagement_id={eid}")   # machine-readable id for the control plane (plain, no ANSI)
+
+    if args.no_launch:
+        print()
+        print(ui.info(f"review scope.yaml, then: redstrike run {eid}"))
+        return 0
+
+    # 6) Launch via the SAME mechanism as `redstrike run` (interactive gated, or --autonomous).
+    print()
+    args.engagement = eid
+    return cmd_run(args, repo)
 
 
 def _console_requested(args) -> bool:
@@ -762,6 +864,35 @@ def build_parser() -> argparse.ArgumentParser:
                    help="assert written authorization is on file (required non-interactively)")
     i.add_argument("--force", action="store_true", help="overwrite an existing scope.yaml")
 
+    au = sub.add_parser("audit",
+                        help="clone a repo URL into a white-box source-audit engagement, then launch it")
+    au.add_argument("repo_url", help="http(s):// or git:// repository URL to audit")
+    au.add_argument("--client", help="engagement client/name (default: derived from the repo URL)")
+    au.add_argument("--authorized-by", help="who authorized this source audit (contact + written-auth ref)")
+    au.add_argument("--branch", help="branch/tag to check out (default: the repo's default branch)")
+    au.add_argument("--window-days", type=int, default=14)
+    au.add_argument("--clone-timeout", type=int, default=source_audit.DEFAULT_TIMEOUT,
+                    help=f"abort the clone after N seconds (default {source_audit.DEFAULT_TIMEOUT})")
+    au.add_argument("--i-confirm-authorization", action="store_true",
+                    help="assert written authorization is on file (required non-interactively)")
+    au.add_argument("--force", action="store_true", help="overwrite an existing engagement of the same id")
+    au.add_argument("--no-launch", action="store_true",
+                    help="clone + scaffold only; do not launch the run (print the `run` command instead)")
+    # run-forwarding flags (audit delegates to the run path after scaffolding — mirror `run`)
+    au.add_argument("--dry-run", action="store_true", help="prepare + print the argv; do not launch")
+    au.add_argument("--permission-mode", default="default", choices=["default", "plan", "acceptEdits"])
+    au.add_argument("--prompt", help="override the initial prompt")
+    au.add_argument("--autonomous", "-n", action="store_true",
+                    help="headless unattended run (claude -p, dontAsk + allowlist, budget/turn capped)")
+    au.add_argument("--allow", action="append", metavar="RULE",
+                    help="autonomous: add an allowlist entry, e.g. --allow 'Bash(grep *)' or --allow Bash")
+    au.add_argument("--max-turns", type=int, default=200, help="autonomous: hard turn cap (default 200)")
+    au.add_argument("--max-budget-usd", type=float, default=20.0, help="autonomous: USD budget cap (default 20)")
+    au.add_argument("--resume", action="store_true", help="autonomous: resume the engagement's stored session")
+    au.add_argument("--console", action="store_true",
+                    help="when the run finishes, bring up the web console over engagements/")
+    au.add_argument("--console-port", type=int, default=8787, help="port for --console (default 8787)")
+
     r = sub.add_parser("run", help="launch the engagement (interactive gated, or --autonomous)")
     r.add_argument("engagement", help="engagement id or path")
     r.add_argument("--dry-run", action="store_true", help="prepare + print the argv; do not launch")
@@ -824,6 +955,7 @@ _DISPATCH = {
     "doctor": cmd_doctor,
     "install": cmd_install,
     "init": cmd_init,
+    "audit": cmd_audit,
     "run": cmd_run,
     "console": cmd_console,
     "verify": cmd_verify,

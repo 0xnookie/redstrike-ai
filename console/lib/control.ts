@@ -48,6 +48,19 @@ export interface RunBody {
   resume?: boolean;
 }
 
+// Paste a repo URL → a white-box source-audit engagement: the control plane clones the repo
+// (shallow, untrusted — no code executed), scaffolds a source-granted scope.yaml, and launches
+// the autonomous run. Carries the SAME authorization assertion the init flow records
+// (confirm_authorization mirrors --i-confirm-authorization) plus the run ceilings.
+export interface AuditBody extends RunBody {
+  repo_url: string;
+  authorized_by: string;
+  confirm_authorization: boolean;
+  branch?: string;
+  client?: string;
+  window_days?: number;
+}
+
 // Add/remove a test-account credential. On ADD a secret is REQUIRED (one of
 // password / token / cookie / headers) — the raw secret is written only to the
 // engagement's gitignored runtime/creds.json; a redacted projection lands in
@@ -178,6 +191,11 @@ export const getStatus = (token: string) => request<ControlStatus>("/api/status"
 
 export const initEngagement = (token: string, body: InitBody) =>
   request<CliResult>("/api/engagements", token, { method: "POST", body: JSON.stringify(body) });
+
+// Clone + scaffold a white-box source engagement from a repo URL, then launch it. The plane
+// returns the launched run's { ok, pid, engagement } (same shape a run launch returns).
+export const auditEngagement = (token: string, body: AuditBody) =>
+  request<CliResult>("/api/engagements/audit", token, { method: "POST", body: JSON.stringify(body) });
 
 export const runEngagement = (token: string, id: string, body: RunBody) =>
   request<CliResult>(`/api/engagements/${encodeURIComponent(id)}/run`, token, { method: "POST", body: JSON.stringify(body) });

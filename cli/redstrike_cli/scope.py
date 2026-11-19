@@ -53,7 +53,7 @@ def build_projection(scope_yaml: dict) -> dict:
     out = scope_yaml.get("out_of_scope", {}) or {}
     win = scope_yaml.get("window", {}) or {}
     oob = scope_yaml.get("oob", {}) or {}
-    return {
+    proj = {
         "engagement": str(scope_yaml.get("engagement", "")),
         "authorized_by": str(scope_yaml.get("authorized_by", "")),
         "window": {"start": _to_iso(win.get("start")), "end": _to_iso(win.get("end"))},
@@ -72,6 +72,18 @@ def build_projection(scope_yaml: dict) -> dict:
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "source": "scope.yaml",
     }
+    # White-box source audit: carry the `source:` block into the runtime projection so the engine
+    # (and the console's served scope.json) sees the source grant. Keyed `source_repo` so it never
+    # collides with the existing `source: "scope.yaml"` provenance string above.
+    src = scope_yaml.get("source")
+    if isinstance(src, dict) and src:
+        proj["source_repo"] = {
+            "repo_url": str(src.get("repo_url", "")),
+            "local_path": str(src.get("local_path", "")),
+            "commit": str(src.get("commit", "")),
+            "branch": str(src.get("branch", "")),
+        }
+    return proj
 
 
 def derive_scope_json(scope_yaml_path: str | Path, out_json_path: str | Path) -> dict:

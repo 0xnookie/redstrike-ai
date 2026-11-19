@@ -46,9 +46,10 @@ def build_fields(
     oob: str = "",
     window: tuple[str, str] | None = None,
     notes: str | None = None,
+    source: dict | None = None,
     date: _dt.date | None = None,
 ) -> dict:
-    return {
+    fields = {
         "engagement": engagement_id(client, date),
         "authorized_by": authorized_by,
         "window": dict(zip(("start", "end"), window or default_window())),
@@ -65,6 +66,12 @@ def build_fields(
         "oob": {"collaborator": oob or ""},
         "notes": notes or "Written authorization on file before the window opens.",
     }
+    # White-box source audit: the SHARED `source:` block marks the engagement source-granted. Its
+    # presence is the signal the orchestrator uses to run the white-box pipeline. Omitted for
+    # ordinary (black-box) engagements so their scope.yaml is unchanged.
+    if source:
+        fields["source"] = source
+    return fields
 
 
 def scaffold(repo_root: Path, fields: dict, *, operator: str, force: bool = False) -> Path:
