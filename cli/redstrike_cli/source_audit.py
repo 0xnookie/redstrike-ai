@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -150,6 +151,27 @@ def _git_out(argv: list[str], env: dict) -> str:
     return (p.stdout or "").strip()
 
 
+def rmtree_safe(path) -> None:
+    """Remove a directory tree, tolerating Windows long paths (the extended-length path prefix lets
+    git's deep checkouts over the 260-char limit be deleted) and read-only files — so a failed or
+    partial clone is always cleaned up and never wedges the next run."""
+    p = Path(path)
+    if not p.exists():
+        return
+
+    def _onerror(func, target, _exc):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except Exception:
+            pass
+
+    root = str(p)
+    if os.name == "nt":
+        root = "\\\\?\\" + os.path.abspath(str(p))
+    shutil.rmtree(root, onerror=_onerror)
+
+
 def _terminate(proc: "subprocess.Popen") -> None:
     """Best-effort stop of a running clone subprocess (terminate, then kill)."""
     try:
@@ -192,6 +214,7 @@ def clone(
         git,
         "-c", f"core.hooksPath={os.devnull}",   # no repo/global hooks ever run
         "-c", f"protocol.file.allow={file_allow}",
+        "-c", "core.longpaths=true",             # Windows: check out paths over the 260-char MAX_PATH
         "clone",
         "--depth", str(int(depth)),
         "--single-branch",

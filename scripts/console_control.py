@@ -346,7 +346,8 @@ def _run_cli(args: list[str], *, capture: bool = True, background: bool = False)
             argv, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             **popen_kw,
         )
-    p = subprocess.run(argv, cwd=cwd, env=env, capture_output=capture, text=True)
+    p = subprocess.run(argv, cwd=cwd, env=env, capture_output=capture, text=True,
+                       encoding="utf-8", errors="replace")
     return p
 
 
