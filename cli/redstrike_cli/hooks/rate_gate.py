@@ -140,16 +140,16 @@ _USER_RES = [
 # coverage behind one is visible in diagnostics); it carries NO evasion/bypass logic of any kind.
 _WAF_SIGS = [
     ("cloudflare", re.compile(
-        r"(?i)(?:^|\n)\s*server\s*:\s*cloudflare\b|(?i)\bcf-ray\s*:|(?i)__cf_bm=|(?i)\bcf_chl_|"
-        r"(?i)\bcf-mitigated\s*:")),
+        r"(?:^|\n)\s*server\s*:\s*cloudflare\b|\bcf-ray\s*:|__cf_bm=|\bcf_chl_|"
+        r"\bcf-mitigated\s*:", re.I)),
     ("aws", re.compile(
-        r"(?i)\bAWSALB(?:CORS)?=|(?i)\bx-amzn-[a-z0-9-]+\s*:|(?i)\bx-amz-cf-id\s*:|"
-        r"(?i)(?:^|\n)\s*server\s*:\s*awselb\b")),
-    ("sucuri", re.compile(r"(?i)\bx-sucuri-(?:id|cache)\s*:")),
-    ("imperva-incapsula", re.compile(r"(?i)\bincap_ses_|(?i)\bvisid_incap_|(?i)\bx-iinfo\s*:")),
+        r"\bAWSALB(?:CORS)?=|\bx-amzn-[a-z0-9-]+\s*:|\bx-amz-cf-id\s*:|"
+        r"(?:^|\n)\s*server\s*:\s*awselb\b", re.I)),
+    ("sucuri", re.compile(r"\bx-sucuri-(?:id|cache)\s*:", re.I)),
+    ("imperva-incapsula", re.compile(r"\bincap_ses_|\bvisid_incap_|\bx-iinfo\s*:", re.I)),
     ("akamai", re.compile(
-        r"(?i)\bak_bmsc=|(?i)\bx-akamai-[a-z0-9-]+\s*:|(?i)(?:^|\n)\s*server\s*:\s*akamaighost\b")),
-    ("fastly", re.compile(r"(?i)\bfastly-debug|(?i)\bx-served-by\s*:\s*cache|(?i)\bx-fastly\b")),
+        r"\bak_bmsc=|\bx-akamai-[a-z0-9-]+\s*:|(?:^|\n)\s*server\s*:\s*akamaighost\b", re.I)),
+    ("fastly", re.compile(r"\bfastly-debug|\bx-served-by\s*:\s*cache|\bx-fastly\b", re.I)),
 ]
 
 
