@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef, useLayoutEffect, useCallback, type CSSProperties } from "react";
+import { memo, useMemo, useState, useEffect, useRef, useLayoutEffect, useCallback, type CSSProperties } from "react";
 import Link from "next/link";
 import { Cpu, Bot, ShieldCheck, Terminal, Rocket, Bot as BotIcon, ListChecks, Activity, Layers, Loader2 } from "lucide-react";
 import { useControl, useRunStream } from "@/components/control/ControlProvider";
@@ -67,7 +67,10 @@ function ReturnPacket({ path, color, reduced, onDone }: { path: SVGPathElement; 
 
 type Packet = { id: string; uid: string; color: string };
 
-function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[]; running: boolean; progress: number }) {
+// Memoized: `OrchestrationInner` re-renders on every stream flush (it reads the hot `events`),
+// but `agents` only gets a new reference when the orchestration fold actually changes. During a
+// file-read/grep burst the fold is unchanged, so this skips re-running the whole SVG each frame.
+const OrchestrationGraph = memo(function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[]; running: boolean; progress: number }) {
   const reduced = useReducedMotion();
   const pathEls = useRef(new Map<string, SVGPathElement>());
 
@@ -229,7 +232,7 @@ function OrchestrationGraph({ agents, running, progress }: { agents: RunAgent[];
       </div>
     </div>
   );
-}
+});
 
 function LegendDot({ color, label }: { color: string; label: string }) {
   return <span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: color }} />{label}</span>;
@@ -240,7 +243,9 @@ const TASK_TONE: Record<RunTask["status"], string> = {
   pending: "text-muted", running: "text-emerald-500", done: "text-faint", error: "text-amber-500",
 };
 
-function TaskQueue({ tasks }: { tasks: RunTask[] }) {
+// Memoized like the graph: `tasks` only changes reference when the fold changes, so a pure
+// tool-event burst doesn't re-render the queue.
+const TaskQueue = memo(function TaskQueue({ tasks }: { tasks: RunTask[] }) {
   const queued = tasks.filter((t) => t.status === "pending" || t.status === "running").slice(0, 8);
   return (
     <ul className="flex-1">
@@ -259,7 +264,7 @@ function TaskQueue({ tasks }: { tasks: RunTask[] }) {
       ))}
     </ul>
   );
-}
+});
 
 /* ----------------------------------------------------------- dispatch log -- */
 const TONE_COLOR: Record<string, string> = {
