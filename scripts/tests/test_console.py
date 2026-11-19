@@ -243,6 +243,30 @@ class TestScopeParsing(unittest.TestCase):
             self.assertEqual(out["out_of_scope"]["domains"], ["admin.acme.com"])
             self.assertEqual(out["window"]["start"], "2026-01-01T00:00:00Z")
             self.assertEqual(out["source"], "scope.yaml")
+            self.assertNotIn("source_repo", out)                     # black-box: no source grant
+
+    def test_scope_yaml_to_json_source_repo_block(self):
+        """A white-box source audit's scope.yaml surfaces the repo grant as `source_repo`."""
+        yaml = (
+            'engagement: "widgets-2026"\n'
+            "authorized_by: appsec@acme / SOW-1\n"
+            "window:\n  start: 2026-01-01T00:00:00Z\n  end:   2026-01-08T23:59:59Z\n"
+            "in_scope:\n  urls:\n    - \"https://example.com/acme/widgets.git\"\n"
+            "source:\n"
+            "  repo_url: \"https://example.com/acme/widgets.git\"\n"
+            "  local_path: source/\n"
+            "  commit: " + ("a" * 40) + "\n"
+            "  branch: main\n"
+            "notes: >\n  white-box source audit\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "scope.yaml"
+            p.write_text(yaml, encoding="utf-8")
+            out = c.scope_yaml_to_json(p)
+            self.assertEqual(out["source_repo"]["repo_url"], "https://example.com/acme/widgets.git")
+            self.assertEqual(out["source_repo"]["local_path"], "source/")
+            self.assertEqual(out["source_repo"]["commit"], "a" * 40)
+            self.assertEqual(out["source_repo"]["branch"], "main")
 
     def test_scope_for_prefers_scope_json(self):
         with tempfile.TemporaryDirectory() as d:

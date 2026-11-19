@@ -22,7 +22,18 @@
     "rules": { "type": "object" },
     "notes": { "type": "string" },
     "status": { "type": "string" },
-    "source": { "type": "string", "description": "where the projection came from, e.g. scope.yaml." }
+    "source": { "type": "string", "description": "where the projection came from, e.g. scope.yaml." },
+    "source_repo": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Present for a white-box source audit: the authorized repository cloned under the engagement (engagements/<id>/source/). Its presence marks the engagement source-granted.",
+      "properties": {
+        "repo_url": { "type": "string" },
+        "local_path": { "type": "string", "description": "clone location relative to the engagement dir, e.g. source/." },
+        "commit": { "type": "string" },
+        "branch": { "type": "string" }
+      }
+    }
   },
   "$defs": {
     "scope_block": {

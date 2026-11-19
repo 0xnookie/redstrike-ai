@@ -507,8 +507,9 @@ def scope_yaml_to_json(path: Path):
 
     win = doc.get("window") or {}
     domains = block("in_scope")["domains"]
-    target = (domains[0].lstrip("*.") if domains else "") or doc.get("engagement", "")
-    return {
+    src = doc.get("source") if isinstance(doc.get("source"), dict) else None
+    target = (domains[0].lstrip("*.") if domains else "") or (src or {}).get("repo_url") or doc.get("engagement", "")
+    out = {
         "engagement": doc.get("engagement", ""),
         "target": target,
         "authorized_by": doc.get("authorized_by", ""),
@@ -519,6 +520,32 @@ def scope_yaml_to_json(path: Path):
         "notes": (doc.get("notes") or "").strip() if isinstance(doc.get("notes"), str) else "",
         "source": "scope.yaml",
     }
+    # White-box source audit: surface the repo grant (cloned source under the engagement) so the
+    # console can show an engagement is source-granted. Keyed `source_repo` to avoid colliding with
+    # the `source: "scope.yaml"` provenance string above.
+    if src:
+        out["source_repo"] = {
+            "repo_url": str(src.get("repo_url", "")),
+            "local_path": str(src.get("local_path", "")),
+            "commit": str(src.get("commit", "")),
+            "branch": str(src.get("branch", "")),
+        }
+    return out
+
+
+def _strip_inline_comment(s: str) -> str:
+    """Drop a trailing YAML `#` comment without breaking a quoted value that contains '#'.
+    A '#' opens a comment only at line start or after whitespace, and never inside quotes."""
+    q = None
+    for i, ch in enumerate(s):
+        if q:
+            if ch == q:
+                q = None
+        elif ch in ("'", '"'):
+            q = ch
+        elif ch == "#" and (i == 0 or s[i - 1] in " \t"):
+            return s[:i]
+    return s
 
 
 def _minimal_scope_read(path: Path) -> dict:
@@ -529,7 +556,7 @@ def _minimal_scope_read(path: Path) -> dict:
     section = None
     list_key = None
     for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].rstrip()
+        line = _strip_inline_comment(raw).rstrip()
         if not line.strip():
             continue
         indent = len(line) - len(line.lstrip())

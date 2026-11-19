@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/lib/control";
-import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, AccountBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus, OrchState, CoverageLedger } from "@/lib/control";
+import type { ControlStatus, PendingItem, RunEvent, InitBody, RunBody, AuditBody, AccountBody, CliResult, AuthSnapshot, SetAuthBody, LoginStatus, OrchState, CoverageLedger } from "@/lib/control";
 import { ControlError, loadToken, saveToken, ingestRunLine, emptyOrch, getCoverage } from "@/lib/control";
 
 // Connection state machine:
@@ -37,6 +37,7 @@ interface ControlCtx {
   disconnect: () => void;
   refresh: () => Promise<void>;
   doInit: (body: InitBody) => Promise<CliResult | null>;
+  doAudit: (body: AuditBody) => Promise<CliResult | null>;
   doRun: (body: RunBody) => Promise<boolean>;
   doRunFor: (id: string, body: RunBody) => Promise<boolean>;
   doApprove: (ids: string[] | "all") => Promise<boolean>;
@@ -480,6 +481,29 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     [setStatus],
   );
 
+  // Paste a repo URL → clone + scaffold a white-box source engagement, then launch it. The plane
+  // does clone+scaffold+launch in one call and echoes the launched engagement id; we refresh status
+  // so its pid shows up and the stream effect opens the tail. Mirrors doInit's plumbing.
+  const doAudit = useCallback(
+    async (body: AuditBody): Promise<CliResult | null> => {
+      setBusy(true);
+      setLastError("");
+      try {
+        resetStreamView();
+        const r = await api.auditEngagement(tokenRef.current, body);
+        if (!r.ok) setLastError((r.stderr || r.error || "source audit failed").trim());
+        await refresh(); // the new engagement + its run pid show up → the stream effect follows it
+        return r;
+      } catch (e) {
+        setLastError(msgOf(e));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh, resetStreamView],
+  );
+
   // Launch a run against an EXPLICIT engagement id — lets a fresh "create & launch"
   // start the run the same tick it scaffolds, before the new id has become `activeId`.
   const doRunFor = useCallback(
@@ -696,6 +720,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
       disconnect,
       refresh,
       doInit,
+      doAudit,
       doRun,
       doRunFor,
       doApprove,
@@ -715,7 +740,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       conn, token, status, engagements, runs, activeId, setActiveId, running, coverage, pending,
-      lastError, busy, connect, disconnect, refresh, doInit, doRun, doRunFor, doApprove, doResume,
+      lastError, busy, connect, disconnect, refresh, doInit, doAudit, doRun, doRunFor, doApprove, doResume,
       doStop, doDelete, doAddAccount, clearEvents, auth, refreshAuth, setProviderAuth, disconnectProvider,
       setModel, startLogin, pollLogin, submitLoginCode,
     ],

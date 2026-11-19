@@ -156,6 +156,19 @@ def render_scope_yaml(fields: dict) -> str:
     rules = fields.get("rules", {})
     phases = rules.get("approval_required_phases", ["exploitation", "post-exploitation"])
     phase_block = "\n".join(f"    - {p}" for p in phases)
+    src = fields.get("source") or {}
+    # White-box source audit: the shared `source:` block. Its PRESENCE marks the engagement
+    # source-granted (the orchestrator runs the white-box pipeline). Emitted before `notes:` so the
+    # folded notes scalar stays last; absent for ordinary black-box engagements.
+    source_block = ""
+    if src:
+        source_block = (
+            "\nsource:                 # white-box: audit the cloned repo at this commit\n"
+            f"  repo_url: \"{src.get('repo_url', '')}\"\n"
+            f"  local_path: \"{src.get('local_path', 'source/')}\"\n"
+            f"  commit: \"{src.get('commit', '')}\"\n"
+            f"  branch: \"{src.get('branch', '')}\"\n"
+        )
     return f"""# Per-engagement scope & rules of engagement. Authored by the `redstrike` CLI.
 # The RoE gate (_contract/roe-gate.md) reads this before any ACTIVE action;
 # out-of-scope / closed-window => HARD STOP. This file is the signed canonical
@@ -187,7 +200,7 @@ rules:
 
 oob:
   collaborator: "{fields.get('oob', {}).get('collaborator', '')}"
-
+{source_block}
 notes: >
   {fields.get('notes', 'Written authorization on file before the window opens.')}
 """

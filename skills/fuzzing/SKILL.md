@@ -8,7 +8,7 @@
 - **TOOLS:** AFL++, libFuzzer, honggfuzz, boofuzz, RESTler, ASAN/UBSAN, afl-tmin, crashwalk/`exploitable`, `refs/fuzzing_techniques.md`.
 - **GOAL:** Confirm a reproducible memory-safety / crash defect on an authorized target — a MINIMIZED input that deterministically triggers a sanitizer-detected fault (ASAN/UBSAN trace) — the crash IS the finding. Done = checklist `- [x]`, review passes, findings accepted + approved.
 - **OUTPUT:** `fuzz_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = an authorized target (binary/library/parser/network or REST API) + its input format + `scope.yaml`. `refs/` = `fuzzing_techniques.md`. Chains FROM recon / target intake; chains TO `exploit-dev` + `reporting`.
+- **DATA / RAG:** inputs = an authorized target (binary/library/parser/network or REST API) + its input format + `scope.yaml` + (white-box) `code-audit/fuzz_targets.jsonl`. `refs/` = `fuzzing_techniques.md`. Chains FROM recon / target intake + `code-audit` (source-informed `fuzz_targets.jsonl` seed targets); chains TO `exploit-dev` + `reporting`.
 - **DECOMPOSITION:** n/a (atomic; harness/target recipes in refs).
 
 ## Goal
@@ -36,6 +36,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted + approved.
 
 ## Inputs
 - An authorized target (binary / library / parser / network or REST API) + its input format + `scope.yaml`
+- Optional WHITE-BOX seed targets from `code-audit/fuzz_targets.jsonl` (source-informed fuzzable entry points + per-language harness stubs + dictionary/seed-corpus hints) — when present, prioritize these entry points and reuse the supplied harness/grammar; the crash proof (minimized input + sanitizer trace) is still produced here and gated by `fuzzing-verify`.
 
 ## Outputs
 `fuzz_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `logs/`

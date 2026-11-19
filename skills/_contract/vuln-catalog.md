@@ -121,6 +121,7 @@ The table above is the web surface. The framework also ships these domains as fi
 - **Host post-exploitation**: `linux-privesc` · `windows-privesc` · `credential-access` · `persistence`.
 - **Mobile / IoT / wireless**: `mobile` · `iot` · `wireless`.
 - **Binary / fuzzing**: `fuzzing` · `exploit-dev`.
+- **White-box source**: `code-audit` ✅ (whole-repo audit by inter-procedural, framework-aware reasoning BEYOND grep + authz/logic/crypto/race analysis; CONFIRMS the `source-audit` feeder's leads into reviewer-gated findings, chains confirmed weaknesses into kill-chains, and emits source-informed fuzz targets to `fuzzing` — consumes `source_context.json`, does not re-grep; feeder `source-audit`).
 - **Social engineering**: `social-engineering` (authorized, named-population campaigns; aggregate-only).
 
 All active domains import [`roe-gate.md`](roe-gate.md) + human approval gates (exploitation / post-ex

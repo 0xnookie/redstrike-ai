@@ -29,6 +29,8 @@ init validation is minimal (delegated to the CLI), and only autonomous runs are 
     Routes (all require the bearer token):
       GET  /api/status                         -> { ok, engagements:[...], runs:{id:pid} }
       POST /api/engagements                     -> redstrike init  (body: client, domains[], authorized_by, confirm_authorization)
+      POST /api/engagements/audit               -> redstrike audit <repo_url> (clone+scaffold a white-box
+                                                   source engagement, then launch it autonomously)
       POST /api/engagements/<id>/run            -> redstrike run <id> --autonomous (body: allow[], max_turns, max_budget, resume)
       GET  /api/engagements/<id>/stream         -> SSE tail of runtime/autorun.jsonl
       GET  /api/engagements/<id>/approvals      -> runtime/approvals_pending.json
@@ -492,6 +494,8 @@ def make_control_handler(target: Path, token: str):
                 return self._set_auth(parts[2], self._body())
             if path == "/api/engagements":
                 return self._init_engagement(self._body())
+            if path == "/api/engagements/audit":
+                return self._audit_engagement(self._body())
             if len(parts) == 4 and parts[1] == "engagements":
                 eid, verb = parts[2], parts[3]
                 eng = engagement_dir(eid)
@@ -533,6 +537,56 @@ def make_control_handler(target: Path, token: str):
             ok = p.returncode == 0
             return self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
                               {"ok": ok, "rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr})
+
+        def _audit_engagement(self, body: dict):
+            """Paste a repo URL -> a white-box source-audit engagement, launched. Shells to
+            `redstrike audit <url> --no-launch` (clone + scaffold only), resolves the new
+            engagement id, then launches its autonomous run through the SAME tracked path as a
+            normal run (so stream / stop / approve all work). All the governance — URL validation,
+            untrusted-clone hardening, the authorization gate, the scope + launch gates — is enforced
+            by the CLI, not re-implemented here. Clone failures surface as a non-2xx with the error."""
+            repo_url = (body.get("repo_url") or "").strip()
+            authorized_by = (body.get("authorized_by") or "").strip()
+            if not repo_url or not authorized_by:
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": "repo_url and authorized_by required"})
+            if not body.get("confirm_authorization"):
+                # mirrors the CLI's --i-confirm-authorization: asserting written auth is on file
+                return self._json(HTTPStatus.BAD_REQUEST,
+                                  {"error": "confirm_authorization:true required (written authorization on file)"})
+            before = {e.name for e in console.discover(target)}
+            # --flag=value form so a leading-dash value can't be misread as an option; argv is a list
+            # (no shell), so every value is passed literally. --no-launch: clone + scaffold only here.
+            args = ["audit", repo_url, f"--authorized-by={authorized_by}",
+                    "--i-confirm-authorization", "--no-launch"]
+            if body.get("branch"):
+                args.append(f"--branch={body['branch']}")
+            if body.get("client"):
+                args.append(f"--client={body['client']}")
+            if body.get("window_days"):
+                args.append(f"--window-days={int(body['window_days'])}")
+            p = _run_cli(args)
+            if p.returncode != 0:
+                err = (p.stderr or p.stdout or "clone/scaffold failed").strip()
+                return self._json(HTTPStatus.BAD_REQUEST,
+                                  {"ok": False, "rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr,
+                                   "error": err[:600]})
+            # Resolve the new engagement id from the CLI's machine marker (deterministic), falling
+            # back to a before/after discovery diff only if the marker is missing.
+            import re as _re
+            m = _re.search(r"^engagement_id=(\S+)$", p.stdout or "", _re.M)
+            eid = m.group(1) if m else ""
+            if not eid:
+                new = sorted({e.name for e in console.discover(target)} - before)
+                eid = new[0] if len(new) == 1 else ""
+            if not eid:
+                # Scaffolded, but we can't identify which engagement to launch — surface it as a
+                # non-success (the audit did NOT start) rather than a silent, misleading green toast.
+                return self._json(HTTPStatus.OK,
+                                  {"ok": False, "rc": 0, "stdout": p.stdout,
+                                   "error": "source engagement scaffolded but its id could not be "
+                                            "resolved to launch — open it in Engagements and launch it manually"})
+            # launch the autonomous run in the background, tracked like any other run
+            return self._run_engagement(eid, body)
 
         def _run_engagement(self, eid: str, body: dict):
             with _RUNS_LOCK:
