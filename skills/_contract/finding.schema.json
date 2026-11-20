@@ -53,6 +53,8 @@
         "impact": { "type": "string", "description": "What the evidence proves an attacker can do. Backtick any inline payload/command/JSON as in `reproduction`." },
         "remediation": { "type": "string", "description": "How to fix it. Backtick any inline code/config/payload." },
         "references": { "type": "array", "items": { "type": "string" } },
+        "candidate_refs": { "type": "array", "items": { "type": "string" }, "description": "Provenance: the source_context.json candidate id(s) this finding originated from (e.g. [\"sa-079\"]). Lets a finding cite its originating recon/source-audit candidate so lineage is never silently dropped; the reconciliation/recall gate reads this exact field to map candidates -> findings. Optional and backward-compatible." },
+        "source_lead": { "type": "string", "description": "Provenance: a free-text pointer to the originating lead when it is not a formal candidate id (e.g. a chain_candidate ref, a structural fact, or an operator-flagged high_risk_file). Optional and backward-compatible." },
         "cleanup": {
           "type": "object",
           "description": "Reversion record. REQUIRED for a post-exploitation/persistence finding that planted or changed state (persistence + the AD/credential post-ex classes) — it proves the benign artifact/change was removed and removal was verified, so the mechanical gate can enforce reversion instead of trusting prose. Omit for findings that change nothing (ordinary web findings).",
@@ -82,7 +84,9 @@
             "false_positive_checks": { "type": "array", "items": { "type": "string" } },
             "rejection_class": { "enum": ["false-positive", "out-of-scope", "duplicate", "open-proof-gap"], "description": "REQUIRED when verdict=rejected — why. false-positive/out-of-scope/duplicate are clean drops. 'open-proof-gap' = real-looking but undemonstrable here (env/creds/WAF/time); it is REPORTED as a known gap / recall caveat, never silently dropped. Recall rule: when genuinely unsure between false-positive and open-proof-gap, choose open-proof-gap — a false positive is caught downstream, a false negative is invisible." },
             "scope_ok": { "type": "boolean" },
-            "notes": { "type": "string" }
+            "notes": { "type": "string" },
+            "decisive": { "type": "string", "description": "The decisive rationale behind the verdict — the single reason this finding was accepted/rejected/blocked (mirrors the reviewer's one-line decisive reason; the sidecar reviews/<id>.verdict.json carries the same field). Optional and backward-compatible." },
+            "method": { "type": "string", "description": "How the verdict was reached — the verification method the reviewer applied (e.g. re-read the traced file:line path + ran the PoC; recomputed the CVSS vector; two-identity replay). Optional and backward-compatible." }
           }
         }
       }

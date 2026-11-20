@@ -66,6 +66,51 @@ guard / deploy-time config). `confidence: confirmed` requires the dynamic proof.
 do not have; never dilute a genuinely traced, demonstrable finding into a mere feeder lead. Front-load
 `_contract/counterevidence.md` on every candidate and `_contract/severity-calibration.md` on every rating.
 
+## Required discipline (HARD gates — not optional prose; `code-audit-verify` FAILS the run if any is skipped)
+These were prose the executor could skip. For any `scope.source` engagement they are now REQUIRED, in order.
+
+- **(a) Model first — `app_model.json` is MANDATORY.**
+  Before any tracing or class reasoning, write `app_model.json` (entry points, trust boundaries, the
+  auth/session model, data stores, privileged ops, plus `state_ops` and `authz_routes`).
+  It is the required white-box model artifact for `scope.source`; without it the authz/logic classes cannot be
+  judged and `surface.py --plan` has nothing to read.
+  No `app_model.json` means the audit has not started.
+- **(b) Enumerate + close the surface with `surface.py` — MANDATORY, run all three stages.**
+  - `python scripts/surface.py --plan --engagement <eng>` FIRST — builds the ledger from `app_model.json` +
+    `source-audit/source_context.json` (the lead makes `--plan` deterministic, but you MUST still run it).
+  - `python scripts/surface.py --mark <id> --status tested --by code-audit --reason "<closure>: …"` for EACH
+    surface element as you close it (`tested` = `confirmed` / `ruled-out` / `open-proof-gap`), or
+    `--status skipped --reason "<why not reasoned-about>"` with a real reason — marking each surface is required,
+    never a sampled subset.
+  - `python scripts/surface.py --validate --engagement <eng> --routed-to code-audit --strict` LAST (expect
+    exit 0). Any element left `discovered` is a RECALL GAP — close it, or report it as EXPLICIT partial coverage
+    (coverage %, what's pending) in `report.md`. A clean/empty `findings.json` over `discovered` surface is INVALID.
+- **(c) Every `analysis.jsonl` record carries a `candidate_id`, so every candidate gets a verdict.**
+  Each `source_context.json` candidate MUST receive an explicit disposition — `confirmed` / `ruled-out` /
+  `open-proof-gap` — tied to its `candidate_id`, so no candidate is silently dropped (the recall gate maps
+  candidates to dispositions by id).
+  When a candidate becomes a finding, stamp the finding's `candidate_refs` (array of candidate ids, e.g.
+  `["sa-079"]`) so lineage survives into `findings.json`; use `source_lead` for an informal lead (a chain
+  candidate, a structural fact, or an operator-flagged high-risk file).
+- **(d) Refutation is PER-SURFACE — never a class-wide generalization from a sample.**
+  You may NOT refute a vuln class by sampling a few routes/sinks and generalizing ("XSS looks handled
+  everywhere").
+  Every enumerated route/sink of that class (each `source-lead` / `state-op` / `authz-route` / sink element) is
+  individually marked `tested` with its own closure reason, naming the guard that neutralizes it (against the
+  guard catalog `G-01..G-14` where one applies).
+  "Class hardened" is valid ONLY once every surface element of the class is closed this way.
+- **(e) A precondition refutation NAMES the precondition as a testable claim and ROUTES it — it never terminates the lead.**
+  Refuting by precondition ("needs a write primitive first", "not reachable without an authenticated session",
+  "requires an attacker-controlled upload") is NOT a close.
+  State the precondition as a TESTABLE claim, record the lead as `open-proof-gap`, and ROUTE it — a chain
+  candidate into `chains.jsonl`, or a hand-off to the skill that could supply the primitive.
+  A precondition that silently ends a lead is a recall gap, not a refutation.
+- **(f) Write every JSONL/JSON artifact as UTF-8 WITHOUT a BOM.**
+  `analysis.jsonl` (and every `*.jsonl` / `*.json` you emit) MUST be UTF-8 with NO byte-order mark.
+  On Windows do NOT use PowerShell `Out-File` / `Set-Content` defaults — they prepend a BOM (`EF BB BF`) that
+  breaks downstream `json.loads`; use the editor's file write, or `-Encoding ascii` / `utf8NoBOM`.
+  Readers should still open with `utf-8-sig` defensively, but the writer must not emit a BOM.
+
 ## Steps  (action · tool · output)
 1. Resolve repo (`scope.source.local_path`, default `engagements/<id>/source/`) + RoE/approval gate · `roe-gate.md` · `logs/`
 2. Model the app: entry points · trust boundaries · auth/session model · data stores · privileged ops (+ any `high_risk_files` you flag) · read + `refs/code_audit.md` · `app_model.json`

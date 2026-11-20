@@ -10,7 +10,9 @@ You cannot judge authorization or business logic without a model of intent. Buil
 - **Entry points** — HTTP routes/handlers, GraphQL resolvers, RPC/queue consumers, scheduled jobs, CLI, webhooks,
   framework lifecycle hooks. Each is an untrusted-input boundary. Record `file:line` + the handler symbol.
 - **Trust boundaries** — where data crosses from attacker-controlled to trusted (request→service→store, service→
-  service, tenant→tenant, user→admin). Note what AUTHN/AUTHZ each boundary is supposed to enforce.
+  service, tenant→tenant, user→admin). Note what AUTHN/AUTHZ each boundary is supposed to enforce. Also record any
+  advertised SECURITY TIER / architectural promise ("this extension tier runs no server-side code", "templates are
+  sandboxed", "this field is read-only to clients") — each is an invariant to verify in §3.
 - **Auth / session model** — how identity is established (session cookie / token / header), how roles/scopes are
   represented, and WHERE the check lives (middleware, decorator, per-handler, ORM scope, none). Build the
   identity × capability intent: who is SUPPOSED to be able to do what.
@@ -79,10 +81,20 @@ source you find), TRACE by reading:
   neutralizes THIS value in THIS context (an HTML encoder does nothing for a SQL sink; a validator on a sibling
   field is irrelevant; a guard that runs AFTER the sink fires is too late; fail-open in a `try/except` doesn't
   sanitize). Per `_contract/counterevidence.md`: a safe sibling, a too-late control, a different-route control,
-  and "a helper handles it" (unchecked) do NOT rule a candidate out.
+  and "a helper handles it" (unchecked) do NOT rule a candidate out. Conversely, `_contract/guard-catalog.md`
+  lists the framework DEFENSES that legitimately DO clear a class — a guard-cited `ruled-out` must name the catalog
+  id (e.g. `G-01`), confirm the guard is IN-PATH for this value + context (not merely present), and check the
+  catalog's ESCAPE-HATCH does not apply (the escape-hatches are where the real bugs hide on a hardened codebase).
 - **Framework awareness** — know the defaults: ORM parameterization vs raw/string-built queries; template
   auto-escaping on vs raw/`|safe`/`dangerouslySetInnerHTML`; body-parser/mass-assign binding; default CSRF /
   auth middleware and the routes that OPT OUT. The vuln is usually where code LEAVES the safe default.
+- **Sanitization-backbone model (hunt the outlier encoder/serializer).** When a framework sanitizes untrusted
+  input CENTRALLY (an input-serializer layer, a write-time filter, a model hook), do not judge each sink alone —
+  build the per-type table of WHICH serializers / field-types / encoders invoke the shared sanitizer and which
+  SKIP it. The vuln is the OUTLIER type that bypasses the backbone, not the sink: a sink reached by ten safe types
+  and one unsanitized type is exploitable only through that one type. Confirm by reading the serializer bodies
+  side-by-side (does THIS type call the shared `sanitize()`, or pass the value through?) and pair the bypassing
+  type with any raw/unescaped output sink it reaches.
 - Close each candidate: **confirmed** (traced unsanitized path to a dangerous sink) · **ruled-out** (a control on
   the path neutralizes it — cite it) · **open-proof-gap** (reachable-looking but a precondition blocks proof).
 `analysis.jsonl` record (one per candidate): `{id, class, source:{file,line,param}, sink:{file,line,kind},
@@ -101,6 +113,16 @@ open-proof-gap", confidence, runtime_guard_uncertainty, lead_ref}`.
   skipped step, TOCTOU on a limit). Needs the model; grep cannot see intent.
 - **Insecure defaults / misconfig in code** — debug on, permissive CORS built in code, default/weak secret,
   disabled cert check, overly broad permission grant, verbose errors.
+- **Framework-tier / architectural-promise violations** — frameworks advertise security tiers and trust-boundary
+  promises ("apps/plugins of this tier run no server-side code", "templates are sandboxed", "this field is
+  read-only to clients", "extensions cannot reach admin routes"). Each is an invariant with NO sink and NO pattern.
+  Enumerate every advertised tier/promise (from `app_model.trust_boundaries`), then for EACH pipeline that carries
+  lower-tier / semi-trusted content into a privileged location — the public web root, the DI container/autoloader,
+  a template engine, a deserializer, an admin-route dispatcher — check the promise is actually ENFORCED on that
+  path. The gap between a stated guarantee and its absent enforcement is the finding (there is no string flowing to
+  `eval` — a scanner cannot know the tier exists); a recurring instance is the confused deputy: semi-trusted
+  extension content supplies a URL / route / target that a privileged executor dispatches under the trusted
+  principal's auth.
 - **Crypto misuse** — ECB, static/reused IV/nonce, hardcoded/predictable key, unauthenticated encryption,
   homemade MAC, `==` token compare (timing), weak hash for passwords/signatures. (JWT crypto → `jwt`.)
 - **Unsafe deserialization** — attacker bytes into a native deserializer / unsafe loader reachable from an entry
@@ -140,6 +162,19 @@ lucky find.
      finding — confirm the window by reading the two code points, and demonstrate with the `race-condition` skill
      (concurrent requests, before/after state, serial baseline does NOT reproduce). An UNAUTHENTICATED such
      operation is worse — it needs no account to hammer.
+     **A lock existing is NOT a refutation — scope it to the concurrency domain.** Verify the lock / mutex /
+     unique-check's SCOPE actually covers the domain the requests span: a per-process or per-host primitive
+     (filesystem flock, in-process mutex, single-node semaphore, local-memory rate-limiter / idempotency cache)
+     serializes workers on ONE host but NOT across a horizontally-scaled cluster — check the lock BACKEND and its
+     DEFAULT config (an unshared default reopens the race on every multi-node deploy). Only `ruled-out` if the
+     control's scope ⊇ the concurrency domain under the realistic deployment; otherwise `confirmed`
+     (deployment-conditional), citing the backend/default.
+     **Check the DB-level backstop AND the migration history.** For a uniqueness / no-oversell / referential
+     invariant the decisive control is often not the write path you are reading but the schema: a UNIQUE index,
+     CHECK, FK, or `SELECT … FOR UPDATE`. An app-level SELECT-then-INSERT that looks like a guard is unprotected if
+     no live DB constraint backstops it — and, critically, a constraint a migration once ADDED then later DROPPED
+     (never re-added) leaves a check that reads as present in current code but is no longer enforced by the DB.
+     Confirm the constraint still exists in the LATEST migration before clearing it.
   2. **Double-spend / replay.** The same token / nonce / request can be submitted twice because it is not marked
      consumed atomically with its effect (or not marked at all) — reset tokens, gift-card codes, idempotency-less
      payment capture, one-time invites.
@@ -163,7 +198,8 @@ lucky find.
      it stops the lax setter from being written up as a false-positive finding.
 - **Close it** like any element: `confirmed` (the invariant is breakable — cite the check line + the write line +
   the missing control) / `ruled-out` (a lock / atomic update / unique constraint / server-side re-derivation
-  holds it — cite it) / `open-proof-gap`. Then `surface.py --mark <state-op id> --status tested …`. A state-op
+  holds it — AND, for a lock, its SCOPE covers the concurrency domain; for a DB constraint, it still exists in the
+  latest migration — cite it) / `open-proof-gap`. Then `surface.py --mark <state-op id> --status tested …`. A state-op
   left `discovered` is a RECALL GAP — an invariant you never reasoned about.
 
 ## 3b. Authorization matrix (two-identity + role-matrix reasoning) → `authz-route` surface
@@ -178,7 +214,7 @@ unguarded route.
   decorator / attribute / per-handler / ORM or data-access-layer scope / **none**). Include framework/default-based ACL:
   routes a framework guards by convention or by a default-deny list, and — critically — the routes that OPT OUT
   of it or were never added to it.
-- **Flag the two absences that matter:**
+- **Flag the three absences that matter:**
   1. **A state-changing or sensitive route with NO authz** (missing BFLA / function-level check) — a privileged
      op reachable by a lower role (or unauthenticated) because the guard is absent, on the wrong route, or
      opted-out. Cross-check `auth_model.guard_sites` and the framework's default ACL against each cell: a
@@ -190,6 +226,14 @@ unguarded route.
      sensitive op, whether the handler goes THROUGH the choke point or AROUND it; an around-path with no local
      guard is the finding (this is exactly the missing-ACL BFLA grep/taint can't see — the backstop makes the
      code "look" protected).
+  3. **An operation that MUTATES the authz model must not let the actor exceed their own authority.** Beyond "can
+     role A call route B", the sharper class is the endpoint that EDITS authorization itself — set-privileges,
+     grant-role, add-to-group, change-tier/plan. Each must verify the resulting grant is a SUBSET of the actor's
+     own authority (and that the privilege/role field is not client-writable); otherwise the holder of a narrow
+     "manage roles" privilege rewrites their own privilege set to the full catalogue = full admin — vertical
+     privesc with NO missing route guard (the route IS gated; the DATA written through it redefines the gate).
+     Enumerate every privilege / role / membership / tier write and settle: is there a subset/monotonicity check,
+     and is the field write-protected from client scope? Absence of the subset check is the finding.
 - **Two-identity + role-matrix reasoning.** Judge each cell against ≥2 identities (e.g. a low-priv user and the
   resource owner / an admin): can identity A invoke a cell reserved for B? That difference, demonstrated, is the
   BFLA/privesc PoC (hand the dynamic proof to `bola-bfla` / `privesc`; object-level ownership to `idor`). Keep
@@ -214,6 +258,9 @@ These confirmed chains SEED `attack-chain-discovery`, which composes cross-skill
 - A finding = **(a)** a traced reachable path at `file:line` across the call chain + **(b)** a PoC/exploit sketch
   (or executed PoC / fuzz crash). Both halves, every time.
 - Static-only path ⇒ `confidence: probable` + a stated runtime-guard uncertainty; `confirmed` needs dynamic proof.
+- A `ruled-out` that rests on a framework defense cites a `_contract/guard-catalog.md` id (`G-NN`), shows the guard
+  is in-path for this value + context, and rules out its escape-hatch — a shallow "a guard exists" is not a
+  refutation.
 - Precondition-blocked exploitation ⇒ demonstrated `severity` + `potential_severity`, confidence honest.
 - Negative control where feasible: a benign variant of the request is handled correctly while the malicious one
   isn't — the difference is attributable to the bug, not noise.

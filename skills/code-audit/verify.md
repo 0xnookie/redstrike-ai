@@ -63,6 +63,15 @@ routed, silently missing entry points / sinks / files no lead covered. Check the
 - [ ] **Leads actually accounted for.** Spot-check that `source_context.json` candidates/structural/chain ids
       and `app_model.json` entry points appear in the ledger as `tested`/`skipped` — a lead dropped from the
       ledger entirely is the silent-skip this gate exists to catch.
+- [ ] **Every candidate has a disposition.** REJECT a "complete"/"clean" claim — including any clean/empty
+      `findings.json` — while ANY `source_context.json` candidate id lacks an explicit disposition: a
+      `confirmed` / `ruled-out` / `open-proof-gap` closure keyed to its `candidate_id` in `analysis.jsonl` (and,
+      where it became a finding, carried through as the finding's `candidate_refs`). A candidate with no
+      disposition is a silent drop ⇒ `rubric.coverage: fail`, bounce the run (`needs-evidence`).
+- [ ] **No class-wide refutation over `discovered` surface.** REJECT a class asserted "refuted" / "hardened"
+      while any routed surface of that class (its `source-lead` / `state-op` / `authz-route` / sink rows) is
+      still `discovered`. A class closes PER-SURFACE — every element `tested` with its OWN reason; a sampled
+      generalization from a subset is a RECALL GAP (`rubric.coverage: fail`), never a close.
 This gate raises RECALL (don't miss surface); it does NOT lower the evidence bar — a `tested` element whose
 closure is `confirmed` STILL owes the full white-box evidence standard above. Completeness ≠ hallucination.
 
@@ -79,8 +88,14 @@ Run `scripts/cvss.py "<CVSS vector>"` for any **Medium+** finding to compute the
 "review": { "verdict": "accepted|blocked|rejected|needs-evidence", "reviewer": "code-audit-verify",
   "rubric": {"evidence":"pass","reproducibility":"pass","fp_gauntlet":"pass","cvss":"pass","coverage":"pass","scope":"pass"},
   "false_positive_checks": ["traced req->handler->orm at routes/api.py:42 -> models/order.py:88, no ownership check between identities; PoC GET /api/orders/{id} as user B returns user A order; confidence probable (no runtime WAF seen), static path re-read"],
-  "scope_ok": true, "notes": "white-box evidence standard met; dynamic PoC on authorized instance; runtime-guard uncertainty stated" }
+  "scope_ok": true, "notes": "white-box evidence standard met; dynamic PoC on authorized instance; runtime-guard uncertainty stated",
+  "decisive": "no ownership check between the two identities on the traced path", "method": "re-read routes/api.py:42 -> models/order.py:88 in source + ran the two-identity PoC" }
 ```
+- Always fill `decisive` (the single decisive reason for the verdict) and `method` (how you reached it — e.g.
+  re-read the traced `file:line` + ran the PoC; recomputed the CVSS) in BOTH `reviews/<id>.verdict.json` and the
+  inline `review{}`. Do NOT reject a finding merely because an executor-supplied `review{}` lacked
+  `decisive`/`method` — FILL them; reject only when the underlying rubric (traced path / evidence / coverage /
+  scope) actually fails. Don't over-tighten.
 - `accepted` → `status: verified` → reporting. `blocked` → verified WITH a caveat (real, demonstration env-blocked). `rejected`/`needs-evidence` → bounce + re-run. Only `accepted` + `blocked` reach reporting.
 - `rubric.coverage` is the ENGAGEMENT-level surface gate (shared across findings, from the surface-ledger check
   above): `pass` only when the surface ledger is enumerated AND closed for `code-audit` (or the open gaps are
