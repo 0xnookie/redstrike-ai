@@ -36,6 +36,15 @@ paths (`C:/...`) for engagement files.
      complete; never let partial coverage pass as complete).
    - Spot-check that `source_context.json` candidate/structural/chain ids and `app_model.json` entry points
      appear in the ledger as `tested`/`skipped` — a lead dropped from the ledger entirely is the silent skip.
+   - **Every candidate has a disposition.** REJECT a "complete"/"clean" claim — including any clean/empty
+     `findings.json` — while ANY `source_context.json` candidate id lacks an explicit disposition: a
+     `confirmed`/`ruled-out`/`open-proof-gap` closure keyed to its `candidate_id` in `analysis.jsonl` (and, where
+     it became a finding, carried through as the finding's `candidate_refs`). A candidate with no disposition is a
+     silent drop ⇒ `rubric.coverage: fail`, bounce (`needs-evidence`).
+   - **No class-wide refutation over `discovered` surface.** REJECT a class asserted "refuted"/"hardened" while
+     any routed surface of that class (its `source-lead`/`state-op`/`authz-route`/sink rows) is still
+     `discovered`. A class closes PER-SURFACE — every element `tested` with its own reason; a sampled
+     generalization is a RECALL GAP (`rubric.coverage: fail`), not a close.
    - This raises RECALL only; it does NOT lower the evidence bar for any `confirmed` element (completeness ≠
      hallucination).
 4. Read `OUT/findings.json` and, for each finding, the cited `poc/<id>/` evidence (the annotated trace + the PoC
@@ -60,7 +69,11 @@ paths (`C:/...`) for engagement files.
    - **Benign + scope + approval** — any dynamic PoC/fuzz-harness run was benign, authorized/sandboxed, approved.
 6. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}`
    block into each finding (reviewer `code-audit-verify`), carrying the engagement-level `rubric.coverage`
-   verdict from step 3, and set `status`.
+   verdict from step 3, and set `status`. Fill `review.decisive` (the single decisive reason for the verdict) and
+   `review.method` (how you reached it — e.g. re-read the traced `file:line` + ran the PoC; recomputed the CVSS)
+   in BOTH the sidecar and the inline block. Do NOT reject a finding merely because an executor-supplied
+   `review{}` lacked `decisive`/`method` — FILL them; reject only when the underlying rubric (traced path /
+   evidence / coverage / scope) actually fails. Don't over-tighten.
 7. Return a verdict table: id | verdict | decisive check | one-line reason, PLUS a one-line surface-coverage
    line (ledger pct closed for `code-audit` + any RECALL GAPs). Only `accepted` and `blocked` findings proceed
    to reporting (blocked = confirmed-real but demonstration env-prevented → report with a caveat; do NOT bounce

@@ -305,6 +305,65 @@ def _report_present(eng: Path) -> bool:
     return (eng / "report" / "findings_consolidated.json").is_file()
 
 
+# --- gate-arming: fire the completeness gates at CLOSE, not only on report-presence ---------------- #
+# "A gate the real workflow routes around is not a gate." The hard completeness gates used to arm ONLY
+# when `report/findings_consolidated.json` existed. When the autorun pipeline crashed and a hunter swarm
+# wrote findings.json / report.md DIRECTLY (the shopware-2026-11-19 failure), the report file was never
+# produced, every hard gate early-returned [], and a 175-surface-untested / all-pending-coverage audit
+# passed the gate and was narrated "hardened". The gates now ALSO arm on run-COMPLETION: executor findings
+# exist AND the run is terminal (a concluded runtime/diagnostics.json run) — so they fire at audit close
+# even when reporting was skipped. Report-present stays an arming trigger (reporting ran = DONE), just not
+# the only one.
+
+# The outcomes diagnostics.py ever writes — each means a run leg CONCLUDED (diagnostics is written only
+# after a post-run gate), so a latest run carrying one of these is a terminal (closed) run.
+_TERMINAL_DIAG_OUTCOMES = {"produced-findings", "clean-tested", "degraded-empty", "failed"}
+
+
+def _run_is_terminal(eng: Path) -> bool:
+    """True when the engagement's latest runtime/diagnostics.json run CONCLUDED (a recognized terminal
+    outcome). A terminal run means the engine leg ended — the audit is AT CLOSE even if reporting was
+    skipped/crashed. A mid-hunt engagement with no concluded run (no diagnostics) is NOT terminal."""
+    run = _latest_run(_load_diagnostics(eng))
+    return bool(run) and run.get("outcome") in _TERMINAL_DIAG_OUTCOMES
+
+
+def _gates_armed(eng: Path, findings=None) -> bool:
+    """Gate-arming predicate — the completeness gates fire when the engagement is at CLOSE by EITHER
+    signal: a consolidated report exists (reporting ran), OR executor findings exist AND the run is
+    terminal (a concluded diagnostics run). The second arms the gates even when reporting is skipped or
+    crashed and a hunter swarm wrote findings.json directly. For a ZERO-finding engagement this collapses
+    to exactly `_report_present` (no findings → the findings-trigger can't fire), so the only behavior that
+    CHANGES is a with-findings, concluded-run engagement — which is precisely where the gates must fire."""
+    if _report_present(eng):
+        return True
+    if findings is None:
+        findings, _ = _discover_engagement_findings(eng)
+    return bool(findings) and _run_is_terminal(eng)
+
+
+def _scope_is_source(eng: Path) -> bool:
+    """True when this engagement was granted SOURCE access (white-box), i.e. scope carries a `source:`
+    block. Best-effort + stdlib-only: prefers the generated runtime/scope.json (`source_repo`, written by
+    scope.build_projection), and falls back to detecting a top-level `source:` mapping in scope.yaml so a
+    hand-authored engagement with no runtime projection is still recognized. `scope.source` is the signal
+    that gates the WHITE-BOX requirements (app_model required, a populated code-audit surface slice,
+    candidate→finding reconciliation) — so a black-box engagement never trips them."""
+    sj = eng / "runtime" / "scope.json"
+    if sj.is_file():
+        try:
+            d = json.loads(sj.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and isinstance(d.get("source_repo"), dict) and d["source_repo"]:
+                return True
+        except Exception:  # noqa: BLE001 — a half-written projection must never crash the gate
+            pass
+    txt = _scope_text(eng)
+    # a `source:` key at column 0 whose block carries a repo_url/local_path/commit/branch sub-key
+    if re.search(r"(?m)^source:\s*$", txt) and re.search(r"(?m)^\s+(repo_url|local_path|commit|branch):", txt):
+        return True
+    return False
+
+
 # --- engagement diagnostics (Phase-2 consumer of runtime/diagnostics.json) ----------------------- #
 # runtime/diagnostics.json is produced per-engagement by the run engine (its schema lives in
 # skills/_contract/diagnostics.schema.json, owned elsewhere — referenced read-only here). We CONSUME
@@ -443,9 +502,9 @@ def _diagnostics_hard_errors(eng: Path, findings: list) -> list:
       `degraded-empty`/`failed` WITH a `degraded_reason`. A missing diagnostics file, a missing/contradictory
       outcome, or an unexplained empty HARD-fails (empty ≠ clean).
 
-    Reads only the stable run-record fields (`outcome`, `findings_count`, `degraded_reason`). [] when no
-    report is present."""
-    if not _report_present(eng):
+    Reads only the stable run-record fields (`outcome`, `findings_count`, `degraded_reason`). [] until the
+    gates arm (a report exists, or executor findings + a terminal run)."""
+    if not _gates_armed(eng, findings):
         return []
     rc = _reportable_findings_count(eng, findings)
     if rc > 0:
@@ -517,9 +576,9 @@ def _coverage_hard_errors(eng: Path) -> list:
     ledger (the juice-shop-2026-10-20 failure: XSS/auth/XXE never ran, clean report anyway). At that
     point a MISSING ledger (strict) or any `pending`/absent category is a FAIL, not a warning.
 
-    Returns [] when no report is present (hunting phase) or coverage can't be checked (surfaced
+    Returns [] until the gates arm (hunting phase) or coverage can't be checked (surfaced
     elsewhere — don't fabricate a failure)."""
-    if not _report_present(eng):
+    if not _gates_armed(eng):
         return []
     cov = _try_import_coverage()
     if not cov:
@@ -552,40 +611,165 @@ def _try_import_surface():
 
 
 def _surface_hard_errors(eng: Path) -> list:
-    """HARD surface gate (fix #5, strict since fix: universal emission) — active once a report exists.
+    """HARD surface gate (fix #5, strict since fix: universal emission) — active once the gates arm.
 
-    A report must not ship with surface recon discovered but no executor tested (the leak category
+    A closed audit must not ship with surface recon discovered but no executor tested (the leak category
     coverage can't see). Now that the recon feeders emit the ledger universally and `surface.py --plan`
-    is idempotent, a MISSING ledger at report time is itself a FAIL (not a warning) — it means surface
+    is idempotent, a MISSING ledger at close is itself a FAIL (not a warning) — it means surface
     coverage was never tracked, the juice-shop-2026-10-20 blind spot. A PRESENT ledger is validated
-    STRICT, so an empty-but-present ledger (feeders didn't populate it) also fails. Mirrors how
-    `_coverage_hard_errors` treats a missing/incomplete coverage ledger at report time."""
-    if not _report_present(eng):
+    STRICT, so an empty-but-present ledger (feeders didn't populate it) also fails.
+
+    For a `scope.source` (white-box) engagement the strict check is SCOPED to the `routed_to:code-audit`
+    slice: the code-audit executor is the one consumer that must prove it closed the whole SOURCE surface
+    (entry points / source-audit leads / high-risk files / state-ops / authz-routes), independently of a
+    sibling's still-pending black-box recon surface in the same shared ledger. Scoping + strict also means
+    the gate CANNOT pass vacuously on zero code-audit surfaces — an empty slice fails, so a ledger holding
+    only black-box kinds is a recall gap, not a pass. Mirrors `_coverage_hard_errors`."""
+    if not _gates_armed(eng):
         return []
     if not (eng / "surface_ledger.json").is_file():
-        return ["surface gate (report present → a surface ledger is required): no surface_ledger.json — "
+        return ["surface gate (close → a surface ledger is required): no surface_ledger.json — "
                 "surface coverage was never tracked (run scripts/surface.py --plan --engagement <dir> "
                 "after recon; it is idempotent and safe to re-run)"]
     sf = _try_import_surface()
     if not sf:
         return []
+    source = _scope_is_source(eng)
+    routed_to = "code-audit" if source else None
     try:
         led = json.loads((eng / "surface_ledger.json").read_text(encoding="utf-8"))
-        ok, _lines, msgs = sf.validate(led, strict=True)
+        ok, _lines, msgs = sf.validate(led, strict=True, routed_to=routed_to)
     except Exception:  # noqa: BLE001
         return []
     if ok:
         return []
-    return [f"surface gate (report present → surface must be tested/accounted): {m}" for m in msgs]
+    tag = ("surface gate (scope.source → the code-audit source surface must be tested/accounted)" if source
+           else "surface gate (close → surface must be tested/accounted)")
+    return [f"{tag}: {m}" for m in msgs]
 
 
 def _surface_warnings(eng: Path) -> list:
-    """Soft nudge DURING the hunt (no report yet): emit the surface ledger after recon so the
-    report-time strict gate has something to check."""
-    if not _report_present(eng) and not (eng / "surface_ledger.json").is_file():
+    """Soft nudge DURING the hunt (gates not yet armed): emit the surface ledger after recon so the
+    close-time strict gate has something to check."""
+    if not _gates_armed(eng) and not (eng / "surface_ledger.json").is_file():
         return ["no surface_ledger.json yet — emit it after recon (scripts/surface.py --plan "
-                "--engagement <dir>); it becomes a hard gate once a report exists"]
+                "--engagement <dir>); it becomes a hard gate at close"]
     return []
+
+
+def _code_audit_surface_count(eng: Path) -> int:
+    """How many ledger surfaces are routed to the code-audit consumer (the white-box source slice).
+    0 means the source surface was never enumerated (the ledger holds only black-box recon kinds)."""
+    sl = eng / "surface_ledger.json"
+    if not sl.is_file():
+        return 0
+    try:
+        led = json.loads(sl.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return 0
+    return sum(1 for s in (led.get("surfaces") or [])
+               if isinstance(s, dict) and "code-audit" in (s.get("routed_to") or []))
+
+
+def _whitebox_shape_errors(eng: Path) -> list:
+    """HARD white-box-shape gate (fix #3) — active only for a `scope.source` engagement once the gates
+    arm. A source-granted audit MUST have produced the white-box model and enumerated the source surface,
+    or it isn't a white-box audit at all — it is a black-box recon run wearing a source grant:
+
+      * `code-audit/app_model.json` (the required white-box model artifact) must exist; AND
+      * the surface ledger must carry >=1 `routed_to:code-audit` surface.
+
+    A ledger holding only black-box kinds (endpoint/form/sink, all discovered_by content-discovery) with
+    ZERO code-audit-routed surfaces is a RECALL GAP — the white-box pipeline never modeled the app or
+    enumerated its source surface (the shopware-2026-11-19 failure: 175 black-box surfaces, 0 code-audit,
+    no app_model) — not a pass. [] for a black-box engagement or before the gates arm."""
+    if not _scope_is_source(eng):
+        return []
+    if not _gates_armed(eng):
+        return []
+    errs = []
+    if not (eng / "code-audit" / "app_model.json").is_file():
+        errs.append("white-box gate (scope.source → the app model is required): no code-audit/app_model.json "
+                    "— the required white-box model artifact was never written. Model the app (entry points / "
+                    "state-ops / authz-routes / high-risk files) first; scripts/surface.py --plan seeds the "
+                    "code-audit surface slice from it.")
+    if _code_audit_surface_count(eng) == 0:
+        errs.append("white-box gate (scope.source → the source surface must be enumerated + routed): the "
+                    "surface ledger has ZERO routed_to:code-audit surfaces — it holds only black-box recon "
+                    "surface, so the white-box source surface (entry points / source-audit leads / high-risk "
+                    "files / state-ops / authz-routes) was never enumerated. Run scripts/surface.py --plan "
+                    "after the source-audit + app_model so the code-audit slice is populated.")
+    return errs
+
+
+def _source_candidate_ids(eng: Path) -> list:
+    """The source-audit candidate ids (sa-*) from source-audit/source_context.json — the sink/lead
+    candidates a white-box audit must each reconcile (confirm/refute as a finding, or test/skip as a
+    source-lead surface). [] when there is no source_context.json."""
+    sc = eng / "source-audit" / "source_context.json"
+    if not sc.is_file():
+        return []
+    try:
+        d = json.loads(sc.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for c in (d.get("candidates") or []):
+        if isinstance(c, dict) and c.get("id"):
+            out.append(str(c["id"]))
+    return out
+
+
+def _reconciled_candidate_ids(eng: Path, findings: list) -> set:
+    """Candidate ids that ARE accounted for: referenced by a finding's `candidate_refs`, OR carried by a
+    `source-lead` surface marked tested/skipped (the surface value begins with the candidate id, e.g.
+    'sa-001 sqli @ db.py:20')."""
+    reconciled = set()
+    for f in (findings or []):
+        if isinstance(f, dict):
+            for r in (f.get("candidate_refs") or []):
+                reconciled.add(str(r))
+    sl = eng / "surface_ledger.json"
+    if sl.is_file():
+        try:
+            led = json.loads(sl.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            led = {}
+        for s in (led.get("surfaces") or []):
+            if not isinstance(s, dict) or s.get("kind") != "source-lead":
+                continue
+            if str(s.get("status")) not in ("tested", "skipped"):
+                continue
+            tok = str(s.get("value") or "").split(" ", 1)[0]  # "sa-001 sqli @ ..." -> "sa-001"
+            if tok:
+                reconciled.add(tok)
+    return reconciled
+
+
+def _candidate_reconciliation_errors(eng: Path, findings: list) -> list:
+    """HARD candidate→finding reconciliation gate (fix #6) — `scope.source` engagements, once armed.
+
+    Every source_context candidate id must be RECONCILED: either referenced by a finding's `candidate_refs`
+    (the lead became a confirmed/refuted finding), OR carried as a `source-lead` surface marked tested or
+    skipped (accounted for in the ledger). An unreconciled candidate is a recall gap — a dangerous-sink
+    lead the white-box audit neither turned into a finding nor explicitly accounted for. [] for a black-box
+    engagement, before the gates arm, or when there is no source_context."""
+    if not _scope_is_source(eng):
+        return []
+    if not _gates_armed(eng, findings):
+        return []
+    cand_ids = _source_candidate_ids(eng)
+    if not cand_ids:
+        return []
+    reconciled = _reconciled_candidate_ids(eng, findings)
+    unreconciled = [cid for cid in cand_ids if cid not in reconciled]
+    if not unreconciled:
+        return []
+    shown = ", ".join(unreconciled[:12]) + ("…" if len(unreconciled) > 12 else "")
+    return [f"candidate-reconciliation gate (scope.source → every source_context candidate must become a "
+            f"finding or be accounted for): {len(unreconciled)}/{len(cand_ids)} candidate(s) unreconciled "
+            f"({shown}) — cite each in a finding's candidate_refs, or mark its source-lead surface "
+            f"tested/skipped (with a reason) in the surface ledger."]
 
 
 def _try_import_notebook():
@@ -641,7 +825,7 @@ def _reconverge_hard_errors(eng: Path) -> list:
     """HARD re-convergence gate (fix #6) — active only when a report AND a non-empty re-convergence
     inbox both exist. A report must not ship while mid-hunt discoveries (new signals/surface recorded
     in reconvergence/inbox.jsonl) remain un-routed — the single-pass leak. No inbox => no gate."""
-    if not _report_present(eng):
+    if not _gates_armed(eng):
         return []
     rc = _try_import_reconverge()
     if not rc:
@@ -694,8 +878,8 @@ def _coordination_integrity_errors(eng: Path) -> list:
     a FAIL: inbox signals ⊄ the routing vocab, inbox/surface-ledger kinds ⊄ the enum, or
     coverage_ledger.signals_used ⊄ the vocab. Reads the RAW artifacts (so a fold-in cannot hide it).
 
-    Returns [] when no report is present, or when the vocab/enum can't be read (surfaced elsewhere)."""
-    if not _report_present(eng):
+    Returns [] until the gates arm, or when the vocab/enum can't be read (surfaced elsewhere)."""
+    if not _gates_armed(eng):
         return []
     vocab = _routing_signal_vocab()
     kinds = _surface_kind_enum()
@@ -816,7 +1000,7 @@ def _recall_check(eng: Path) -> tuple:
     """(hard_errors, warnings) for the recall-audit gate. HARD only once a report exists: a gated recall
     gap (shallow-clear / skipped-but-signalled / never-run) must be closed (escalate + re-run the class) or
     explicitly accepted. An accepted gap is surfaced as a warning so the exception is never silent."""
-    if not _report_present(eng):
+    if not _gates_armed(eng):
         return [], []
     ra = _try_import_recall_audit()
     if not ra:
@@ -870,7 +1054,7 @@ def _try_import_chain_validate():
 def _chain_hard_errors(eng: Path) -> list:
     """HARD attack-chain gate (fix: no attack-chain validator) — active only once a report exists. Every
     chain step must resolve to an accepted/blocked finding, and every chain finding must be composite."""
-    if not _report_present(eng):
+    if not _gates_armed(eng):
         return []
     cv = _try_import_chain_validate()
     if not cv:
@@ -890,8 +1074,8 @@ def _duplicate_id_errors(eng: Path, findings: list) -> list:
     aggregated across the per-skill */findings.json files, a collision silently collapses/confuses the
     consolidated report. Mirrors the coverage hard-gate: no report → no gate.
 
-    Returns one error per duplicated id (with its occurrence count); [] when no report is present."""
-    if not _report_present(eng):
+    Returns one error per duplicated id (with its occurrence count); [] until the gates arm."""
+    if not _gates_armed(eng, findings):
         return []
     counts = Counter(f.get("id") for f in findings
                      if isinstance(f, dict) and f.get("id"))
@@ -1170,7 +1354,7 @@ def _independent_review_check(eng: Path, findings: list) -> tuple:
     un-reviewed, un-accepted finding a HARD error; before a report it is a soft warning."""
     roster = _verify_roster()
     accepts = _self_verified_accepts(eng)
-    report = _report_present(eng)
+    report = _gates_armed(eng, findings)
     flagged, accepted = [], []
     for f in findings:
         if not isinstance(f, dict):
@@ -1269,6 +1453,13 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # a reason). An unexplained empty is a silent "we produced nothing", not a clean result (empty ≠ clean).
     diagnostics_errors = _diagnostics_hard_errors(eng, findings)
 
+    # White-box-shape gate (fix #3): a `scope.source` engagement MUST carry the app model + a populated
+    # code-audit surface slice — a source grant with only black-box recon surface is a recall gap, not a
+    # pass. Candidate→finding reconciliation (fix #6): every source_context candidate must become a finding
+    # (candidate_refs) or be accounted for as a tested/skipped source-lead. Both no-op for black-box.
+    whitebox_errors = _whitebox_shape_errors(eng)
+    candidate_errors = _candidate_reconciliation_errors(eng, findings)
+
     results = []
     for f in findings:
         ok, detail, warns = check_finding(f, eng, scope_text, cvss_mod, verdict_ids)
@@ -1308,9 +1499,13 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
 
     failed = [r for r in results if not r["passed"]]
     all_warnings = top_warnings + [w for r in results for w in r["warnings"]]
+    # The verdict is BOUND to every hard gate (fix #9): a "complete/clean" PASS cannot be emitted while
+    # any hard-error list is non-empty — so a human/subagent swarm cannot narrate "hardened" past an open
+    # ledger, an untested source surface, or an unreconciled candidate.
     gate_ok = ((not failed) and (not coverage_errors) and (not review_errors)
                and (not dup_errors) and (not integrity_errors) and (not recall_errors)
-               and (not chain_errors) and (not diagnostics_errors))
+               and (not chain_errors) and (not diagnostics_errors)
+               and (not whitebox_errors) and (not candidate_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -1322,6 +1517,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "recall_errors": recall_errors,
                           "chain_errors": chain_errors,
                           "diagnostics_errors": diagnostics_errors,
+                          "whitebox_errors": whitebox_errors,
+                          "candidate_reconciliation_errors": candidate_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -1360,6 +1557,16 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "outcome — empty ≠ clean):")
             for dge in diagnostics_errors:
                 print(f"  - {dge}")
+        if whitebox_errors:
+            print("\n✗ white-box-shape gate FAILED (scope.source → an app model + a populated code-audit "
+                  "surface slice are required):")
+            for we in whitebox_errors:
+                print(f"  - {we}")
+        if candidate_errors:
+            print("\n✗ candidate-reconciliation gate FAILED (scope.source → every source_context candidate "
+                  "must become a finding or be accounted for):")
+            for ce2 in candidate_errors:
+                print(f"  - {ce2}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -1375,7 +1582,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
               f"{len(review_errors)} independent-review error(s), {len(dup_errors)} duplicate-id error(s), "
               f"{len(integrity_errors)} coordination-integrity error(s), {len(recall_errors)} recall-audit "
               f"error(s), {len(chain_errors)} attack-chain error(s), {len(diagnostics_errors)} diagnostics "
-              f"error(s), {len(all_warnings)} warning(s).")
+              f"error(s), {len(whitebox_errors)} white-box-shape error(s), {len(candidate_errors)} "
+              f"candidate-reconciliation error(s), {len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -1401,6 +1609,14 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("A zero-finding report can't prove it was a real clean test => emit runtime/diagnostics.json "
                   "whose latest run outcome is 'clean-tested', or 'degraded-empty'/'failed' with a "
                   "degraded_reason, before reporting (empty ≠ clean).")
+        if whitebox_errors:
+            print("A source-granted (scope.source) engagement lacks its white-box model / source surface => "
+                  "write code-audit/app_model.json and run scripts/surface.py --plan so the code-audit surface "
+                  "slice is enumerated + tested, before reporting.")
+        if candidate_errors:
+            print("A source_context candidate was never confirmed/refuted as a finding nor accounted for => "
+                  "cite it in a finding's candidate_refs, or mark its source-lead surface tested/skipped, "
+                  "before reporting.")
     return gate_ok
 
 

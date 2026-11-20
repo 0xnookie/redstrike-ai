@@ -480,6 +480,13 @@ def load_source_surfaces(eng: Path) -> list:
 
     # --- app_model.json: entry points (routes/handlers/CLI/jobs/queue-consumers/webhooks) + privileged ops ---
     am = _read_json(eng / "code-audit" / "app_model.json") or {}
+    # Whether the app model actually PROVIDES each typed surface. When it is thin/absent for a type, the
+    # structural-fact loop below derives that typed surface from source_context.structural[] instead, so a
+    # white-box run whose app_model was never written still gets entry-point / authz-route / state-op
+    # coverage (not just generic source-leads) — "(+ source_context.structural[] when app_model is thin)".
+    have_entry = bool(am.get("entry_points"))
+    have_state = bool(am.get("state_ops"))
+    have_authz = bool(am.get("authz_routes"))
     for ep in am.get("entry_points", []) or []:
         if not isinstance(ep, dict):
             add("entry-point", ep, "code-audit:app-model")
@@ -546,14 +553,28 @@ def load_source_surfaces(eng: Path) -> list:
     # security-relevant structural facts are leads too (an authz absence / route is closed, not skipped).
     _SEC_STRUCT = {"route", "state-change-route", "auth-guard", "unauth-route", "id-from-param",
                    "missing-ownership-check", "mass-assignment", "writable-path", "web-exec-path"}
+
+    def _structural_kind(k):
+        """Pick the surface kind for a structural fact. When the app model is THIN for a type, a matching
+        fact becomes that TYPED surface (so the code-audit slice carries entry-point/authz-route/state-op
+        coverage without an app_model); otherwise it is a generic source-lead (unchanged behavior)."""
+        if not have_state and k == "state-change-route":
+            return "state-op"
+        if not have_entry and k in ("route", "unauth-route", "web-exec-path"):
+            return "entry-point"
+        if not have_authz and k in ("auth-guard", "missing-ownership-check"):
+            return "authz-route"
+        return "source-lead"
+
     for sfact in sc.get("structural", []) or []:
         if not isinstance(sfact, dict):
             continue
         k = sfact.get("kind")
         loc = _loc(sfact.get("file"), sfact.get("line"))
         sid = sfact.get("id") or "sf"
-        add("source-lead", f"{sid} {k} @ {loc}" if loc else f"{sid} {k}", "source-audit:structural")
-        if k in _SEC_STRUCT:
+        skind = _structural_kind(k)
+        add(skind, f"{sid} {k} @ {loc}" if loc else f"{sid} {k}", "source-audit:structural")
+        if skind != "source-lead" or k in _SEC_STRUCT:
             note_file(sfact.get("file"))
     for cc in sc.get("chain_candidates", []) or []:
         if not isinstance(cc, dict):

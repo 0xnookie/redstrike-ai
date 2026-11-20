@@ -32,6 +32,8 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -289,11 +291,134 @@ def loop_degraded_reason(reason: str, *, invocations: int, cumulative_cost: floa
     return None
 
 
+# --- audit-close artifacts (fix: the completeness gates ran dark) ------------
+# When the autorun pipeline crashed and a hunter swarm wrote findings.json / report.md directly (the
+# shopware-2026-11-19 failure), reporting never ran, so no report/findings_consolidated.json existed, the
+# coverage ledger stayed silent-green at 0, the surface ledger's code-audit slice was never populated, and
+# the hard completeness gates all early-returned []. These close-steps make the ledgers + report reflect
+# reality at audit close so the gates can SEE the engagement — each is BEST-EFFORT and never alters the
+# loop outcome.
+
+def _scope_is_source(eng_dir: Path) -> bool:
+    """True when this engagement was granted SOURCE access (white-box) — runtime/scope.json carries a
+    `source_repo` block (scope.build_projection writes it from scope.yaml's `source:`)."""
+    d = _read_json(Path(eng_dir) / "runtime" / "scope.json")
+    return isinstance(d, dict) and isinstance(d.get("source_repo"), dict) and bool(d["source_repo"])
+
+
+def _authoritative_findings(eng_dir: Path) -> list:
+    """The engagement's single source of truth for findings: the top-level findings.json when present
+    (the shared vault the swarm/executors write), else the per-skill `*/findings.json` union. Mirrors the
+    completion gate's discovery so the materialized report matches what verify scans."""
+    eng = Path(eng_dir)
+
+    def _flat(doc):
+        if isinstance(doc, list):
+            return [f for f in doc if isinstance(f, dict)]
+        if isinstance(doc, dict):
+            return [f for f in (list(doc.get("findings") or []) + list(doc.get("attack_chains") or []))
+                    if isinstance(f, dict)]
+        return []
+
+    root = _read_json(eng / "findings.json")
+    if root is not None:
+        return _flat(root)
+    acc = []
+    for p in sorted(eng.glob("*/findings.json")):
+        acc.extend(_flat(_read_json(p)))
+    return acc
+
+
+def _materialize_report(eng_dir: Path, findings: list) -> bool:
+    """Safety net (fix #2): write report/findings_consolidated.json from the authoritative findings when
+    reporting was SKIPPED — so (a) the completeness gates arm (report-present), and (b) the authoritative
+    set lands where verify scans. Conservative: NEVER clobbers an existing report, and no-ops when there
+    are no findings. Returns True only when it wrote the file."""
+    eng = Path(eng_dir)
+    out = eng / "report" / "findings_consolidated.json"
+    if out.is_file() or not findings:
+        return False
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        plain = [f for f in findings if not (f.get("composite") or f.get("_composite"))]
+        chains = [f for f in findings if (f.get("composite") or f.get("_composite"))]
+        doc = {
+            "generated": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "source": "runloop close (reporting was skipped — materialized from authoritative findings)",
+            "findings": plain,
+            "attack_chains": chains,
+        }
+        out.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def close_artifacts(repo: Path, eng_dir: Path, *, emit=None) -> None:
+    """Reconcile the ledgers + report with reality at audit close so the completeness gates can SEE the
+    engagement. Best-effort end to end — any failure degrades to a no-op and never breaks the flow:
+      1. scope.source: run `surface.py --plan` so the code-audit surface slice is populated even if the LLM
+         skipped the surface step (idempotent merge — preserves tested/skipped progress);
+      2. `coverage.py --close`: reconcile coverage_ledger.json findings_count+status from the authoritative
+         findings (a white-box run attributes them to code-audit) so it stops reading silent-green at 0;
+      3. materialize report/findings_consolidated.json when reporting was skipped (so the gates arm and the
+         authoritative set lands where verify scans)."""
+    emit = emit or (lambda _line: None)
+    eng, repo = Path(eng_dir), Path(repo)
+    source = _scope_is_source(eng)
+
+    if source:
+        script = repo / "scripts" / "surface.py"
+        if script.is_file():
+            try:
+                subprocess.run([sys.executable, str(script), "--plan", "--engagement", str(eng)],
+                               cwd=str(repo), check=False, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=120)
+            except Exception:
+                pass
+
+    cov = repo / "scripts" / "coverage.py"
+    if cov.is_file():
+        cmd = [sys.executable, str(cov), "--close", "--engagement", str(eng)]
+        if source:
+            cmd += ["--source-category", "code-audit"]
+        try:
+            subprocess.run(cmd, cwd=str(repo), check=False, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=60)
+        except Exception:
+            pass
+
+    try:
+        findings = _authoritative_findings(eng)
+        if _materialize_report(eng, findings):
+            emit(ui.info(f"reporting was skipped — materialized report/findings_consolidated.json from "
+                         f"{len(findings)} authoritative finding(s) so the completeness gates arm at close"))
+    except Exception:
+        pass
+
+
 def annotate_record(record: dict, loop: "LoopResult") -> dict:
     """Overlay the loop's whole-run stop reason onto a diagnostics record so the OUTCOME is honest:
     a budget-truncated / max-invocation / stuck / blocked run is degraded (coverage partial), not
-    'clean'. Never overwrites a real finding delivery (produced-findings) and leaves a cleanly
-    completed run (reason==done) exactly as classify_outcome decided."""
+    'clean'. Leaves a cleanly completed, gate-clear run (reason==done, gate_rc==0) exactly as
+    classify_outcome decided.
+
+    Also BINDS the outcome to the post-run gate (fix #9): when the completion/coverage gate REFUSED the
+    engagement (a non-zero `gate_rc` in the record — an open ledger / untested source surface /
+    unreconciled candidate), a 'complete/clean' outcome must not be emitted. A would-be produced-findings
+    / clean-tested outcome is downgraded to degraded-empty with the gate-refusal reason, so the console
+    (which reads the latest run's outcome + degraded_reason) shows the refusal instead of a false green —
+    a human/subagent swarm cannot narrate 'hardened' past an open gate."""
+    gate_rc = record.get("gate_rc")
+    if isinstance(gate_rc, int) and gate_rc != 0 and record.get("outcome") in (
+            diagnostics.PRODUCED, diagnostics.CLEAN):
+        note = ("the completion/coverage gate REFUSED this engagement (open ledger / untested source "
+                "surface / unreconciled candidate) — findings may exist but the audit is NOT report-ready; "
+                "run `redstrike verify <eng>` for the gate ledger")
+        prior = str(record.get("degraded_reason") or "").strip()
+        record["outcome"] = diagnostics.DEGRADED
+        record["degraded_reason"] = f"{prior} · {note}" if prior else note
+
     if loop.reason == DONE:
         return record
     if record.get("outcome") == diagnostics.PRODUCED:
@@ -419,6 +544,14 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
         emit(ui.info(f"invocation {invocations} complete · {_plural(outstanding_now, 'category')} "
                      f"still outstanding · {_plural(cur.findings, 'finding')} so far · "
                      f"${cumulative_cost:.4f} of ${max_budget_usd:.2f} used · resuming…"))
+
+    # --- audit close: reconcile the ledgers + materialize the report so the completeness gates can SEE the
+    #     engagement before the single post-run gate runs (fix: the gates ran dark when reporting was
+    #     skipped and a hunter swarm wrote findings directly). Best-effort; never alters the loop outcome. ---
+    try:
+        close_artifacts(repo, eng_dir, emit=emit)
+    except Exception:
+        pass
 
     # --- combine the legs into one whole-run result for the single gate + diagnostics pass ---
     pending_count = len(redrivable_ids(read_ledger(eng_dir)))

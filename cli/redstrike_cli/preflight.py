@@ -131,6 +131,17 @@ def find_bash() -> str | None:
     return shutil.which("bash")
 
 
+def lib_present(mod: str) -> bool:
+    """Is an importable Python module present, WITHOUT importing it (so a broken optional dep never
+    aborts preflight)? Used to surface `jsonschema` / PyYAML — both have bundled stdlib fallbacks, so
+    an absence is a ``warn`` (degraded to the built-in reader), never a blocking ``err``."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec(mod) is not None
+    except Exception:
+        return False
+
+
 def run_doctor(repo_root: Path, args: list[str] | None = None) -> tuple[int, str]:
     """Invoke scripts/doctor.sh (needs bash). Returns (exit_code, combined_output)."""
     script = repo_root / "scripts" / "doctor.sh"
@@ -174,6 +185,23 @@ def gather(repo_root: Path) -> list[Check]:
 
     pv = sys.version_info
     checks.append(Check("ok", "python", f"{pv.major}.{pv.minor}.{pv.micro}"))
+
+    # Optional Python validators: jsonschema (authoritative full-spec finding/schema validation) and
+    # PyYAML (exact scope.yaml parsing). Both have bundled stdlib fallbacks, so absence is degraded, not
+    # fatal — surface it as a `warn` with the install hint so operators know full-spec validation is off.
+    for mod, label, why in (
+        ("jsonschema", "python: jsonschema", "full-spec finding/schema validation"),
+        ("yaml", "python: PyYAML", "exact scope.yaml parsing"),
+    ):
+        if lib_present(mod):
+            checks.append(Check("ok", label, "present"))
+        else:
+            checks.append(Check(
+                "warn", label,
+                f"not installed — stdlib fallback in use for {why}; "
+                f"`pip install 'redstrike-cli[validate]'` enables the full validator",
+            ))
+
     node = shutil.which("node")
     checks.append(
         Check("ok", "node", node) if node else Check("warn", "node", "absent (subagents/Playwright/MCP use Node)")

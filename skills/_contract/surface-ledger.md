@@ -32,6 +32,10 @@ reads `code-audit/app_model.json` + `source-audit/source_context.json` and enume
 - `authz-route` — a route/handler × its required privilege (one authorization-matrix cell), enumerated into
   `app_model.authz_routes`; flags a state-changing/sensitive route with NO authz, or one that bypasses a central
   authz backstop. A FIRST-CLASS enumerated surface grep can't see ("no authz annotation" is an absence).
+When `app_model.json` is thin or absent, the `source-audit` feeder is the FALLBACK producer of these kinds —
+`surface.py --plan` seeds `source-lead` / `state-op` / `authz-route` (and typed `entry-point`) rows from
+`source-audit/source_context.json` `structural[]`, so the business-logic and authorization passes still have an
+enumerated surface to close instead of a vacuous empty slice.
 `code-audit` closes each (`--mark … --status tested --reason "<confirmed|ruled-out|open-proof-gap>: …"`, or a
 reasoned `skipped`) and gates its OWN slice with `--validate --routed-to code-audit --strict`, so in a combined
 grey+white-box engagement it isn't blocked by a sibling's pending black-box surface in the same shared ledger.

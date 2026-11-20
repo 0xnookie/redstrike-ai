@@ -292,6 +292,20 @@ def selftest() -> int:
     assert "web3" in led3["active_phases"], "web3 phase should auto-activate"
     sc = next(c for c in led3["categories"] if c["id"] == "sc")
     assert sc["status"] == "pending", "sc should route when contracts in scope"
+    # close-write: reconcile findings_count + flip pending->attempted from the authoritative findings.
+    _led = {"categories": [{"id": "code-audit", "status": "pending", "findings_count": 0},
+                           {"id": "xss", "status": "pending", "findings_count": 0}]}
+    _chg = reconcile_counts(_led, [{"id": "RS-1", "title": "t"}, {"id": "RS-2", "composite": True}],
+                            source_category="code-audit")
+    _ca = next(c for c in _led["categories"] if c["id"] == "code-audit")
+    assert _ca["status"] == "attempted" and _ca["findings_count"] == 1, _ca  # composite excluded
+    _xss = next(c for c in _led["categories"] if c["id"] == "xss")
+    assert _xss["status"] == "pending" and _xss["findings_count"] == 0, _xss  # no findings -> untouched
+    assert _chg == ["code-audit"], _chg
+    # per-skill _rs_source_skill attribution (no source_category needed)
+    _led2 = {"categories": [{"id": "idor", "status": "pending", "findings_count": 0}]}
+    reconcile_counts(_led2, [{"id": "RS-3", "_rs_source_skill": "idor"}])
+    assert _led2["categories"][0]["status"] == "attempted" and _led2["categories"][0]["findings_count"] == 1
     print("coverage.py selftest: OK "
           f"({len(ids)} categories, {len(set(agents))} executors, orphans wired, phases auto-activate)")
     return 0
@@ -357,6 +371,81 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
     return 0
 
 
+# --- close-write: reconcile the ledger with the authoritative findings at audit close ------------- #
+# The silent-green-at-0 failure (shopware-2026-11-19): the autorun crashed, a hunter swarm wrote
+# findings.json directly, and nobody flipped the coverage ledger — so every category stayed `pending`
+# with findings_count=0 even though 48 findings (code-audit) existed, and the console read a false green.
+# `close_write` reconciles the ledger FROM the authoritative findings at close so the ledger reflects
+# reality instead of leaving it silent-green.
+
+def _finding_category_counts(findings, *, source_category=None):
+    """Count non-composite findings per coverage-category id. Attribution:
+      * a per-skill `_rs_source_skill` tag (the per-skill executor layout) maps a finding to that id;
+      * `source_category` (e.g. 'code-audit' for a white-box run) claims every otherwise-unattributed
+        non-composite finding — in a source engagement all findings come from the code-audit executor.
+    Returns {category_id: count}. Pure (no I/O)."""
+    from collections import Counter
+    counts = Counter()
+    for f in findings or []:
+        if not isinstance(f, dict):
+            continue
+        if f.get("composite") or f.get("_composite"):
+            continue
+        skill = f.get("_rs_source_skill")
+        if skill:
+            counts[str(skill)] += 1
+        elif source_category:
+            counts[str(source_category)] += 1
+    return dict(counts)
+
+
+def reconcile_counts(led, findings, *, source_category=None):
+    """Update a coverage ledger IN PLACE from the engagement's authoritative findings so it stops reading
+    'silent-green at 0' when findings exist. For each category that produced findings: set findings_count
+    and, when it is still `pending`/`blocked`, flip it to `attempted` (it clearly ran). A category with no
+    findings is left untouched (so the close-write only ever ADDS accuracy, never hides a real gap). Returns
+    the list of changed category ids. Pure (operates on the passed dict)."""
+    counts = _finding_category_counts(findings, source_category=source_category)
+    changed = []
+    for c in led.get("categories", []) or []:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("id")
+        n = counts.get(str(cid), 0)
+        if n <= 0:
+            continue
+        dirty = False
+        if int(c.get("findings_count", 0) or 0) != n:
+            c["findings_count"] = n
+            dirty = True
+        if str(c.get("status", "")).lower() in ("pending", "blocked"):
+            c["status"] = "attempted"
+            dirty = True
+        if dirty:
+            changed.append(cid)
+    return changed
+
+
+def close_write(eng: Path, findings=None, *, source_category=None) -> list:
+    """Reconcile coverage_ledger.json from the engagement's authoritative findings at CLOSE and persist it
+    (atomic). Best-effort: no ledger / unreadable ledger => no-op ([]). When `findings` is None, discovers
+    them the way the completion gate does (root / per-skill / consolidated). Returns changed category ids."""
+    ledger_path = eng / LEDGER_NAME
+    if not ledger_path.is_file():
+        return []
+    try:
+        led = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    if findings is None:
+        findings = _discover_findings(eng) or []
+    changed = reconcile_counts(led, findings, source_category=source_category)
+    if changed:
+        led["generated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+    return changed
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Redstrike deterministic routing + coverage ledger.")
     ap.add_argument("--plan", action="store_true", help="emit a coverage ledger from map + signals")
@@ -368,6 +457,12 @@ def main() -> int:
     ap.add_argument("--note", help="reason/note for --mark (required when status is skipped/n/a/blocked)")
     ap.add_argument("--escalations", help="--mark: comma-separated escalation.py ladder technique id(s) tried "
                     "(e.g. derive-not-assume,encoding-ladder); MERGED into the entry's escalations list")
+    ap.add_argument("--close", action="store_true",
+                    help="reconcile the ledger's findings_count+status from the engagement's findings at "
+                         "close (needs --engagement); use --source-category for a white-box run")
+    ap.add_argument("--source-category", dest="source_category", default=None,
+                    help="--close: attribute every otherwise-unattributed finding to this category id "
+                         "(e.g. code-audit for a scope.source engagement)")
     ap.add_argument("--list", action="store_true", help="print the routing map categories")
     ap.add_argument("--selftest", action="store_true", help="internal consistency check (CI)")
     ap.add_argument("--signals", help="signals JSON file, or '-' for stdin (omit = none => attempt all)")
@@ -402,6 +497,20 @@ def main() -> int:
             print(json.dumps(led, indent=2) if args.as_json else None)
             if not args.as_json:
                 _print_plan_human(led)
+        return 0
+
+    if args.close:
+        if not args.engagement:
+            ap.error("--close needs --engagement")
+        changed = close_write(Path(args.engagement), source_category=args.source_category)
+        if args.as_json:
+            print(json.dumps({"engagement": args.engagement, "reconciled": changed}, indent=2))
+        else:
+            if changed:
+                print(f"close: reconciled {len(changed)} categor"
+                      f"{'y' if len(changed) == 1 else 'ies'} from findings: {', '.join(map(str, changed))}")
+            else:
+                print("close: no coverage categories to reconcile (no ledger, or no findings matched a category)")
         return 0
 
     if args.mark:
