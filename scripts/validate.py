@@ -504,6 +504,11 @@ for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_c
 # reviewer, and every <x>-verify reviewer must have a matching executor — no orphan on either side.
 _exec_names = {p.name for p in skills_dir.iterdir() if p.is_dir() and (p / "verify.md").is_file()}
 _agent_verify = {p.name[:-len("-verify.md")] for p in agents_dir.glob("*-verify.md")} if agents_dir.is_dir() else set()
+# cross-cutting reviewers that are deliberately NOT 1:1 with an executor (one reviewer
+# spanning many classes, e.g. the cross-model adversarial second-verifier) — exempt from
+# the executor<->reviewer symmetry check AND from the per-class reviewer count (#15).
+_CROSS_CUTTING_VERIFIERS = {"adversarial"}
+_agent_verify -= _CROSS_CUTTING_VERIFIERS
 checked["verify_bindings"] = len(_exec_names)
 for orphan in sorted(_exec_names - _agent_verify):
     err(f"binding: skills/{orphan}/verify.md has no matching .claude/agents/{orphan}-verify.md")
@@ -535,7 +540,8 @@ for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_c
 # new skill/executor/reviewer can't land while the badges + body quietly drift out of date.
 _n_skills = len(_skill_md_dirs)
 _n_executors = sum(1 for p in _skill_md_dirs if (p / "verify.md").is_file())
-_n_reviewers = len(list(agents_dir.glob("*-verify.md"))) if agents_dir.is_dir() else 0
+_n_reviewers = len([p for p in agents_dir.glob("*-verify.md")
+                    if p.name[:-len("-verify.md")] not in _CROSS_CUTTING_VERIFIERS]) if agents_dir.is_dir() else 0
 _n_review_only = _n_skills - _n_executors
 _readme = ROOT / "README.md"
 if not _readme.is_file():

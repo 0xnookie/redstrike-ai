@@ -35,6 +35,7 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -50,6 +51,9 @@ MAX_INVOCATIONS = "max-invocations"
 WALL_CLOCK = "wall-clock"
 BLOCKED_ON_APPROVAL = "blocked-on-approval"
 NO_PROGRESS = "no-progress"
+ENGINE_CRASH = "engine-crash"          # a leg's `claude -p` exited rc!=0 and could not be recovered
+                                       # (retries + fresh-session fallback exhausted). DISTINCT from
+                                       # no-progress: an ENGINE failure, never "the run is stuck".
 
 # --- ceilings / thresholds ---------------------------------------------------
 DEFAULT_MAX_INVOCATIONS = 10            # env REDSTRIKE_MAX_INVOCATIONS
@@ -57,6 +61,9 @@ DEFAULT_MAX_WALL_SECONDS = 24 * 3600    # env REDSTRIKE_MAX_WALL_SECONDS (genero
 BUDGET_FLOOR = 0.25                     # stop once remaining global budget <= this
 NO_PROGRESS_TOOLCALLS = 1              # "~zero new tool calls" for a leg == did nothing
 STALL_LIMIT = 2                        # consecutive no-progress legs that trip the breaker
+DEFAULT_CRASH_RETRIES = 2              # env REDSTRIKE_CRASH_RETRIES — bounded retries of a CRASHED
+                                       # leg (rc!=0) with backoff BEFORE it counts as a failure
+RETRY_BACKOFF_SECONDS = 2.0           # env REDSTRIKE_RETRY_BACKOFF_SECONDS — linear per-attempt base
 
 
 # --- small env helpers -------------------------------------------------------
@@ -266,10 +273,18 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
 
 # --- diagnostics overlay (pure) ----------------------------------------------
 def loop_degraded_reason(reason: str, *, invocations: int, cumulative_cost: float,
-                         max_budget: float, pending_count: int, pending_approvals: int) -> str | None:
+                         max_budget: float, pending_count: int, pending_approvals: int,
+                         crash_cause: str | None = None) -> str | None:
     """A human, honest one-liner for why the WHOLE looped run ended (None when it completed)."""
     if reason == DONE:
         return None
+    if reason == ENGINE_CRASH:
+        cause = f" — {crash_cause}" if crash_cause else ""
+        return (f"stopped after {invocations} invocation(s): the engine CRASHED and could not be "
+                f"recovered (bounded retries + a fresh-session fallback were exhausted){cause}; "
+                f"{pending_count} category/ies still outstanding. This is an ENGINE failure, NOT a "
+                f"stuck run — see runtime/error.log + runtime/diagnostics.json legs[], fix the cause, "
+                f"then relaunch with --resume")
     if reason == BUDGET_EXHAUSTED:
         return (f"stopped after {invocations} invocation(s): the global budget (${max_budget:.2f}) "
                 f"was exhausted (${cumulative_cost:.2f} spent) with {pending_count} category/ies "
@@ -419,9 +434,23 @@ def annotate_record(record: dict, loop: "LoopResult") -> dict:
         record["outcome"] = diagnostics.DEGRADED
         record["degraded_reason"] = f"{prior} · {note}" if prior else note
 
+    # Per-leg cause capture: surface EVERY leg attempt's own outcome (rc / subtype / cost / tool_calls
+    # / first-exception) so a failing NON-final leg's cause survives — previously only the last leg's
+    # RunSummary was kept. Attached whenever the loop captured any legs (new autonomous path only).
+    if getattr(loop, "legs", None):
+        record["legs"] = list(loop.legs)
+
     if loop.reason == DONE:
         return record
     if record.get("outcome") == diagnostics.PRODUCED:
+        return record
+    # An unrecoverable engine crash is a FAILED run (distinct from degraded-empty): the run did not
+    # complete because the ENGINE died, not because the surface was empty or the breaker tripped. Carry
+    # the captured crash cause and do NOT let the generic stop_detail downgrade it to degraded.
+    if loop.reason == ENGINE_CRASH:
+        record["outcome"] = diagnostics.FAILED
+        if loop.stop_detail:
+            record["degraded_reason"] = loop.stop_detail
         return record
     if loop.stop_detail:
         record["outcome"] = diagnostics.DEGRADED
@@ -439,6 +468,7 @@ class LoopResult:
     stop_detail: str | None = None
     budgets: list = field(default_factory=list)   # the --max-budget-usd passed to each leg
     pending_count: int = 0
+    legs: list = field(default_factory=list)      # per-attempt cause capture (diagnostics.leg_record)
 
 
 def _cost_of(res) -> float:
@@ -462,30 +492,161 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
+# --- single-leg execution + crash recovery -----------------------------------
+# WAVE-2 SEAM. A later wave promotes `drive` from a single-session resumer into a worker-pool
+# scheduler of N parallel legs. `_execute_leg` is the ATOMIC unit of engine work — the per-shard call
+# a pool fans out; `_run_leg` wraps it with the rc-branching / bounded-retry / resume-fallback a pool
+# can reuse per shard. Keep these two factored OUT of `drive` so the pool can call the single-leg path
+# directly; do not inline them back. `drive` composes `_run_leg` across resumed legs (the single
+# session) — the pool composes it across shards.
+
+@dataclass
+class _LegOutcome:
+    """The result of running ONE logical leg (its first attempt plus any crash retries / fallback)."""
+    res: object                                 # RunResult of the FINAL attempt (success or last crash)
+    crashed: bool = False                       # True iff rc!=0 after retries + fallback were exhausted
+    cost: float = 0.0                           # total cost across every attempt in this logical leg
+    attempts: list = field(default_factory=list)  # one diagnostics.leg_record per attempt
+    reseeded: bool = False                      # the fresh-session fallback was used
+    cause: str | None = None                    # short human crash cause when `crashed`
+
+
+def _execute_leg(engine, prep, repo: Path, eng_dir: Path, *, prompt: str, resume: bool,
+                 extra_allow: list, max_turns: int, leg_budget: float, audit: Path):
+    """Build + run EXACTLY ONE engine leg; return its ``RunResult``. The atomic unit of engine work
+    (see the WAVE-2 SEAM note above — this is what a worker pool calls per shard)."""
+    inv = engine.build_invocation(
+        prep, repo, prompt, mode="autonomous", allow=extra_allow,
+        max_turns=max_turns, max_budget=leg_budget, resume=resume,
+    )
+    return engine.run(prep, eng_dir, inv, mode="autonomous", audit=audit)
+
+
+def _reseed_session(prep, eng_dir: Path) -> str | None:
+    """Mint a FRESH `claude` session id for the resume-failure fallback and record it as the new resume
+    anchor. Returns the new id (None if it can't be set). The engagement STATE is already on disk
+    (ledgers / findings), so a brand-new session seeded by the continue-prompt rebuilds context — this
+    is how we recover from an un-resumable session (the common `--resume` crash cause). Best-effort:
+    the in-memory `prep.session_id` is authoritative for THIS process; persisting session.json just
+    lets a later operator `--resume` target the working session."""
+    try:
+        new_id = str(uuid.uuid4())
+        prep.session_id = new_id
+    except Exception:
+        return None
+    try:
+        sf = Path(eng_dir) / "runtime" / "session.json"
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(json.dumps({
+            "session_id": new_id,
+            "created": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "note": "reseeded by runloop after a resume-leg crash (un-resumable-session fallback)",
+        }, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return new_id
+
+
+def _run_leg(engine, prep, repo: Path, eng_dir: Path, *, prompt: str, resume: bool,
+             extra_allow: list, max_turns: int, audit: Path, engagement_id: str,
+             cost_so_far: float, max_budget_usd: float, crash_retries: int,
+             sleep, backoff: float) -> _LegOutcome:
+    """Run ONE logical leg, BRANCHING ON ``rc`` so an engine CRASH is handled on its own path and can
+    no longer masquerade as a no-progress stall:
+
+      1. run the leg once (`_execute_leg`);
+      2. while it CRASHED (rc!=0), RETRY up to ``crash_retries`` times with linear backoff — each
+         attempt's cost still counts toward the global budget, and a retry is skipped once the
+         remaining budget can no longer afford one;
+      3. if a RESUME leg is still crashing after its retries, try ONE fresh `--session-id` leg seeded
+         by the continue-prompt + the on-disk ledgers (state is persisted) — the un-resumable-session
+         recovery;
+      4. capture EVERY attempt's cause into ``attempts`` so a failing NON-final attempt is never lost.
+
+    Returns a ``_LegOutcome``; ``crashed`` is True only when the leg could not be made to run."""
+    out = _LegOutcome(res=None)
+
+    def _remaining() -> float:
+        return max_budget_usd - cost_so_far - out.cost
+
+    def _attempt(p: str, r: bool, kind: str, attempt_no: int):
+        leg_budget = max(_remaining(), BUDGET_FLOOR)
+        res = _execute_leg(engine, prep, repo, eng_dir, prompt=p, resume=r,
+                           extra_allow=extra_allow, max_turns=max_turns,
+                           leg_budget=leg_budget, audit=audit)
+        cost = _cost_of(res)
+        out.cost += cost
+        out.res = res
+        out.attempts.append(diagnostics.leg_record(
+            attempt=attempt_no, kind=kind, rc=getattr(res, "rc", 0), cost=cost,
+            summary=getattr(res, "summary", None)))
+        return res
+
+    def _crashed(res) -> bool:
+        return getattr(res, "rc", 0) not in (0, None)
+
+    # attempt 1 — the leg as asked (resume or fresh initial)
+    res = _attempt(prompt, resume, "resume" if resume else "initial", 1)
+
+    # bounded retries with backoff, while it keeps crashing and the budget still affords one
+    n = 0
+    while _crashed(res) and n < crash_retries and _remaining() > BUDGET_FLOOR:
+        n += 1
+        try:
+            sleep(backoff * n)
+        except Exception:
+            pass
+        res = _attempt(prompt, resume, "retry", len(out.attempts) + 1)
+
+    # resume-failure fallback: a RESUME leg still crashing → ONE fresh --session-id leg seeded by the
+    # continue-prompt (state is already persisted on disk). Only for resume legs; a fresh initial leg
+    # that crashes has no session to fall back from.
+    if _crashed(res) and resume and _remaining() > BUDGET_FLOOR:
+        if _reseed_session(prep, eng_dir) is not None:
+            out.reseeded = True
+            res = _attempt(continue_prompt(engagement_id, eng_dir), False,
+                           "resume-fallback", len(out.attempts) + 1)
+
+    out.crashed = _crashed(res)
+    if out.crashed:
+        out.cause = diagnostics.leg_cause(out.attempts[-1] if out.attempts else None)
+    return out
+
+
 def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_allow: list,
           max_turns: int, max_budget_usd: float, first_resume: bool, audit: Path,
-          engagement_id: str, gate_verify=None, emit=None, now=None) -> LoopResult:
+          engagement_id: str, gate_verify=None, emit=None, now=None, sleep=None) -> LoopResult:
     """Run the autonomous engagement to completion across resumed legs. Builds + runs the first
     invocation (honoring an operator ``first_resume``), then resumes the stable session with a
     fresh continue-prompt each time until the completion contract or a ceiling trips. Returns a
     ``LoopResult`` whose ``result`` reflects the WHOLE run (last leg's summary, cumulative cost,
-    first start → last end) for the single post-run gate + diagnostics pass."""
+    first start → last end) for the single post-run gate + diagnostics pass.
+
+    Each leg is run through ``_run_leg``, which BRANCHES ON ``rc``: a CRASHED leg (rc!=0) is retried
+    with backoff and (for a resume leg) recovered via a fresh-session fallback; only an unrecoverable
+    crash ends the loop, with an honest ``engine-crash`` reason — never a masquerading ``no-progress``.
+    ``sleep`` is injectable for tests (defaults to ``time.sleep`` for the retry backoff)."""
     gate_verify = gate_verify or gatemod.verify
     emit = emit or (lambda line: print(line))
     monotonic = now or time.monotonic
+    sleep = sleep or time.sleep
 
     max_invocations = max(1, _env_int("REDSTRIKE_MAX_INVOCATIONS", DEFAULT_MAX_INVOCATIONS))
     max_wall = _env_float("REDSTRIKE_MAX_WALL_SECONDS", DEFAULT_MAX_WALL_SECONDS)
+    crash_retries = max(0, _env_int("REDSTRIKE_CRASH_RETRIES", DEFAULT_CRASH_RETRIES))
+    backoff = max(0.0, _env_float("REDSTRIKE_RETRY_BACKOFF_SECONDS", RETRY_BACKOFF_SECONDS))
     deadline = monotonic() + max_wall
 
     cumulative_cost = 0.0
     invocations = 0
     stalls = 0
     budgets: list[float] = []
+    legs: list[dict] = []
     prev: Snapshot | None = None
     last_res = None
     started_first = ""
     reason = DONE
+    crash_cause: str | None = None
 
     while True:
         # --- hard ceilings, checked before each NEW leg (the first leg always runs) ---
@@ -501,22 +662,31 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
                 reason = WALL_CLOCK
                 break
 
-        # --- build + run one leg ---
+        # --- build + run one leg, branching on rc (crash recovery: retry + resume-fallback) ---
         remaining = max_budget_usd - cumulative_cost
         leg_budget = max(remaining, BUDGET_FLOOR)
         resume = first_resume if invocations == 0 else True
         prompt = first_prompt if invocations == 0 else continue_prompt(engagement_id, eng_dir)
-        inv = engine.build_invocation(
-            prep, repo, prompt, mode="autonomous", allow=extra_allow,
-            max_turns=max_turns, max_budget=leg_budget, resume=resume,
-        )
         budgets.append(leg_budget)
-        res = engine.run(prep, eng_dir, inv, mode="autonomous", audit=audit)
+        outcome = _run_leg(
+            engine, prep, repo, eng_dir, prompt=prompt, resume=resume, extra_allow=extra_allow,
+            max_turns=max_turns, audit=audit, engagement_id=engagement_id,
+            cost_so_far=cumulative_cost, max_budget_usd=max_budget_usd,
+            crash_retries=crash_retries, sleep=sleep, backoff=backoff,
+        )
         invocations += 1
+        res = outcome.res
         if not started_first:
             started_first = getattr(res, "started", "") or ""
         last_res = res
-        cumulative_cost += _cost_of(res)
+        cumulative_cost += outcome.cost
+        legs.extend(outcome.attempts)
+
+        # --- rc branch: an UNRECOVERABLE engine crash ends the loop honestly (never "no-progress") ---
+        if outcome.crashed:
+            reason = ENGINE_CRASH
+            crash_cause = outcome.cause
+            break
 
         # --- completion / stop decisions ---
         # DONE only when the gate is clear AND no re-drivable work (pending OR blocked) remains. A
@@ -559,6 +729,7 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
     detail = loop_degraded_reason(
         reason, invocations=invocations, cumulative_cost=cumulative_cost,
         max_budget=max_budget_usd, pending_count=pending_count, pending_approvals=n_approvals,
+        crash_cause=crash_cause,
     )
 
     final_summary = getattr(last_res, "summary", None)
@@ -590,4 +761,5 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
         stop_detail=detail,
         budgets=budgets,
         pending_count=pending_count,
+        legs=legs,
     )

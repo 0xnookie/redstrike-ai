@@ -66,7 +66,8 @@ blocked / produced nothing" visible, so a report never presents an inconclusive 
 4. Normalize severity/CVSS; order Critical→Info. Findings with `composite: true` (kill chains) are listed under an **Attack Chains** section and EXCLUDED from the severity counts — non-additive, they re-state already-counted components · `refs/report_template.md` · `findings_consolidated.json`
 5. Write per-finding sections (template) + executive summary — the summary's **risk posture is gated by §0.5** (a degraded/blocked run reports as "assessment incomplete / inconclusive," never "no issues found") · synth · `report.md`
 6. Emit a short stats summary · synth · `summary.md`
-7. /REVIEW SKILL · `review.md`
+7. **Seal the evidence vault (chain of custody)** — `python scripts/evidence_seal.py --engagement <dir>`: hashes every evidence/poc artifact into `evidence/manifest.json` and populates each finding's `evidence[].sha256`. Then self-verify — `python scripts/evidence_seal.py --engagement <dir> --verify` (exit 0 required; exit 3 = a tamper signal: an altered/missing/unsealed artifact — STOP and reconcile, do not ship a report over unverifiable evidence) · `scripts/evidence_seal.py` · `evidence/manifest.json` · §Chain of custody
+8. /REVIEW SKILL · `review.md`
 
 ## Tools
 - `jq` over engagement dirs, `refs/report_template.md`
@@ -77,7 +78,7 @@ blocked / produced nothing" visible, so a report never presents an inconclusive 
 - `refs/report_template.md`
 
 ## Outputs
-`findings_consolidated.json` · `report.md` · `summary.md` · `logs/`
+`findings_consolidated.json` · `report.md` · `summary.md` · `evidence/manifest.json` · `logs/`
 
 ## Phases
 - **Phase 1 (generic):** collect + filter-to-accepted + de-dupe.
@@ -101,3 +102,21 @@ blocked full demonstration) in a clearly-labeled "confirmed — demonstration li
 counts. Never include `rejected`/`needs-evidence` items as confirmed. Normalize every CVSS score with
 `scripts/cvss.py` (do not trust hand-written numbers). Keep redacted secrets redacted. The report + evidence
 stay in the engagement dir (git-ignored); deliver to the client through the agreed channel only.
+
+## Chain of custody  (court-grade: tamper-evidence + a who/what/when trail)
+Evidence that cannot be shown unaltered is not evidence. Two artifacts carry the custody, and the report
+MUST cite both so a third party can audit the result:
+
+- **`evidence/manifest.json`** — the sealed inventory (step 7): every evidence/PoC artifact with its
+  `sha256`, size and capture time, plus a `time_anchor` (a content digest over all artifact hashes, bound
+  to the repo commit in force) that dates the whole set. Each finding's `evidence[].sha256` is populated
+  from it, so a report reference resolves to an exact, verifiable artifact. Anyone can re-run
+  `evidence_seal.py --verify` to confirm nothing was altered, removed, or added after sealing.
+- **`runtime/audit.jsonl`** — the immutable, append-only custody log (roe-gate.md §4): one timestamped
+  record (`{ts, actor, action, target, detail, sha256?}`, schema `skills/_contract/audit.schema.json`) per
+  gate decision, target-reaching tool invocation, and evidence capture — the who/what/when trail, each
+  line bound to the scope in force. It makes the engagement replayable and the evidence attributable.
+
+In the report (methodology / appendix), state that all evidence is hashed in `evidence/manifest.json`
+(sealed + self-verified at close) and that `runtime/audit.jsonl` is the chain-of-custody log, so the
+findings rest on tamper-evident, attributable proof — not on screenshots that could have been edited.

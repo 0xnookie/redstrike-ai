@@ -1,39 +1,54 @@
 #!/usr/bin/env python3
 """
-benchmark.py -- Redstrike RECALL benchmark.
+benchmark.py -- Redstrike benchmark SCORECARD: recall + precision + cost + reproducibility.
 
-Precision is already strong (every reported finding is independently verified); recall -- "what did we
-MISS?" -- is the unmeasured axis. This scores recall against a labelled target and flags regressions.
+Redstrike's architecture is at the field frontier, but it can PROVE nothing without a measured,
+reproducible scorecard. This harness scores four axes against labelled targets and flags regressions:
+
+  * RECALL        -- "what did we MISS?" -- solved / total known vulns (overall + per category + difficulty).
+  * PRECISION     -- "is what we report REAL?" -- reported findings vs the target's TRUTH set. A reported
+                     finding not in the truth set is an FP *candidate* (real-but-unlabelled findings exist),
+                     NOT an automatic FP -- it is marked for adjudication, never auto-failed.
+  * COST / TIME   -- mean cost per verified finding + time-to-first-finding + totals, from the engagement's
+                     runtime telemetry (diagnostics.json + autorun.jsonl).
+  * REPRODUCIBILITY-- recall/precision variance across K>=3 epochs (the Cybench convention); a variance
+                     blowout is itself a regression.
 
 Two answer-key kinds:
   * http-json     -- a live app whose ground truth is enumerable (OWASP Juice Shop: 116 challenges, each
                      machine-checkable via GET /api/Challenges with a boolean `solved`). recall = solved/total.
   * findings-match-- target-agnostic: an `expected` vuln manifest matched against an engagement's REPORTED
                      findings (accepted/blocked, non-composite). No live solved-API needed, so ANY labelled
-                     app can be scored from a run's output. Guards against Juice-Shop overfitting.
+                     app can be scored from a run's output. Guards against Juice-Shop overfitting. An optional
+                     `truth` / `not_expected` set drives precision (see benchmark/README.md).
 
-Positioning: the live recall RUN needs a live target + a real engagement, so it is an OPERATOR workflow (see
-benchmark/RUNBOOK.md), NOT a push-CI job. What CI runs is `--selftest` (deterministic, no network) via
-scripts/validate.py, so the harness + target specs + category maps can't rot.
+Positioning (TWO-SPEED): the live score RUN needs a live target + a real engagement, so it is an OPERATOR
+workflow (see benchmark/RUNBOOK.md), NOT a push-CI job. What CI runs is `--selftest` (deterministic, no
+network) via scripts/validate.py, so the harness + target specs + category maps can't rot.
 
-  --score     Compute recall (overall + per native category + per difficulty) from a live --base-url, a
-              captured --answer-key dump, or (findings-match) an --engagement dir. Optionally --out JSON.
-  --baseline  Score, then record it as benchmark/baselines/<target>.json (the floor to beat).
-  --check     Score, compare to the recorded baseline, and EXIT 2 on any recall regression > --tolerance.
-  --map       Print the target's native-category -> Redstrike routing-map-category mapping (validated).
-  --selftest  Validate every target spec + the scoring/regression logic. No network. (CI runs this.)
+  --score      Score recall (+ precision + cost when an --engagement is given) from a live --base-url, a
+               captured --answer-key dump, or (findings-match) an --engagement dir. Optionally --out JSON.
+  --repro      Score K epochs (repeat --engagement/--answer-key) and report recall/precision VARIANCE.
+  --baseline   Score, then record it as benchmark/baselines/<target>.json (the floor to beat).
+  --check      Score, compare to the recorded baseline, EXIT 2 on recall/precision regression > --tolerance
+               or a reproducibility variance blowout > --max-variance.
+  --scoreboard Regenerate benchmark/SCOREBOARD.md (the committed, public scorecard) from the baselines.
+  --map        Print the target's native-category -> Redstrike routing-map-category mapping (validated).
+  --selftest   Validate every target spec + the scoring/precision/cost/repro logic. No network. (CI runs this.)
 
 Stdlib only. Examples:
   python scripts/benchmark.py --selftest
   python scripts/benchmark.py --score --target juice-shop --base-url http://localhost:3000
-  python scripts/benchmark.py --score --target juice-shop --answer-key challenges.json
   python scripts/benchmark.py --score --target generic-web --engagement engagements/<client>-<date>
+  python scripts/benchmark.py --repro --target generic-web --engagement run1 --engagement run2 --engagement run3
   python scripts/benchmark.py --check --target juice-shop --answer-key challenges.json --tolerance 0.02
+  python scripts/benchmark.py --scoreboard
 """
 import argparse
 import datetime
 import json
 import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -226,7 +241,7 @@ def score(challenges: list, target: dict, want_unsolved: bool = True) -> dict:
 
 
 def to_baseline(res: dict, provenance: str) -> dict:
-    return {
+    bl = {
         "target": res["target"],
         "recorded_at": _now(),
         "provenance": provenance,
@@ -234,6 +249,23 @@ def to_baseline(res: dict, provenance: str) -> dict:
         "by_category": {k: {kk: v[kk] for kk in ("solved", "total", "recall")}
                         for k, v in res["by_category"].items()},
     }
+    # precision / cost / reproducibility are carried into the baseline ONLY when the score produced them,
+    # so a recall-only baseline (e.g. the shipped Juice-Shop floor) stays backward-compatible.
+    if isinstance(res.get("precision"), dict):
+        p = res["precision"]
+        bl["precision"] = {k: p[k] for k in (
+            "reported", "true_positives", "confirmed_fp", "fp_candidates",
+            "precision_upper", "precision_lower", "fp_rate_confirmed") if k in p}
+    if isinstance(res.get("cost"), dict):
+        c = res["cost"]
+        bl["cost"] = {k: c.get(k) for k in (
+            "verified_findings", "total_cost_usd", "mean_cost_per_finding_usd",
+            "total_tokens", "total_wallclock_s", "time_to_first_finding_s", "total_steps")}
+    if isinstance(res.get("reproducibility"), dict):
+        r = res["reproducibility"]
+        bl["reproducibility"] = {"epochs": r.get("epochs"), "enough_epochs": r.get("enough_epochs"),
+                                 "recall": r.get("recall"), "precision": r.get("precision")}
+    return bl
 
 
 def load_baseline(name: str) -> dict:
@@ -244,7 +276,7 @@ def load_baseline(name: str) -> dict:
     return _read_json(p)
 
 
-def check(res: dict, base: dict, tolerance: float) -> dict:
+def check(res: dict, base: dict, tolerance: float, max_variance: float = None) -> dict:
     regress, improve, missing = [], [], []
     bo, co = base["overall"]["recall"], res["overall"]["recall"]
     if co < bo - tolerance:
@@ -262,8 +294,307 @@ def check(res: dict, base: dict, tolerance: float) -> dict:
         elif cr > b["recall"] + 1e-9:
             improve.append((cat, b["recall"], cr))
     new_cats = [c for c in cur if c not in base.get("by_category", {})]
+
+    # --- precision regression (only when BOTH sides carry precision) ---------------------------------
+    bp, cp = base.get("precision"), res.get("precision")
+    if isinstance(bp, dict) and isinstance(cp, dict):
+        bu, cu = float(bp.get("precision_upper", 1.0)), float(cp.get("precision_upper", 1.0))
+        if cu < bu - tolerance:
+            regress.append(("precision", bu, cu))
+        elif cu > bu + 1e-9:
+            improve.append(("precision", bu, cu))
+        # a rising CONFIRMED false-positive rate is a regression too (candidates never auto-fail).
+        bf, cf = float(bp.get("fp_rate_confirmed", 0.0)), float(cp.get("fp_rate_confirmed", 0.0))
+        if cf > bf + tolerance:
+            regress.append(("fp-rate", bf, cf))
+
+    # --- reproducibility variance blowout -----------------------------------------------------------
+    var_flags = []
+    repro = res.get("reproducibility")
+    if max_variance is not None and isinstance(repro, dict):
+        for axis in ("recall", "precision"):
+            st = repro.get(axis) or {}
+            sd = st.get("stdev")
+            if sd is not None and float(sd) > max_variance:
+                var_flags.append((axis, float(sd), max_variance))
+                regress.append((f"{axis}-variance", max_variance, float(sd)))
+
     return {"ok": not regress and not missing, "regressions": regress,
-            "improvements": improve, "missing_categories": missing, "new_categories": new_cats}
+            "improvements": improve, "missing_categories": missing, "new_categories": new_cats,
+            "variance_blowouts": var_flags}
+
+
+# =================================================================================================
+# PRECISION / FALSE-POSITIVE scoring
+# =================================================================================================
+def _truth_matchers(target: dict) -> list:
+    """Matchers for KNOWN-TRUE vulnerabilities. Defaults to the `expected` set (every expected vuln is a
+    known-true), plus any extra `truth[]` entries declared for true vulns that aren't scored for recall."""
+    out = [e["match"] for e in target.get("expected", []) if isinstance(e, dict) and e.get("match")]
+    out += [t["match"] for t in target.get("truth", []) if isinstance(t, dict) and t.get("match")]
+    return out
+
+
+def _not_expected_matchers(target: dict) -> list:
+    """Matchers for KNOWN-FALSE claims (a reported finding matching one is a CONFIRMED false positive)."""
+    return [n["match"] for n in target.get("not_expected", []) if isinstance(n, dict) and n.get("match")]
+
+
+def precision(findings: list, target: dict) -> dict:
+    """Score PRECISION of an engagement's REPORTED findings against the target's truth set.
+
+    Each reported finding is classed:
+      * TRUE POSITIVE   -- matches a truth matcher (`expected`/`truth`).
+      * CONFIRMED FP    -- matches a `not_expected` matcher (labelled-false).
+      * FP CANDIDATE    -- matches neither: UNLABELLED. Real-but-unlabelled findings exist, so a candidate
+                           is flagged for ADJUDICATION, never auto-counted as a false positive.
+
+    Reported as a RANGE so no honesty is lost:
+      precision_upper = TP / (TP + confirmed_FP)        -- candidates adjudicated out (optimistic floor-free)
+      precision_lower = TP / (TP + confirmed_FP + cand) -- every candidate is an FP (pessimistic worst-case)
+      fp_rate_confirmed = confirmed_FP / reported        -- CONFIRMED only; candidates listed separately.
+    """
+    truth = _truth_matchers(target)
+    not_exp = _not_expected_matchers(target)
+    tp, cfp, cand = [], [], []
+    for f in findings:
+        if truth and any(_match_expected(m, f) for m in truth):
+            tp.append(f)
+        elif not_exp and any(_match_expected(m, f) for m in not_exp):
+            cfp.append(f)
+        else:
+            cand.append(f)
+    n_tp, n_cfp, n_cand = len(tp), len(cfp), len(cand)
+    reported = n_tp + n_cfp + n_cand
+    labelled = n_tp + n_cfp
+    p_upper = round(n_tp / labelled, 4) if labelled else (1.0 if reported == 0 else 0.0)
+    p_lower = round(n_tp / reported, 4) if reported else 1.0
+    return {
+        "reported": reported,
+        "true_positives": n_tp,
+        "confirmed_fp": n_cfp,
+        "fp_candidates": n_cand,
+        "precision_upper": p_upper,
+        "precision_lower": p_lower,
+        "fp_rate_confirmed": round(n_cfp / reported, 4) if reported else 0.0,
+        "truth_matchers": len(truth),
+        "not_expected_matchers": len(not_exp),
+        "candidates_for_adjudication": sorted({(f.get("title") or "(untitled)") for f in cand}),
+        "confirmed_fp_titles": sorted({(f.get("title") or "(untitled)") for f in cfp}),
+        "note": ("precision_upper adjudicates candidates OUT; precision_lower counts them all as FP. "
+                 "FP candidates are UNLABELLED reported findings -- adjudicate before treating as FPs."),
+    }
+
+
+# =================================================================================================
+# COST / TIME telemetry (read from runtime/diagnostics.json [+ autorun.jsonl for cost/tokens])
+# =================================================================================================
+def _parse_iso(ts):
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _duration_s(started, ended) -> float:
+    a, b = _parse_iso(started), _parse_iso(ended)
+    if a is None or b is None:
+        return 0.0
+    return max(0.0, (b - a).total_seconds())
+
+
+def _run_cost_tokens(run: dict):
+    """Cost/tokens from the diagnostics run RECORD itself, if a future diagnostics schema carries them
+    (preferred, authoritative). Returns (cost_usd|None, tokens|None). diagnostics.py owns that schema; this
+    reads several plausible keys so the metric lights up the moment they are added -- without touching it."""
+    if not isinstance(run, dict):
+        return None, None
+    cost = None
+    for k in ("cost_usd", "total_cost_usd", "cost"):
+        v = run.get(k)
+        if isinstance(v, (int, float)):
+            cost = float(v)
+            break
+    usage = run.get("usage") if isinstance(run.get("usage"), dict) else {}
+    tokens = None
+    for k in ("total_tokens", "tokens"):
+        v = run.get(k) if run.get(k) is not None else usage.get(k)
+        if isinstance(v, (int, float)):
+            tokens = int(v)
+            break
+    if tokens is None and usage:
+        it, ot = usage.get("input_tokens"), usage.get("output_tokens")
+        if isinstance(it, (int, float)) or isinstance(ot, (int, float)):
+            tokens = int(it or 0) + int(ot or 0)
+    return cost, tokens
+
+
+def _autorun_session_telemetry(eng: Path) -> dict:
+    """Parse runtime/autorun.jsonl -> {session_id: {cost_usd, tokens, turns}} from its `result` events.
+
+    IMPORTANT (measured from real runs): `total_cost_usd` is CUMULATIVE within a session -- every result
+    event of the same session repeats the running total -- so per session we take the MAX (never sum, which
+    would multiply-count). `usage` tokens and `num_turns`, by contrast, are PER-LEG, so they are SUMMED.
+    """
+    path = eng / "runtime" / "autorun.jsonl"
+    if not path.is_file():
+        return {}
+    sess: dict = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(o, dict) or o.get("type") != "result":
+            continue
+        sid = o.get("session_id") or ""
+        s = sess.setdefault(sid, {"cost_usd": 0.0, "tokens": 0, "turns": 0})
+        cost = o.get("total_cost_usd")
+        if isinstance(cost, (int, float)):
+            s["cost_usd"] = max(s["cost_usd"], float(cost))   # cumulative-per-session -> MAX
+        u = o.get("usage") if isinstance(o.get("usage"), dict) else {}
+        s["tokens"] += int(u.get("input_tokens") or 0) + int(u.get("output_tokens") or 0)  # per-leg -> SUM
+        t = o.get("num_turns")
+        if isinstance(t, (int, float)):
+            s["turns"] += int(t)
+    return sess
+
+
+def telemetry(eng: Path, verified_findings: int) -> dict:
+    """Cost/time scorecard for an engagement, from runtime/diagnostics.json (+ autorun.jsonl for $/tokens).
+
+    Headline metrics:
+      * mean_cost_per_finding_usd = total_cost / verified_findings  (the differentiator: efficiency, not just
+        capability). None when cost is unavailable or there are no verified findings.
+      * time_to_first_finding_s   = summed engine-run durations UP TO the first finding-bearing leg. Findings
+        carry no per-item timestamp, so this is a leg-granularity proxy over ENGINE WORK TIME (idle gaps
+        between legs are excluded, so an interactive close hours later does not inflate it).
+      * total_wallclock_s         = summed per-leg engine durations (ended-started), not calendar span.
+      * total_cost_usd / total_tokens / total_steps / runs.
+
+    Returns {} when there is no diagnostics.json (telemetry is best-effort; absence never fails a score).
+    """
+    diag = _read_json(eng / "runtime" / "diagnostics.json")
+    runs = (diag or {}).get("runs") if isinstance(diag, dict) else None
+    if not isinstance(runs, list) or not runs:
+        return {}
+    runs = [r for r in runs if isinstance(r, dict)]
+    runs.sort(key=lambda r: _parse_iso(r.get("started")) or datetime.datetime.min.replace(
+        tzinfo=datetime.timezone.utc))
+
+    autorun = _autorun_session_telemetry(eng)
+    total_cost = 0.0
+    total_tokens = 0
+    cost_seen = tokens_seen = False
+    counted_sessions = set()
+    total_wall = 0.0
+    total_steps = 0
+    ttff = None
+    cum_dur = 0.0
+
+    for r in runs:
+        dur = _duration_s(r.get("started"), r.get("ended"))
+        total_wall += dur
+        cum_dur += dur
+        total_steps += len(r.get("phase_tally") or [])
+        # first finding-bearing leg (findings_count is a cumulative snapshot per leg).
+        if ttff is None and int(r.get("findings_count", 0) or 0) > 0:
+            ttff = round(cum_dur, 3)
+        # cost/tokens: prefer the run record; else the matching autorun session (max/sum rules applied).
+        rc, rt = _run_cost_tokens(r)
+        sid = r.get("session") or ""
+        if rc is None and sid and sid in autorun:
+            rc = autorun[sid]["cost_usd"]
+        if rt is None and sid and sid in autorun:
+            rt = autorun[sid]["tokens"]
+        if rc is not None:
+            total_cost += rc
+            cost_seen = True
+        if rt is not None:
+            total_tokens += rt
+            tokens_seen = True
+        if sid:
+            counted_sessions.add(sid)
+
+    # autorun sessions with no diagnostics run to attribute them to (e.g. an interactive close whose leg
+    # recorded an empty session) still represent real spend -- fold them into the totals once.
+    for sid, s in autorun.items():
+        if sid and sid not in counted_sessions:
+            total_cost += s["cost_usd"]
+            total_tokens += s["tokens"]
+            cost_seen = cost_seen or s["cost_usd"] > 0
+            tokens_seen = tokens_seen or s["tokens"] > 0
+
+    vf = int(verified_findings or 0)
+    mean_cpf = round(total_cost / vf, 4) if (cost_seen and vf > 0) else None
+    src = "diagnostics.json"
+    if autorun:
+        src += "+autorun.jsonl"
+    return {
+        "verified_findings": vf,
+        "runs": len(runs),
+        "total_cost_usd": round(total_cost, 4) if cost_seen else None,
+        "mean_cost_per_finding_usd": mean_cpf,
+        "total_tokens": total_tokens if tokens_seen else None,
+        "total_wallclock_s": round(total_wall, 3),
+        "time_to_first_finding_s": ttff,
+        "total_steps": total_steps,
+        "source": src,
+        "note": ("cost is cumulative-per-session in autorun.jsonl (MAX per session); time-to-first-finding "
+                 "is a leg-granularity proxy over engine work time (findings have no per-item timestamp)."),
+    }
+
+
+# =================================================================================================
+# REPRODUCIBILITY -- K-epoch variance (Cybench convention: K>=3)
+# =================================================================================================
+def _dist(xs: list) -> dict:
+    xs = [float(x) for x in xs if x is not None]
+    if not xs:
+        return {"n": 0, "mean": None, "stdev": None, "min": None, "max": None, "spread": None}
+    return {
+        "n": len(xs),
+        "mean": round(statistics.fmean(xs), 4),
+        "stdev": round(statistics.pstdev(xs), 4),   # population stdev: deterministic, defined for n==1 (0.0)
+        "min": round(min(xs), 4),
+        "max": round(max(xs), 4),
+        "spread": round(max(xs) - min(xs), 4),
+    }
+
+
+def reproducibility(results: list, min_epochs: int = 3) -> dict:
+    """Aggregate K per-epoch score() results into recall/precision variance (stdev/spread).
+
+    K>=3 is the Cybench convention; fewer epochs still compute but set `enough_epochs=False` so a reader
+    (and --check) knows the variance estimate is under-powered."""
+    recalls = [r.get("overall", {}).get("recall") for r in results]
+    precs = [r["precision"]["precision_upper"] for r in results
+             if isinstance(r.get("precision"), dict)]
+    per = []
+    for i, r in enumerate(results):
+        row = {"epoch": i + 1, "recall": r.get("overall", {}).get("recall")}
+        if isinstance(r.get("precision"), dict):
+            row["precision"] = r["precision"]["precision_upper"]
+        if isinstance(r.get("cost"), dict):
+            row["mean_cost_per_finding_usd"] = r["cost"].get("mean_cost_per_finding_usd")
+        per.append(row)
+    return {
+        "epochs": len(results),
+        "min_epochs": min_epochs,
+        "enough_epochs": len(results) >= min_epochs,
+        "recall": _dist(recalls),
+        "precision": _dist(precs) if precs else None,
+        "per_epoch": per,
+    }
 
 
 def _print_score(res: dict):
@@ -276,6 +607,169 @@ def _print_score(res: dict):
     if res.get("by_difficulty"):
         print("\nby difficulty:  " + " ".join(
             f"{k}*={v['solved']}/{v['total']}" for k, v in res["by_difficulty"].items()))
+    _print_precision(res.get("precision"))
+    _print_cost(res.get("cost"))
+    _print_repro(res.get("reproducibility"))
+
+
+def _print_precision(p: dict):
+    if not isinstance(p, dict):
+        return
+    print(f"\n# Precision  ({p['reported']} reported)")
+    print(f"  precision: {p['precision_upper']:.1%} (adjudicated) .. {p['precision_lower']:.1%} (worst-case)")
+    print(f"  TP={p['true_positives']}  confirmed-FP={p['confirmed_fp']} "
+          f"(rate {p['fp_rate_confirmed']:.1%})  FP-candidates={p['fp_candidates']}")
+    if p.get("confirmed_fp_titles"):
+        print("  confirmed false positives:")
+        for t in p["confirmed_fp_titles"][:10]:
+            print(f"    x {t}")
+    if p.get("candidates_for_adjudication"):
+        print("  FP candidates (ADJUDICATE -- unlabelled, may be real):")
+        for t in p["candidates_for_adjudication"][:10]:
+            print(f"    ? {t}")
+
+
+def _fmt_s(v):
+    return "n/a" if v is None else f"{v:.1f}s"
+
+
+def _print_cost(c: dict):
+    if not isinstance(c, dict):
+        return
+    print(f"\n# Cost / time  ({c['runs']} run leg(s), {c['verified_findings']} verified finding(s))")
+    tc = c.get("total_cost_usd")
+    mcpf = c.get("mean_cost_per_finding_usd")
+    print(f"  total cost: {'n/a' if tc is None else f'${tc:.4f}'}   "
+          f"mean $/finding: {'n/a' if mcpf is None else f'${mcpf:.4f}'}")
+    print(f"  time-to-first-finding: {_fmt_s(c.get('time_to_first_finding_s'))}   "
+          f"total engine time: {_fmt_s(c.get('total_wallclock_s'))}   steps: {c.get('total_steps')}")
+    if c.get("total_tokens") is not None:
+        print(f"  total tokens: {c['total_tokens']:,}")
+
+
+def _print_repro(r: dict):
+    if not isinstance(r, dict):
+        return
+    tag = "" if r.get("enough_epochs") else f"  (under-powered: <{r.get('min_epochs')} epochs)"
+    print(f"\n# Reproducibility  ({r['epochs']} epoch(s)){tag}")
+    rc = r.get("recall") or {}
+    print(f"  recall:    mean {rc.get('mean')}  stdev {rc.get('stdev')}  "
+          f"spread {rc.get('spread')}  [{rc.get('min')}..{rc.get('max')}]")
+    pr = r.get("precision")
+    if pr:
+        print(f"  precision: mean {pr.get('mean')}  stdev {pr.get('stdev')}  "
+              f"spread {pr.get('spread')}  [{pr.get('min')}..{pr.get('max')}]")
+
+
+# =================================================================================================
+# SCOREBOARD -- the committed, public, versioned scorecard (generated from the baselines)
+# =================================================================================================
+def _pct(v):
+    return "—" if v is None else f"{float(v) * 100:.1f}%"
+
+
+def _usd(v):
+    return "—" if v is None else f"${float(v):.3f}"
+
+
+def _num(v):
+    return "—" if v is None else f"{v}"
+
+
+def render_scoreboard(baselines: list) -> str:
+    """Render SCOREBOARD.md from a list of baseline dicts (one per target). Deterministic: the committed
+    scorecard is regenerated, never hand-edited. Missing axes render as '—' so a recall-only baseline is
+    still listed honestly."""
+    lines = []
+    lines.append("# Redstrike benchmark scorecard")
+    lines.append("")
+    lines.append("<!-- GENERATED by `python scripts/benchmark.py --scoreboard` from benchmark/baselines/*.json."
+                 " Do not hand-edit. -->")
+    lines.append("")
+    lines.append("The public, versioned, reproducible scorecard: recall (what we catch), precision (whether "
+                 "what we report is real), cost efficiency (mean $ per verified finding), and reproducibility "
+                 "(variance across epochs). Capability without a measured precision + cost + reproducibility "
+                 "number proves nothing; this is that number.")
+    lines.append("")
+    lines.append("Baselines are committed deliberately (the floor to beat); `benchmark/results/` is gitignored "
+                 "scratch. A live score is an operator workflow (see `RUNBOOK.md`); CI only runs `--selftest`.")
+    lines.append("")
+    lines.append("| Target | Recall | Precision (adj.) | Confirmed FP-rate | Mean $/finding | Recall σ | "
+                 "Epochs | Recorded |")
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for bl in baselines:
+        if not isinstance(bl, dict):
+            continue
+        tgt = bl.get("target", "?")
+        recall = _pct((bl.get("overall") or {}).get("recall"))
+        p = bl.get("precision") or {}
+        prec = _pct(p.get("precision_upper")) if p else "—"
+        fpr = _pct(p.get("fp_rate_confirmed")) if p else "—"
+        c = bl.get("cost") or {}
+        mcpf = _usd(c.get("mean_cost_per_finding_usd")) if c else "—"
+        rep = bl.get("reproducibility") or {}
+        rsd = (rep.get("recall") or {}).get("stdev") if rep else None
+        rsd_s = _num(rsd)
+        epochs = _num(rep.get("epochs")) if rep else "—"
+        rec_at = bl.get("recorded_at", "—")
+        lines.append(f"| {tgt} | {recall} | {prec} | {fpr} | {mcpf} | {rsd_s} | {epochs} | {rec_at} |")
+    lines.append("")
+    lines.append("## Per-target detail")
+    lines.append("")
+    for bl in baselines:
+        if not isinstance(bl, dict):
+            continue
+        lines.append(f"### {bl.get('target', '?')}")
+        lines.append("")
+        if bl.get("provenance"):
+            lines.append(f"*Provenance:* {bl['provenance']}")
+            lines.append("")
+        o = bl.get("overall") or {}
+        lines.append(f"- **Recall:** {_pct(o.get('recall'))} ({o.get('solved')}/{o.get('total')})")
+        p = bl.get("precision")
+        if p:
+            lines.append(f"- **Precision:** {_pct(p.get('precision_upper'))} adjudicated .. "
+                         f"{_pct(p.get('precision_lower'))} worst-case "
+                         f"(TP={p.get('true_positives')}, confirmed-FP={p.get('confirmed_fp')}, "
+                         f"FP-candidates={p.get('fp_candidates')})")
+        c = bl.get("cost")
+        if c:
+            lines.append(f"- **Cost:** mean {_usd(c.get('mean_cost_per_finding_usd'))}/finding, "
+                         f"total {_usd(c.get('total_cost_usd'))} over "
+                         f"{_num(c.get('verified_findings'))} verified finding(s); "
+                         f"time-to-first-finding {_num(c.get('time_to_first_finding_s'))}s")
+        rep = bl.get("reproducibility")
+        if rep:
+            rc = rep.get("recall") or {}
+            lines.append(f"- **Reproducibility:** {rep.get('epochs')} epochs, recall σ={rc.get('stdev')} "
+                         f"(spread {rc.get('spread')}){'' if rep.get('enough_epochs') else ' — UNDER-POWERED (<3)'}")
+        by_cat = bl.get("by_category") or {}
+        if by_cat:
+            lines.append("")
+            lines.append("<details><summary>Per-category recall</summary>")
+            lines.append("")
+            lines.append("| Category | Recall | solved/total |")
+            lines.append("|---|---|---|")
+            for cat, d in by_cat.items():
+                lines.append(f"| {cat} | {_pct(d.get('recall'))} | {d.get('solved')}/{d.get('total')} |")
+            lines.append("")
+            lines.append("</details>")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def generate_scoreboard() -> int:
+    bls = []
+    for p in sorted(BASELINES.glob("*.json")):
+        bl = _read_json(p)
+        if isinstance(bl, dict):
+            bls.append(bl)
+    if not bls:
+        sys.exit("[!] no baselines under benchmark/baselines/ -- record one first (--baseline)")
+    out = BENCH / "SCOREBOARD.md"
+    out.write_text(render_scoreboard(bls), encoding="utf-8")
+    print(f"wrote scorecard ({len(bls)} target(s)) -> benchmark/SCOREBOARD.md")
+    return 0
 
 
 def _validate_map(target: dict):
@@ -306,6 +800,15 @@ def selftest() -> int:
             assert isinstance(exp, list) and exp, f"{p.name} findings-match target needs a non-empty 'expected'"
             for e in exp:
                 assert e.get("match"), f"{p.name} expected item '{e.get('id')}' has no 'match'"
+            # OPTIONAL precision sets: `truth` (extra known-true) + `not_expected` (known-false). Same
+            # matcher shape as `expected`, so a precision-aware spec stays consistent with the routing map.
+            for key in ("truth", "not_expected"):
+                items = t.get(key)
+                if items is not None:
+                    assert isinstance(items, list), f"{p.name} '{key}' must be a list"
+                    for e in items:
+                        assert isinstance(e, dict) and e.get("match"), \
+                            f"{p.name} {key} item '{(e or {}).get('id')}' has no 'match'"
         else:
             assert "category_map" in t, f"{p.name} (http-json) missing 'category_map'"
             for k in ("endpoint", "id_field", "category_field", "solved_field"):
@@ -336,22 +839,139 @@ def selftest() -> int:
     fm = score(_expected_challenges(tgt, fnd), tgt)
     assert fm["overall"] == {"solved": 1, "total": 3, "recall": 0.3333}, fm["overall"]
     assert not _match_expected({}, fnd[0]), "empty matcher must not match"
-    print(f"benchmark.py selftest: OK ({len(specs)} target spec(s), http-json + findings-match scoring verified)")
+
+    # --- PRECISION / FP (TP + confirmed-FP + candidate, with truth + not_expected) -------------------
+    ptgt = {"target": "t",
+            "expected": [{"id": "sqli", "match": {"cwe": "CWE-89"}},
+                         {"id": "xss", "match": {"cwe": "CWE-79"}}],
+            "not_expected": [{"id": "fake-rce", "match": {"cwe": "CWE-77"}}]}
+    pfnd = [{"owasp": "A03", "cwe": "CWE-89", "wstg": "", "title": "SQLi"},        # TP (truth=expected)
+            {"owasp": "A03", "cwe": "CWE-77", "wstg": "", "title": "bogus RCE"},   # confirmed FP
+            {"owasp": "A05", "cwe": "CWE-16", "wstg": "", "title": "odd header"}]  # UNLABELLED -> candidate
+    pr = precision(pfnd, ptgt)
+    assert (pr["true_positives"], pr["confirmed_fp"], pr["fp_candidates"]) == (1, 1, 1), pr
+    assert pr["precision_upper"] == 0.5, pr          # TP / (TP+confirmed_FP) = 1/2
+    assert pr["precision_lower"] == 0.3333, pr       # TP / reported            = 1/3
+    assert pr["fp_rate_confirmed"] == 0.3333, pr     # candidate NOT counted as FP
+    assert pr["candidates_for_adjudication"] == ["odd header"], pr
+
+    # --- COST / TIME telemetry (synthetic diagnostics.json; cost carried IN the run record) ----------
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        eng = Path(d)
+        (eng / "runtime").mkdir(parents=True)
+        (eng / "runtime" / "diagnostics.json").write_text(json.dumps({"version": 2, "runs": [
+            {"session": "s1", "started": "2026-01-01T00:00:00+00:00", "ended": "2026-01-01T00:00:40+00:00",
+             "findings_count": 0, "phase_tally": [{"class": "sqli"}, {"class": "xss"}], "cost_usd": 1.0},
+            {"session": "s2", "started": "2026-01-01T00:01:00+00:00", "ended": "2026-01-01T00:01:20+00:00",
+             "findings_count": 2, "phase_tally": [{"class": "idor"}], "cost_usd": 3.0,
+             "usage": {"input_tokens": 100, "output_tokens": 50}},
+        ]}), encoding="utf-8")
+        tel = telemetry(eng, verified_findings=2)
+        assert tel["total_cost_usd"] == 4.0, tel                      # 1.0 + 3.0
+        assert tel["mean_cost_per_finding_usd"] == 2.0, tel           # 4.0 / 2
+        assert tel["total_wallclock_s"] == 60.0, tel                  # 40 + 20
+        assert tel["time_to_first_finding_s"] == 60.0, tel           # legs up to the finding-bearing leg
+        assert tel["total_steps"] == 3, tel                           # 2 + 1 phase-tally entries
+        assert tel["total_tokens"] == 150, tel
+        # cost cumulative-per-session rule via autorun.jsonl (same session repeats the running total).
+        with tempfile.TemporaryDirectory() as d2:
+            eng2 = Path(d2)
+            (eng2 / "runtime").mkdir(parents=True)
+            (eng2 / "runtime" / "diagnostics.json").write_text(json.dumps({"runs": [
+                {"session": "AA", "started": "2026-01-01T00:00:00+00:00",
+                 "ended": "2026-01-01T00:00:10+00:00", "findings_count": 1, "phase_tally": []}]}),
+                encoding="utf-8")
+            (eng2 / "runtime" / "autorun.jsonl").write_text(
+                json.dumps({"type": "result", "session_id": "AA", "total_cost_usd": 5.0, "num_turns": 10,
+                            "usage": {"input_tokens": 10, "output_tokens": 5}}) + "\n" +
+                json.dumps({"type": "result", "session_id": "AA", "total_cost_usd": 9.0, "num_turns": 1,
+                            "usage": {"input_tokens": 2, "output_tokens": 1}}) + "\n",
+                encoding="utf-8")
+            tel2 = telemetry(eng2, verified_findings=1)
+            assert tel2["total_cost_usd"] == 9.0, tel2    # MAX per session (9), never 5+9=14
+            assert tel2["total_tokens"] == 18, tel2       # tokens SUMMED per-leg: 15 + 3
+
+    # --- REPRODUCIBILITY (variance across epochs) + check() blowout ----------------------------------
+    e1 = {"overall": {"recall": 0.60}, "precision": {"precision_upper": 0.90}}
+    e2 = {"overall": {"recall": 0.62}, "precision": {"precision_upper": 0.88}}
+    e3 = {"overall": {"recall": 0.61}, "precision": {"precision_upper": 0.91}}
+    rep = reproducibility([e1, e2, e3])
+    assert rep["epochs"] == 3 and rep["enough_epochs"], rep
+    assert rep["recall"]["mean"] == 0.61, rep
+    assert rep["recall"]["spread"] == 0.02, rep
+    noisy = {"target": "t", "overall": {"solved": 0, "total": 1, "recall": 0.0}, "by_category": {},
+             "reproducibility": reproducibility(
+                 [{"overall": {"recall": 0.2}}, {"overall": {"recall": 0.9}}, {"overall": {"recall": 0.5}}])}
+    vchk = check(noisy, {"overall": {"recall": 0.0}, "by_category": {}}, 0.0, max_variance=0.1)
+    assert not vchk["ok"] and any(r[0] == "recall-variance" for r in vchk["regressions"]), vchk
+    # precision regression is caught too
+    pbase = {"overall": {"recall": 0.0}, "by_category": {}, "precision": {"precision_upper": 0.9,
+             "fp_rate_confirmed": 0.0}}
+    pcur = {"target": "t", "overall": {"solved": 0, "total": 1, "recall": 0.0}, "by_category": {},
+            "precision": {"precision_upper": 0.7, "fp_rate_confirmed": 0.0}}
+    pchk = check(pcur, pbase, 0.05)
+    assert not pchk["ok"] and any(r[0] == "precision" for r in pchk["regressions"]), pchk
+
+    # --- SCOREBOARD renders from baselines (recall-only + full) --------------------------------------
+    full_bl = to_baseline({"target": "demo", "overall": {"solved": 1, "total": 2, "recall": 0.5},
+                           "by_category": {}, "precision": pr, "cost": tel,
+                           "reproducibility": rep}, "selftest")
+    sb = render_scoreboard([full_bl, load_baseline("juice-shop") if (BASELINES / "juice-shop.json").is_file()
+                            else {"target": "x", "overall": {"recall": 0.3}}])
+    assert sb.startswith("# Redstrike benchmark scorecard"), sb[:60]
+    assert "demo" in sb and "Mean $/finding" in sb, "scoreboard missing columns"
+
+    print(f"benchmark.py selftest: OK ({len(specs)} target spec(s); recall + precision/FP + cost/time + "
+          f"reproducibility + scoreboard verified)")
     return 0
 
 
+def _score_one(target: dict, *, base_url=None, answer_key=None, engagement=None):
+    """Score ONE epoch and attach precision + cost telemetry whenever an engagement dir is available.
+
+    findings-match -> requires an engagement (its reported findings ARE the data). http-json -> scores the
+    solved-API; if an engagement dir is ALSO supplied, precision + cost are attached from it too."""
+    ak_type = (target.get("answer_key") or {}).get("type", "http-json")
+    findings = None
+    if ak_type == "findings-match":
+        if not engagement:
+            sys.exit("[!] a findings-match target needs --engagement <dir> (the run's output)")
+        findings = _load_findings(Path(engagement))
+        res = score(_expected_challenges(target, findings), target)
+    else:
+        res = score(fetch_answer_key(target, base_url, answer_key), target)
+        if engagement:
+            findings = _load_findings(Path(engagement))
+    if findings is not None:
+        res["precision"] = precision(findings, target)
+    if engagement:
+        tel = telemetry(Path(engagement), verified_findings=len(findings or []))
+        if tel:
+            res["cost"] = tel
+    return res
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Redstrike recall benchmark.")
+    ap = argparse.ArgumentParser(description="Redstrike benchmark scorecard (recall + precision + cost + repro).")
     ap.add_argument("--score", action="store_true")
+    ap.add_argument("--repro", action="store_true",
+                    help="score K epochs (repeat --engagement/--answer-key) and report recall/precision variance")
     ap.add_argument("--baseline", action="store_true", help="record the current score as the baseline")
     ap.add_argument("--check", action="store_true", help="compare to baseline; exit 2 on regression")
+    ap.add_argument("--scoreboard", action="store_true", help="regenerate benchmark/SCOREBOARD.md from baselines")
     ap.add_argument("--map", action="store_true", dest="show_map")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--target", help="target name under benchmark/targets/")
     ap.add_argument("--base-url", help="live base URL of the running target")
-    ap.add_argument("--answer-key", help="captured answer-key JSON dump (instead of --base-url)")
-    ap.add_argument("--engagement", help="engagement dir (findings-match targets score its findings)")
-    ap.add_argument("--tolerance", type=float, default=0.0, help="allowed recall drop before it's a regression")
+    ap.add_argument("--answer-key", action="append",
+                    help="captured answer-key JSON dump (instead of --base-url; repeatable for --repro)")
+    ap.add_argument("--engagement", action="append",
+                    help="engagement dir (findings-match scores its findings; repeatable for --repro)")
+    ap.add_argument("--tolerance", type=float, default=0.0, help="allowed recall/precision drop before it's a regression")
+    ap.add_argument("--epochs", type=int, default=3, help="--repro: minimum epochs for a sound variance estimate (default 3)")
+    ap.add_argument("--max-variance", type=float, default=None,
+                    help="--check: fail if reproducibility recall/precision stdev exceeds this (variance blowout)")
     ap.add_argument("--out", help="write the full result JSON here")
     ap.add_argument("--provenance", default="", help="note stored with a --baseline (how it was produced)")
     ap.add_argument("--json", action="store_true", dest="as_json")
@@ -359,9 +979,13 @@ def main() -> int:
 
     if args.selftest:
         return selftest()
+    if args.scoreboard:
+        return generate_scoreboard()
     if not args.target:
-        ap.error("need --target (or --selftest)")
+        ap.error("need --target (or --selftest / --scoreboard)")
     target = load_target(args.target)
+    engagements = args.engagement or []
+    answer_keys = args.answer_key or []
 
     if args.show_map:
         errs, _ = _validate_map(target)
@@ -376,14 +1000,39 @@ def main() -> int:
         print("\nall mapped ids exist in routing-map.json.")
         return 0
 
-    ak_type = (target.get("answer_key") or {}).get("type", "http-json")
-    if ak_type == "findings-match":
-        if not args.engagement:
-            ap.error("a findings-match target needs --engagement <dir> (the run's output)")
-        challenges = _expected_challenges(target, _load_findings(Path(args.engagement)))
-    else:
-        challenges = fetch_answer_key(target, args.base_url, args.answer_key)
-    res = score(challenges, target)
+    # --- reproducibility: score K epochs, aggregate variance -----------------------------------------
+    if args.repro:
+        sources = [{"engagement": e} for e in engagements] + [{"answer_key": a} for a in answer_keys]
+        if len(sources) < 2:
+            ap.error("--repro needs >=2 epochs: repeat --engagement/--answer-key (K>=3 recommended)")
+        epochs = [_score_one(target, base_url=args.base_url, **src) for src in sources]
+        rep = reproducibility(epochs, min_epochs=args.epochs)
+        res = dict(epochs[-1])                      # carry the last epoch's headline score + attach variance
+        res["reproducibility"] = rep
+        if args.out:
+            op = Path(args.out)
+            op.parent.mkdir(parents=True, exist_ok=True)
+            op.write_text(json.dumps(res, indent=2) + "\n", encoding="utf-8")
+        if args.baseline:
+            BASELINES.mkdir(parents=True, exist_ok=True)
+            prov = args.provenance or f"{rep['epochs']}-epoch repro, {res['scored_at']}"
+            (BASELINES / f"{args.target}.json").write_text(
+                json.dumps(to_baseline(res, prov), indent=2) + "\n", encoding="utf-8")
+            _print_score(res)
+            print(f"\nwrote baseline -> benchmark/baselines/{args.target}.json")
+            return 0
+        if args.as_json:
+            print(json.dumps(res, indent=2))
+        else:
+            _print_score(res)
+        if not rep["enough_epochs"]:
+            print(f"\n[!] only {rep['epochs']} epoch(s) (<{args.epochs}) -- variance estimate is under-powered.")
+        return 0
+
+    # --- single score (one source) -------------------------------------------------------------------
+    res = _score_one(target, base_url=args.base_url,
+                     answer_key=answer_keys[0] if answer_keys else None,
+                     engagement=engagements[0] if engagements else None)
     if args.out:
         op = Path(args.out)
         op.parent.mkdir(parents=True, exist_ok=True)
@@ -391,7 +1040,8 @@ def main() -> int:
 
     if args.baseline:
         BASELINES.mkdir(parents=True, exist_ok=True)
-        prov = args.provenance or f"scored {res['scored_at']} from {args.answer_key or args.base_url or args.engagement}"
+        src = (answer_keys[0] if answer_keys else None) or args.base_url or (engagements[0] if engagements else None)
+        prov = args.provenance or f"scored {res['scored_at']} from {src}"
         bl = to_baseline(res, prov)
         (BASELINES / f"{args.target}.json").write_text(json.dumps(bl, indent=2) + "\n", encoding="utf-8")
         _print_score(res)
@@ -400,22 +1050,23 @@ def main() -> int:
 
     if args.check:
         base = load_baseline(args.target)
-        chk = check(res, base, args.tolerance)
+        chk = check(res, base, args.tolerance, max_variance=args.max_variance)
         if args.as_json:
-            print(json.dumps({"result": res["overall"], "check": chk}, indent=2))
+            print(json.dumps({"result": res["overall"], "precision": res.get("precision"),
+                              "cost": res.get("cost"), "check": chk}, indent=2))
         else:
             _print_score(res)
             print(f"\n# Regression check vs baseline ({base['recorded_at']}, tol {args.tolerance:.0%})")
-            for cat, b, c in chk["regressions"]:
-                print(f"  REGRESS  {cat:<26} {b:.1%} -> {c:.1%}")
+            for cat, bv, cv in chk["regressions"]:
+                print(f"  REGRESS  {cat:<26} {bv:.3f} -> {cv:.3f}")
             for cat in chk["missing_categories"]:
                 print(f"  MISSING  {cat:<26} (in baseline, absent now)")
-            for cat, b, c in chk["improvements"]:
-                print(f"  up       {cat:<26} {b:.1%} -> {c:.1%}")
+            for cat, bv, cv in chk["improvements"]:
+                print(f"  up       {cat:<26} {bv:.3f} -> {cv:.3f}")
             if chk["new_categories"]:
                 print(f"  new categories (not in baseline): {', '.join(chk['new_categories'])}")
             print(f"\n{'PASS' if chk['ok'] else 'FAIL'}: "
-                  + ("no recall regression." if chk["ok"] else "recall regressed (see above)."))
+                  + ("no regression." if chk["ok"] else "regression detected (see above)."))
         return 0 if chk["ok"] else 2
 
     if args.score:
@@ -425,7 +1076,7 @@ def main() -> int:
             _print_score(res)
         return 0
 
-    ap.error("choose one of --score / --baseline / --check / --map / --selftest")
+    ap.error("choose one of --score / --repro / --baseline / --check / --scoreboard / --map / --selftest")
 
 
 if __name__ == "__main__":

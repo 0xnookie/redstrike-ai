@@ -74,7 +74,21 @@ sentences.> During the engagement, **<N>** issues were confirmed:
 | Info | <n> |
 
 **Headline findings:** <top 3–5 in business terms, e.g. "An unauthenticated attacker could take over any
-user account via …">. **Overall posture:** <one line>.
+user account via …">. **Overall posture:** <one line — must be consistent with Assurance & Coverage below;
+do NOT claim clean/hardened over an unadjudicated recall gap or a degraded/failed run>.
+
+## Assurance & Coverage
+<MACHINE-FILLED from coverage_ledger.json + surface_ledger.json + reviews/recall_audit.verdict.json +
+runtime/diagnostics.json — factual, not narrated. A degraded/incomplete run is stated AS SUCH here.>
+- **Surface tested:** <tested>/<total> surfaces (from surface_ledger.json; else attempted/routed categories).
+- **Categories:** <run> run · <accepted> with accepted findings · <blocked> blocked (env-prevented) ·
+  <skipped> skipped (<each skip reason>) · <pending> pending. (from coverage_ledger.json `status`.)
+- **Open proof gaps:** <k> — real-looking but undemonstrated here (rejection_class open-proof-gap + any
+  recall-audit BLOCKED/open gaps); carried as caveats, re-test candidates — NOT silent drops.
+- **Run outcome:** <produced-findings | clean-tested | degraded-empty | failed> <(+ degraded_reason if any)>
+  (from runtime/diagnostics.json latest run).
+- **Recall adjudication:** <all recall gaps adjudicated — justified-clear / blocked> | <N unadjudicated — do
+  NOT ship a clean posture>.
 
 ## Scope & Methodology
 - **Scope:** <in-scope assets> (out of scope: <...>).
@@ -124,7 +138,11 @@ To whom it may concern,
 <TESTER/FIRM> conducted an independent penetration test of <CLIENT>'s <TARGET> (<TYPE>) between
 <start> and <end>, following the PTES methodology and OWASP testing guides. The assessment identified
 **<n> Critical, <n> High, <n> Medium, <n> Low** findings, detailed in the accompanying report
-(<ENGAGEMENT_ID>). <One line on overall posture / whether criticals were remediated at retest.>
+(<ENGAGEMENT_ID>). Testing covered <tested>/<total> identified surfaces; the run completed as
+<run outcome> <(+ degraded_reason if degraded)>, with <k> open proof gap(s) carried as caveats.
+<One line on overall posture / whether criticals were remediated at retest — MUST match the report's
+Assurance & Coverage clause; do not state a clean/hardened posture over an unadjudicated recall gap or a
+degraded/failed run.>
 
 This letter attests that the testing was performed as described; it is not a certification or a guarantee
 of security.
