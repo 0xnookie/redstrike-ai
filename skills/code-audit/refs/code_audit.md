@@ -147,6 +147,20 @@ lucky find.
      role, tier, `is_admin`, currency — taken from the request and used in the decision instead of being looked
      up / recomputed from server state. Negative quantity, zero/negative price, a discount re-applied, a tier the
      client named — each breaks the invariant with no "injection" anywhere.
+  4. **Lax setter + strict finalizer (staged-state eligibility).** A value is staged into session / context /
+     cart / draft state by a cheap, legitimate endpoint (switch-context, set-payment/shipping-method, save-draft,
+     add-to-cart), then CONSUMED by a later state-changing finalizer (place-order, capture, submit, publish). The
+     permissive setter is almost never the bug — it is often deliberately lax (it may only check the entity
+     EXISTS, not that it is *eligible*). The bug exists only if the finalizer TRUSTS the staged value instead of
+     RE-VALIDATING eligibility at use (active? allowed in this channel/tenant? availability rule satisfied? still
+     owned? still in a legal state?). So do NOT flag the lax setter — trace to the finalizer and settle the fixed
+     four-link chain: **enforcement point (where a failed check actually blocks the write) ← the blocking severity
+     of the error/exception it raises ← the validator/guard that raises it ← is that validator actually WIRED into
+     the finalizer's calculate/process path.** `confirmed` only if a link is missing (the finalizer re-reads the
+     staged value with no re-validation, or the validator exists but is never invoked on this path); `ruled-out`
+     if the finalizer re-derives / re-checks and blocks — cite the enforcement line + the blocking severity. This
+     is the move that separates a real eligibility bypass from a value that is harmlessly re-validated at use, and
+     it stops the lax setter from being written up as a false-positive finding.
 - **Close it** like any element: `confirmed` (the invariant is breakable — cite the check line + the write line +
   the missing control) / `ruled-out` (a lock / atomic update / unique constraint / server-side re-derivation
   holds it — cite it) / `open-proof-gap`. Then `surface.py --mark <state-op id> --status tested …`. A state-op
