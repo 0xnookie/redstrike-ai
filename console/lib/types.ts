@@ -85,6 +85,9 @@ export interface Engagement {
     approval_required_phases?: string[];
   };
   phase_progress?: { done: number; total: number };
+  /** White-box SOURCE-CODE audit grant from scope.source (repo_url/commit/branch). Present ⇒ this is
+   *  a source audit, not a black-box web engagement — the console branches its recon views on it. */
+  source?: { repo_url?: string; local_path?: string; commit?: string; branch?: string };
   /** the autonomous-run log: present? last written when? (liveness for runs we didn't launch) */
   run?: { log: boolean; updated?: string | null };
   /** the final consolidated report exists (the reporting phase ran) */
@@ -500,6 +503,64 @@ export interface Notebook {
   evidence?: NotebookEvidence[];
   roe?: NotebookRoe;
   test_accounts?: NotebookAccount[];
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * White-box SOURCE-CODE audit artifacts.
+ * A source audit has none of the black-box web recon artifacts (host_discovery /
+ * content.json / js-analysis). Instead the feeders emit a structural map of the
+ * app's real attack surface + the code-asset inventory. These are the white-box
+ * analogs the Site Map / Assets views branch to. Every field is loose by design
+ * (feeders emit what they found); readers tolerate partial/missing rows.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+// surface_ledger.json — the app's real route/attack-surface map (the white-box analog of an HTTP
+// sitemap). One `surfaces[]` row per discovered endpoint / form / sink, each routed to the
+// executor(s) that should test it. NB: web engagements also emit a surface_ledger (its surfaces are
+// URLs/params), so this file alone is NOT a white-box signal — Engagement.source is.
+export type SurfaceKind = "endpoint" | "form" | "sink" | "param" | "api-operation" | string;
+export interface SurfaceItem {
+  id: string;
+  kind: SurfaceKind;
+  value: string;            // a route path, a form action, or a sink "expr @ file:line [route]"
+  discovered_by?: string;
+  routed_to?: string[];     // executor slugs this surface was handed to
+  status?: string;          // discovered | tested | …
+  reason?: string;
+}
+export interface SurfaceLedger {
+  engagement?: string;
+  generated_at?: string;
+  surfaces?: SurfaceItem[];
+}
+
+// source-audit/source_context.json — the structural map + dependency/sink surface the white-box
+// feeder emits (the analog of "assets"). Consumed by the code-audit executor; the console reads it
+// read-only to populate the Source Map / Source Assets views.
+export interface SourceTaint {
+  reachable?: boolean; source?: string; sink?: string; sanitized?: boolean; engine?: string; rule_id?: string;
+}
+export interface SourceCandidate {
+  id?: string; file?: string; route?: string; line?: number; language?: string;
+  pattern?: string; category?: string; confidence?: string; snippet?: string; taint?: SourceTaint;
+}
+export interface SourceStructural {
+  id?: string; kind?: string; file?: string; line?: number; method?: string;
+  route_path?: string; handler?: string; source?: string; note?: string;
+}
+export interface SourceDependency { manifest?: string; name: string; version?: string; }
+export interface SourceSecret { file?: string; line?: number; type?: string; fingerprint?: string; }
+export interface SourceChainStep { ref?: string; role?: string; note?: string; }
+export interface SourceChain {
+  id?: string; title?: string; route_sequence?: string[]; steps?: SourceChainStep[];
+  pattern?: string; kind?: string; preconditions?: string[]; impact?: string;
+}
+export interface SourceContext {
+  version?: number; target?: string; generated_at?: string; scope_ref?: string;
+  languages?: string[]; candidates?: SourceCandidate[]; secret_candidates?: SourceSecret[];
+  dependencies?: SourceDependency[]; structural?: SourceStructural[];
+  chain_candidates?: SourceChain[]; routing?: string[];
+  coverage?: { files_scanned?: number; status?: string };
 }
 
 export interface ConsoleData {

@@ -13,12 +13,22 @@ import { Progress } from "@/components/ui/charts";
 import { AssetMap } from "@/components/AssetMap";
 import { SubdomainMap } from "@/components/SubdomainMap";
 import { buildSubdomainData } from "@/lib/subdomainMap";
+import { isSourceEngagement } from "@/lib/sourceSurface";
+import SourceAssets from "@/components/source/SourceAssets";
 
 const KIND_LABEL: Record<AssetKind, string> = {
   domain: "Domain", subdomain: "Subdomain", ip: "IP", cidr: "CIDR", service: "Service", endpoint: "Endpoint",
 };
 
+/* On a white-box SOURCE-CODE audit the "assets" are code assets (modules / dependencies / sink
+ * leads), not fetched web hosts — dispatch to the source-asset inventory. Web engagements keep
+ * the existing host/port/subdomain views unchanged. */
 export default function AssetsPage() {
+  const { activeEngagement, sourceContext } = useConsole();
+  return isSourceEngagement(activeEngagement, sourceContext) ? <SourceAssets /> : <WebAssets />;
+}
+
+function WebAssets() {
   const { activeEngagement: eng, assets, services, findings, notebook, setFindingsQuery, openHost, openEndpoint } = useConsole();
   const router = useRouter();
   const openHostFindings = (host: string) => { setFindingsQuery(host); router.push("/findings"); };

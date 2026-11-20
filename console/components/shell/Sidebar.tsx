@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { useConsole } from "@/lib/store";
+import { isSourceEngagement } from "@/lib/sourceSurface";
 import { useControl } from "@/components/control/ControlProvider";
 import { reportable } from "@/lib/stats";
 import { EngagementSwitcher } from "./EngagementSwitcher";
@@ -68,19 +69,22 @@ interface NavBadge { n: number; tone?: BadgeTone }
 // live nav counts derived from the loaded engagement data.
 // Per-engagement counts reflect the ACTIVE engagement; engagements is the full list. 0 => no badge.
 function useNavBadges(): Record<string, NavBadge> {
-  const { engagements, findings, chains, assets, content, notebook, cveIntel, jsRecon } = useConsole();
+  const { engagements, findings, chains, assets, content, notebook, cveIntel, jsRecon, activeEngagement, sourceContext, surfaceLedger } = useConsole();
   const { auth, conn, running } = useControl();
   const activeLeads = (notebook?.leads ?? []).filter((l) => l.status === "open" || l.status === "testing").length;
   const cves = (cveIntel?.cves ?? cveIntel?.entries ?? []).length;
   const connected = conn === "ready" ? Object.values(auth?.providers ?? {}).filter((p) => p.connected).length : 0;
   const anyRunning = engagements.some((e) => e.status === "running");
+  // white-box source audit: the Site Map / Assets badges count source surfaces / dependencies,
+  // not web routes / hosts (which don't exist for a source audit).
+  const sourceMode = isSourceEngagement(activeEngagement, sourceContext);
   return {
     "/engagements": { n: engagements.length, tone: anyRunning ? "live" : undefined },
     "/findings": { n: reportable(findings).length, tone: "hot" },
     "/chains": { n: chains.length },
-    "/assets": { n: assets.length },
-    "/sitemap": { n: content?.routes?.length ?? 0 },
-    "/js-recon": { n: jsRecon?.totals?.endpoints ?? 0 },
+    "/assets": { n: sourceMode ? (sourceContext?.dependencies?.length ?? 0) : assets.length },
+    "/sitemap": { n: sourceMode ? (sourceContext?.structural?.length ?? surfaceLedger?.surfaces?.length ?? 0) : (content?.routes?.length ?? 0) },
+    "/js-recon": { n: sourceMode ? 0 : (jsRecon?.totals?.endpoints ?? 0) },
     "/notebook": { n: activeLeads },
     "/cve-intel": { n: cves },
     "/orchestration": { n: 0, tone: running ? "live" : undefined }, // a run is streaming right now
@@ -93,9 +97,15 @@ const TONE_CLASS: Record<BadgeTone, string> = {
   live: "bg-emerald-500/[0.12] text-emerald-500",
 };
 
+// On a white-box source audit, the recon views change meaning — relabel their nav entries so the
+// sidebar matches what the pages now render.
+const SOURCE_LABEL: Record<string, string> = { "/sitemap": "Source map", "/assets": "Source assets" };
+
 export function Sidebar({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
   const pathname = usePathname();
   const badges = useNavBadges();
+  const { activeEngagement, sourceContext } = useConsole();
+  const sourceMode = isSourceEngagement(activeEngagement, sourceContext);
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
@@ -116,6 +126,7 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
                 const badge = badges[it.href];
                 const count = badge?.n ?? 0;
                 const tone = badge?.tone;
+                const label = sourceMode ? SOURCE_LABEL[it.href] ?? it.label : it.label;
                 return (
                   <li key={it.href}>
                     <Link
@@ -127,7 +138,7 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
                       )}
                     >
                       <Icon size={17} className={active ? "text-brand" : ""} />
-                      <span className="flex-1 truncate">{it.label}</span>
+                      <span className="flex-1 truncate">{label}</span>
                       {count > 0 ? (
                         <span
                           className={cx(

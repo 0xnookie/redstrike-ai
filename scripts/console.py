@@ -42,6 +42,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -68,6 +69,12 @@ WANTED = {
     "notebook.json": ["notebook.json"],
     "diagnostics.json": ["diagnostics.json"],
     "reasoning_trace.json": ["reasoning_trace.json"],
+    # white-box (source-audit) surfaces the console's Source Map / Source Assets views read.
+    # surface_ledger.json sits at the engagement root; source_context.json is nested under
+    # source-audit/ — its canonical key carries that served sub-path so resolve() maps
+    # /e/<id>/source-audit/source_context.json straight to it.
+    "surface_ledger.json": ["surface_ledger.json"],
+    "source-audit/source_context.json": ["source_context.json"],
     "scope.json": ["scope.json"],
 }
 
@@ -82,14 +89,36 @@ def ensure_build(force: bool) -> None:
         subprocess.run([npm, "--prefix", str(CONSOLE), "run", "build"], check=True)
 
 
+# Heavy, non-artifact subtrees that are NEVER searched for engagement files. A
+# white-box engagement embeds a full source checkout under source/ (tens of
+# thousands of files — Shopware's is 29,587); globbing it on every request made a
+# single findings fetch take ~45s and stacked the 15s manifest poll into a
+# starvation spiral (findings never rendered). Skills only ever write served
+# artifacts OUTSIDE these dirs (source-audit/, code-audit/, findings/, report/ …),
+# so pruning them is safe and ~100x faster. Dot-dirs are skipped too.
+_PRUNE_DIRS = {"source", ".git", "node_modules", "vendor", "__pycache__"}
+
+
+def _walk_pruned(root: Path):
+    """os.walk(root), top-down, never descending into _PRUNE_DIRS or dot-dirs, so an
+    embedded source checkout is never walked. Yields (Path(dirpath), filenames)."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS and not d.startswith(".")]
+        yield Path(dirpath), filenames
+
+
 def _shallowest(root: Path, name: str):
-    hits = sorted(root.rglob(name), key=lambda p: len(p.parts))
+    """Shallowest file named `name` under `root`, skipping heavy non-artifact
+    subtrees. Deterministic: ties at equal depth break on the full path string."""
+    hits = [dirpath / name for dirpath, filenames in _walk_pruned(root) if name in filenames]
+    hits.sort(key=lambda p: (len(p.parts), str(p)))
     return hits[0] if hits else None
 
 
 def _js_dir(engagement: Path):
     """The engagement's js-analysis directory (shallowest match), if any."""
-    hits = sorted((p for p in engagement.rglob("js-analysis") if p.is_dir()), key=lambda p: len(p.parts))
+    hits = [dirpath for dirpath, _ in _walk_pruned(engagement) if dirpath.name == "js-analysis"]
+    hits.sort(key=lambda p: (len(p.parts), str(p)))
     return hits[0] if hits else None
 
 
@@ -369,8 +398,24 @@ def discover(target: Path) -> list[Path]:
     return engs
 
 
+# Short-TTL per-engagement discovery cache. The console opens an engagement by
+# fetching ~10 artifacts near-simultaneously, and polls the manifest every 15s; a
+# cold files_for() walks the (pruned) tree once per wanted name, so without this the
+# open-burst re-walks the same tree a dozen times. A 3s TTL collapses the burst into
+# one walk while still surfacing a newly-written artifact within a few seconds. The
+# GIL makes the plain-dict get/set safe enough under the threading server (a cold
+# race just does an extra harmless walk).
+_FILES_CACHE: dict = {}
+_FILES_TTL = 3.0
+
+
 def files_for(engagement: Path) -> dict:
     """canonical name -> source Path for one engagement (real files on disk only)."""
+    key = str(engagement)
+    now = time.monotonic()
+    cached = _FILES_CACHE.get(key)
+    if cached and (now - cached[0]) < _FILES_TTL:
+        return cached[1]
     files = {}
     for canonical, candidates in WANTED.items():
         if canonical == "scope.json":
@@ -380,6 +425,7 @@ def files_for(engagement: Path) -> dict:
             if hit:
                 files[canonical] = hit
                 break
+    _FILES_CACHE[key] = (now, files)
     return files
 
 
@@ -473,6 +519,59 @@ def summarize(eng: Path, files: dict) -> dict:
     elif isinstance(cons, dict) and isinstance(cons.get("attack_chains"), list):
         chains = len(cons["attack_chains"])
     return {"findings": total, **counts, "chains": chains}
+
+
+def _severity_counts(findings) -> dict:
+    """Reportable-severity split in the report's `severity_counts` shape (critical/high/medium/
+    low/info). Reuses `_reportable` — the same rule `summarize()` uses — so blocked/accepted
+    non-composite findings count and rejected/needs-evidence ones don't."""
+    counts = {k: 0 for k in ("critical", "high", "medium", "low", "info")}
+    for f in findings:
+        if isinstance(f, dict) and _reportable(f):
+            sev = f.get("severity")
+            if sev in counts:
+                counts[sev] += 1
+    return counts
+
+
+def _scope_target(scope) -> str | None:
+    """A human target string from a parsed scope, or None. Mirrors scope_yaml_to_json's precedence
+    (an explicit `target`, else the first in-scope domain stripped of its wildcard, else the first
+    in-scope URL) so it also yields something useful for a raw runtime/scope.json that carries no
+    computed `target`. Never raises."""
+    if not isinstance(scope, dict):
+        return None
+    t = scope.get("target")
+    if t:
+        return t
+    insc = scope.get("in_scope") if isinstance(scope.get("in_scope"), dict) else {}
+    doms = insc.get("domains") or []
+    if doms:
+        return str(doms[0]).lstrip("*.")
+    urls = insc.get("urls") or []
+    if urls:
+        return str(urls[0])
+    return None
+
+
+def _computed_envelope(eng: Path, findings: list) -> dict:
+    """Wrap the live per-skill union in a MINIMAL report-shaped envelope (engagement / target /
+    generated_at / severity_counts / open_proof_gaps) so a pre-reporting engagement serves the same
+    top-level shape a real findings_consolidated.json does — several frontend views read those
+    header fields that a bare {findings} union would be missing. Never raises: an unreadable scope
+    degrades to a null target, not a crash."""
+    try:
+        scope = scope_for(eng)
+    except Exception:
+        scope = None
+    return {
+        "engagement": eng.name,
+        "target": _scope_target(scope),
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "severity_counts": _severity_counts(findings),
+        "open_proof_gaps": [],
+        "findings": findings,
+    }
 
 
 def _iso_z(v):
@@ -708,7 +807,9 @@ def make_handler(target: Path):
                     findings, _ = engagement_findings(eng, files)
                     if not findings:
                         return None
-                    raw = {"findings": findings}
+                    # Computed union (no on-disk report yet): wrap the live findings in a minimal
+                    # report envelope so its top-level shape matches a real consolidated report.
+                    raw = _computed_envelope(eng, findings)
                 return ("json", _json_bytes(_validate("findings_consolidated.json", raw)))
             # every other canonical artifact: load + validate + serve JSON (was raw file). An
             # artifact with no _contract schema, or one that won't parse as JSON, falls back to the
