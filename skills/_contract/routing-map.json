@@ -531,7 +531,7 @@
       "owasp": "-",
       "phase": "web",
       "pattern": "single",
-      "feeder": null,
+      "feeder": "flow-context",
       "agents": [
         "business-logic"
       ],
@@ -606,7 +606,7 @@
       "owasp": "-",
       "phase": "web",
       "pattern": "single",
-      "feeder": null,
+      "feeder": "flow-context",
       "agents": [
         "race-condition"
       ],
@@ -1168,6 +1168,24 @@
       "skip_reason": "no accepted finding to weaponize benignly",
       "risk": "high",
       "notes": "per high-value finding; approval-gated"
+    },
+    {
+      "id": "browser-exploit",
+      "name": "Browser-driven stateful exploitation",
+      "owasp": "-",
+      "phase": "capability",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "browser-exploit"
+      ],
+      "baseline": false,
+      "triggers": [
+        "flow:state-change"
+      ],
+      "skip_reason": "no cookie-authenticated state-changing flow needs autonomous browser driving",
+      "risk": "high",
+      "notes": "MECHANISM invoked by the stateful-write executors to drive a real browser autonomously (login->navigate->action) instead of deferring to a human; approval-gated. Finding belongs to the invoking class. phase:capability is exempt from the trigger-producer check; flow:state-change is produced by content-discovery."
     }
   ]
 }

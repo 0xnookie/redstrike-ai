@@ -10,7 +10,7 @@
 - **TOOLS:** interceptor (Caido/mitmproxy) to replay/alter flows, turbo-intruder (race conditions), `js-analysis/out/<site>/analysis/site-summary.md` for intended behavior; human-in-the-loop reasoning.
 - **GOAL:** Find business-logic flaws — violations of the app's intended invariants that yield real impact (money, access, data, quota) — each reproducible. The tests are DERIVED per app, not from a payload list. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `workflow_model.md`, `invariants.json`, `abuse_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/analysis/site-summary.md` + `findings/{endpoints,params,apis}.jsonl`, `auth.env` (multi-role), `scope.yaml`. `refs/` = `logic_flaw_patterns.md`. Chains FROM `js-analysis`; chains TO `reporting`. Overlaps access-control/IDOR (coordinate).
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/analysis/site-summary.md` + `findings/{endpoints,params,apis}.jsonl` + `flow-context/flow_context.json`, `auth.env` (multi-role), `scope.yaml`. `refs/` = `logic_flaw_patterns.md`. Chains FROM `js-analysis` + `flow-context`; chains TO `reporting`. Overlaps access-control/IDOR (coordinate).
 - **DECOMPOSITION:** n/a (atomic, bespoke).
 
 ## Goal
@@ -24,10 +24,10 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 - Targeted tests that violate each invariant; confirmed impact when one breaks
 
 ## Steps  (action · tool · output)
-1. Model workflows + state machines (from site-summary + crawling the flow) · synth · `workflow_model.md`
-2. Enumerate invariants/assumptions per workflow · `refs/logic_flaw_patterns.md` · `invariants.json`
-3. Design abuse tests per invariant (tamper, reorder, replay, race, skip step, negative/overflow) · synth · (into tests)
-4. Execute abuse tests (interceptor / turbo-intruder for races) · tools · `abuse_tests.jsonl` — if the workflow step is a **non-replayable server action** (see note), source + replay from `proxy-context/http_history.json` with the one field tampered
+1. Ingest the modeled state machine from `flow_context.json` (states/transitions/flows), then extend it (site-summary + crawling the flow) · synth · `workflow_model.md`
+2. Enumerate invariants/assumptions per workflow (seed from `flow_context.json` `invariants[] where route=="business-logic"`) · `refs/logic_flaw_patterns.md` · `invariants.json`
+3. Design abuse tests per invariant (tamper, reorder, replay, race, skip step, negative/overflow; treat `flows[].enforced_order==false` as the step-skip surface) · synth · (into tests)
+4. Execute abuse tests (interceptor / turbo-intruder for races) · tools · `abuse_tests.jsonl` — if the workflow step is a **non-replayable server action** (flagged by `flow_context.json` `actions[].non_replayable`; see note), source + replay from `proxy-context/http_history.json` with the one field tampered
 5. Confirm the invariant broke WITH impact (money/access/data) · synth · `poc/<id>/`
 6. Rate (CVSS, business impact) + write finding · synth · `findings.json`
 7. Emit report · synth · `report.md`
@@ -39,7 +39,11 @@ with a `Next-Action` header + a bound-state `multipart/form-data` body — a syn
 **source the request from `proxy-context/http_history.json`** (`_contract/proxy.md` §4a), then **replay it
 with the single field under test tampered** (price / quantity / state / step / coupon), leaving the
 bound-state part intact so the server accepts it — instead of hand-building the altered flow.
-`scripts/replay_server_action.py` extracts the entry + marks the tamper slot.
+`scripts/replay_server_action.py` extracts the entry + marks the tamper slot. First invoke the
+`browser-exploit` capability (`skills/browser-exploit/`, `_contract/browser-session.md`, approval-gated) to
+drive that multi-step flow autonomously (login→navigate→action) — the capture tampers price / quantity /
+state / step; it hands back the proven finding (under this class) + a replay-faithful capture — de-dupe
+against this candidate. Degrade to a human capture only if no browser driver is available.
 
 ## Tools
 - **Model/execute:** interceptor (Caido / mitmproxy), turbo-intruder (race/TOCTOU), multi-role `auth.env`
@@ -48,6 +52,7 @@ bound-state part intact so the server accepts it — instead of hand-building th
 
 ## Inputs
 - `js-analysis/out/<site>/`: `analysis/site-summary.md`, `findings/{endpoints,params,apis}.jsonl`
+- `flow-context/flow_context.json`: the modeled state machine + `invariants[] where route=="business-logic"` + `flows[].enforced_order` + `actions[].non_replayable`
 - `auth.env` (multiple roles/accounts), `scope.yaml`, `refs/logic_flaw_patterns.md`
 
 ## Outputs

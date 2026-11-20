@@ -36,7 +36,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding `review.v
 4. Locate where each tracer renders (which surface, which viewer) · crawl as each identity · `render_map.json` (confirmed pairs)
 5. Classify context AT THE RENDER SURFACE; canary the output encoder/sanitizer · `refs/context_rules.md`(xss-context) + DOM inspect · (into findings draft)
 6. Select payload; probe store-side AND output-side sanitizers · `refs/stored_payloads.md` + `dalfox` · `payloads_tried.jsonl`
-7. Confirm EXECUTION on the render surface as a DIFFERENT user/session · `chrome-devtools-mcp` → `puppeteer` (second profile) · `poc/<id>/render_*.{png,dom}`
+7. Confirm EXECUTION on the render surface as a DIFFERENT user/session · `chrome-devtools-mcp` → `puppeteer` (second profile) · `poc/<id>/render_*.{png,dom}` — when the store write + render are browser-gated, the `browser-exploit` capability (see note) drives both ends: the authed store write and this second-session cross-user execution confirmation
 8. Capture the store request + the render evidence (both ends) · interceptor + browser · `poc/<id>/store_req.http` + render evidence
 9. Assess durability (survives logout/new session) + blast radius (who sees it) · re-test fresh session · (into findings)
 10. Rate (CVSS) + write finding · synth · `findings.json`
@@ -51,7 +51,12 @@ is **not** constructible from scratch), **source the store request from `proxy-c
 captured one time via browser-through-proxy (`_contract/proxy.md` §4a) — and **replay it with the stored-XSS
 tracer/payload injected** into the captured text field, leaving the bound-state part intact, instead of
 constructing the store request. `scripts/replay_server_action.py` extracts the entry + marks the
-payload-inject slot. The render-side cross-user execution confirmation (steps 7–9) is unchanged.
+payload-inject slot. First invoke the `browser-exploit` capability (`skills/browser-exploit/`,
+`_contract/browser-session.md`, approval-gated) to drive the authed store write autonomously
+(login→navigate→action, payload into the captured field) AND confirm EXECUTION in a second real browser
+session as a different user; it hands back the proven finding (under this class) + a replay-faithful capture —
+de-dupe against this candidate. Degrade to a human capture only if no browser driver is available. The
+render-side cross-user execution confirmation (steps 7–9) is unchanged.
 
 ## Tools
 - **Ingest:** `jq` over `xss_context.json`

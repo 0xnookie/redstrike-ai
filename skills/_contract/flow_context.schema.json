@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/flow_context.schema.json",
+  "title": "Redstrike Flow Context",
+  "description": "Structured application state model emitted by the flow-context feeder and consumed by business-logic / race-condition / auth-bypass / idor — plus the navigation plan the browser driver acts on. Built from MULTIPLE identities (auth.env): states (pages/resource-states), the actions reachable from each, the transitions those actions drive (under which guard/precondition), and the invariants that must hold — all keyed to the identity/role that can reach them. A modeled flow is CONTEXT, not a finding: it is the substrate the logic/race/authz executors reason over, never proof of a flaw.",
+  "type": "object",
+  "required": ["target", "generated_at", "identities", "states"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "description": "schema version of this context document (current = 1). Optional and backward-compatible (mirrors coverage_ledger.map_version)." },
+    "target": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string" },
+    "identities": {
+      "type": "array",
+      "description": "the accounts/roles the model is keyed to (>=2 so reachability + role-gated transitions can be differenced; +admin for vertical flows). Mirrors authz_context.identities.",
+      "items": {
+        "type": "object",
+        "required": ["label"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string" },
+          "role": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "states": {
+      "type": "array",
+      "description": "the application states/pages: a node in the app state machine. Each carries the actions reachable from it and which identities observed it. The url/route fields double as the browser driver's navigation plan.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^st-[0-9]{3,}$" },
+          "name": { "type": "string" },
+          "kind": { "enum": ["page", "resource-state", "cart-state", "checkout-step", "auth-state", "wizard-step", "api-state", "modal", "other"], "description": "the sort of state this node represents" },
+          "url": { "type": "string", "description": "the URL / route that renders this state (the browser driver navigates here)" },
+          "reachable_by": { "type": "array", "items": { "type": "string" }, "description": "identity labels observed to reach this state (empty / 'anonymous' = pre-auth)" },
+          "entry_states": { "type": "array", "items": { "type": "string", "pattern": "^st-[0-9]{3,}$" }, "description": "state ids a valid flow arrives here from (for step-skip / forced-browsing reasoning)" },
+          "actions": {
+            "type": "array",
+            "description": "the actions available from this state (the executors tamper/replay/race these)",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "method"],
+              "additionalProperties": false,
+              "properties": {
+                "id": { "type": "string", "pattern": "^ac-[0-9]{3,}$" },
+                "name": { "type": "string" },
+                "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "GRAPHQL", "WS"] },
+                "route": { "type": "string", "description": "the endpoint/path the action calls" },
+                "handler": { "type": "string", "description": "server handler / function name when known (white-box)" },
+                "allowed_roles": { "type": "array", "items": { "type": "string" }, "description": "identity labels / roles the server is supposed to let perform it (BFLA / vertical surface)" },
+                "state_change": { "type": "boolean", "description": "true if the action mutates server state (the race / logic / CSRF surface)" },
+                "single_use": { "type": "boolean", "description": "the action is meant to succeed at most once per subject (coupon redeem, withdraw, confirm) — the race-condition over-redemption surface" },
+                "ui_selector": { "type": "string", "description": "optional selector / control hint so the browser driver can trigger the action in-page" },
+                "non_replayable": { "type": "boolean", "description": "the action rides a non-curl-constructible request (e.g. a Next.js / RSC server action: POST + Next-Action header + bound-state multipart body). The consuming executor must SOURCE + REPLAY it from proxy-context/http_history.json, not synthesize it (see _contract/proxy.md)." }
+              }
+            }
+          }
+        }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "description": "edges of the state machine: an action drives a move from one state to another, allowed only when its guard holds. The business-logic / auth-bypass executors probe whether the guard is actually enforced server-side; the browser driver walks these to reach deep states.",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^tr-[0-9]{3,}$" },
+          "from": { "type": "string", "pattern": "^st-[0-9]{3,}$", "description": "source state id" },
+          "to": { "type": "string", "pattern": "^st-[0-9]{3,}$", "description": "destination state id" },
+          "via": { "type": "string", "pattern": "^ac-[0-9]{3,}$", "description": "the action id that drives this transition" },
+          "guard": { "type": "string", "description": "the precondition that must hold for the transition to be legitimate, in plain language (e.g. 'payment confirmed', 'owns the resource', 'prior step completed', 'within quota')" },
+          "guard_kind": { "enum": ["auth-required", "role-required", "ownership", "csrf-token", "state-precondition", "sequence", "payment-confirmed", "quota", "rate-limit", "none"], "description": "the class of guard, so executors route it (missing auth/role/ownership -> auth-bypass/idor; sequence/state-precondition/quota -> business-logic; single-use under concurrency -> race-condition)" },
+          "enforced_by": { "enum": ["server", "client-only", "unknown"], "description": "where the guard is observed to be enforced. client-only is a lead: the transition may be reachable by forced browsing / direct request." },
+          "taken_by": { "type": "array", "items": { "type": "string" }, "description": "identity labels observed to legitimately take this transition" }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "description": "the rules the application assumes hold across the model — the properties the logic/race/authz executors try to BREAK for impact. An invariant is a hypothesis to test, not a finding.",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^inv-[0-9]{3,}$" },
+          "statement": { "type": "string", "description": "the rule in plain language, e.g. 'an order can be paid at most once', 'price = sum(item.price * qty)', 'only the owner can read a document', 'quota >= 0'" },
+          "kind": { "enum": ["single-use", "ownership", "sequence", "price-integrity", "quantity-nonneg", "quota", "monotonic", "role-gate", "uniqueness", "atomicity", "other"], "description": "the invariant family" },
+          "scope_states": { "type": "array", "items": { "type": "string", "pattern": "^st-[0-9]{3,}$" }, "description": "state ids this invariant governs" },
+          "scope_actions": { "type": "array", "items": { "type": "string", "pattern": "^ac-[0-9]{3,}$" }, "description": "action ids whose abuse could violate it" },
+          "break_impact": { "type": "string", "description": "the concrete impact if it breaks (money, access, data, quota) — so the executor rates severity to the real effect" },
+          "route": { "enum": ["business-logic", "race-condition", "auth-bypass", "idor", "privesc"], "description": "the executor best placed to prove a violation of this invariant" }
+        }
+      }
+    },
+    "flows": {
+      "type": "array",
+      "description": "named multi-step workflows (checkout, registration, password-reset, transfer, upgrade) as an ordered walk over states/actions — the step-skipping / forced-browsing / replay surface, and the browser driver's scripted path to a deep state.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "steps"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^fl-[0-9]{3,}$" },
+          "name": { "type": "string" },
+          "enforced_order": { "type": "boolean", "description": "true if steps are supposed to run strictly in order (the step-skip surface when the server does not enforce it)" },
+          "keyed_to": { "type": "array", "items": { "type": "string" }, "description": "identity labels / roles this flow is modeled for" },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "description": "ordered steps; each references a state and (optionally) the action that advances it",
+            "items": {
+              "type": "object",
+              "required": ["state"],
+              "additionalProperties": false,
+              "properties": {
+                "state": { "type": "string", "pattern": "^st-[0-9]{3,}$" },
+                "action": { "type": "string", "pattern": "^ac-[0-9]{3,}$" },
+                "note": { "type": "string", "description": "what this step contributes / the precondition it establishes" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "identity_requirements": {
+      "type": "object",
+      "description": "what identities the downstream logic/race/authz hunts actually need, scoped up front (mirrors authz_context). Flags surfaces untestable without operator-provisioned identities (verified/eID/KYC/second-tenant) so the gap is explicit, not discovered mid-hunt.",
+      "additionalProperties": false,
+      "properties": {
+        "min_identities": { "type": "integer", "description": "how many distinct accounts the deep flows need (>=2)" },
+        "roles_needed": { "type": "array", "items": { "type": "string" } },
+        "verification_level": { "type": "string", "description": "entitlement/verification an account needs to reach the sensitive flow (e.g. verified-email / KYC / paid-tier)" },
+        "untestable_without": { "type": "array", "items": { "type": "string" }, "description": "surfaces blocked until the operator provisions these (e.g. a second verified tenant)" },
+        "notes": { "type": "string" }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "states_mapped": { "type": "integer" },
+        "identities_crawled": { "type": "integer" },
+        "status": { "enum": ["complete", "incomplete"] }
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@
 - **TOOLS:** Turbo Intruder (single-packet attack), Burp Repeater "send group in parallel", interceptor, `refs/race_techniques.md`.
 - **GOAL:** Confirm a race condition — a concurrency-induced violation of an intended invariant (a single-use action succeeding more than once, a balance/stock going inconsistent) — benignly and minimally. Done = checklist `- [x]`, review passes, findings accepted + approved.
 - **OUTPUT:** `race_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/` endpoints+forms + `business-logic` workflow model (single-use/limited actions) + `scope.yaml`. `refs/` = `race_techniques.md`. Chains FROM recon / `business-logic`; chains TO `reporting`.
+- **DATA / RAG:** inputs = `js-analysis/` endpoints+forms + `business-logic` workflow model (single-use/limited actions) + `flow-context/flow_context.json` + `scope.yaml`. `refs/` = `race_techniques.md`. Chains FROM recon / `business-logic` / `flow-context`; chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -21,10 +21,10 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted + approved.
 - A benign proof on a TEST account: the limited action succeeded N>1 times (or an invariant broke) because requests were parallel — and serial attempts do NOT reproduce it
 
 ## Steps  (action · tool · output)
-1. Ingest endpoints/forms + business-logic single-use/limited actions · `jq` · (into tests)
+1. Ingest endpoints/forms + business-logic single-use/limited actions + `flow_context.json` `actions[] where single_use==true && state_change==true` + `invariants[] where route=="race-condition"` (pre-identified over-redemption / limit-overrun targets) · `jq` · (into tests)
 2. Pick targets: TOCTOU (check-then-use) + limit-overrun (single-use/quota) · refs · `race_tests.jsonl`
 3. Baseline serially (confirm the action is normally limited) · interceptor · `race_tests.jsonl`
-4. Fire a BOUNDED concurrent burst (single-packet HTTP/2 via Turbo Intruder, or last-byte sync HTTP/1) · Turbo Intruder · `poc/<id>/` — if the action is a **non-replayable server action** (see note), source the request from `proxy-context/http_history.json` and fire THAT captured request as the parallel burst
+4. Fire a BOUNDED concurrent burst (single-packet HTTP/2 via Turbo Intruder, or last-byte sync HTTP/1) · Turbo Intruder · `poc/<id>/` — if the action is a **non-replayable server action** (flagged by `flow_context.json` `actions[].non_replayable`; see note), source the request from `proxy-context/http_history.json` and fire THAT captured request as the parallel burst
 5. Detect the break (redeemed >1×, double balance, duplicate unique, bypassed quota) vs serial baseline · synth · `race_tests.jsonl`
 6. Confirm benignly + minimally on a test account; revert any state (refund/void) · synth · `cleanup`/`poc`
 7. Rate (CVSS) + write finding · synth · `findings.json`
@@ -37,7 +37,11 @@ curl-constructible from scratch, a synthesized POST 500s), **source the request 
 `proxy-context/http_history.json`** — captured once via browser-through-proxy (`_contract/proxy.md` §4a) —
 and **fire that captured request as the parallel burst** (bound-state part unchanged), rather than
 synthesizing the concurrent requests. Turbo Intruder / the Repeater parallel group drives the captured
-request; `scripts/replay_server_action.py` extracts the entry.
+request; `scripts/replay_server_action.py` extracts the entry. First invoke the `browser-exploit` capability
+(`skills/browser-exploit/`, `_contract/browser-session.md`, approval-gated) to drive + capture the single-use
+action autonomously (login→navigate→action), then fire that capture as a PARALLEL BURST (bound-state
+unchanged); it hands back the proven finding (under this class) + a replay-faithful capture — de-dupe against
+this candidate. Degrade to a human capture only if no browser driver is available.
 
 ## Tools
 - Turbo Intruder (`Engine.BURP2`, single-packet gate), Burp Repeater parallel group, interceptor, `refs/race_techniques.md`
@@ -45,6 +49,7 @@ request; `scripts/replay_server_action.py` extracts the entry.
 
 ## Inputs
 - `js-analysis/` endpoints+forms, `business-logic` workflow model, `scope.yaml`
+- `flow-context/flow_context.json`: `actions[] where single_use==true && state_change==true` + `invariants[] where route=="race-condition"` + `actions[].non_replayable`
 
 ## Outputs
 `race_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`
