@@ -1,7 +1,8 @@
-# Recall benchmark — operator runbook
+# Benchmark scorecard — operator runbook
 
-Measuring recall is a deliberate, hands-on run: it needs a live labelled target and a real Redstrike
-engagement against it. It is **not** a push-CI job (CI only runs `--selftest`). Here is the end-to-end loop.
+Measuring the scorecard (recall + precision + cost + reproducibility) is a deliberate, hands-on run: it needs
+a live labelled target and/or a real Redstrike engagement against it. It is **not** a push-CI job (CI only
+runs `--selftest`). Here is the end-to-end loop.
 
 ## A. Juice Shop (`http-json`, live solved-API)
 
@@ -47,12 +48,45 @@ python scripts/benchmark.py --score --target <your-target> --engagement engageme
 
 `_load_findings` reads whichever findings layout the run produced (consolidated report, a root
 `findings.json`, or the union of per-skill `*/findings.json`) and counts only accepted/blocked,
-non-composite findings — i.e. recall credits what actually got **reported**.
+non-composite findings — i.e. recall credits what actually got **reported**. The same `--score --engagement`
+pass **also** reports precision (vs the target's truth set) and cost/time (from `runtime/diagnostics.json` +
+`runtime/autorun.jsonl`) — no extra step.
+
+## C. Reproducibility (K≥3 epochs)
+
+Run the SAME target K≥3 times (separate engagement dirs), then aggregate the variance:
+
+```bash
+python scripts/benchmark.py --repro --target <your-target> \
+  --engagement engagements/<t>-run1 --engagement engagements/<t>-run2 --engagement engagements/<t>-run3 \
+  --epochs 3 --out benchmark/results/<t>-repro.json
+
+# gate a change on variance (fail if recall/precision stdev blows out):
+python scripts/benchmark.py --check --target <your-target> --max-variance 0.10 \
+  --engagement engagements/<t>-rerun
+```
+
+Record a repro result as the baseline (`--repro --baseline`) to publish the variance on the scoreboard.
+
+## D. Scoreboard (the committed, public scorecard)
+
+```bash
+python scripts/benchmark.py --scoreboard      # regenerate benchmark/SCOREBOARD.md from all baselines
+```
+
+`SCOREBOARD.md` is generated — never hand-edit it. Regenerate it whenever you record/replace a baseline, and
+commit the regenerated file alongside the baseline change.
 
 ## Interpreting it
 
-- **Overall recall** is the headline: solved / total known vulns.
-- **Per-category** recall shows *where* recall is weak — that is where to aim routing/payload/recon work.
-- A `--check` regression means a change made Redstrike miss something it used to catch: investigate before
-  merging. An improvement is printed too (consider re-recording the baseline up).
-- `benchmark/results/` is git-ignored scratch; commit a baseline deliberately, not every score.
+- **Overall recall** is the headline: solved / total known vulns. **Per-category** recall shows *where* recall
+  is weak — that is where to aim routing/payload/recon work.
+- **Precision** is a range: `precision_upper` (candidates adjudicated out) .. `precision_lower` (worst case).
+  **FP candidates are unlabelled, not failures** — triage them: a genuine new bug becomes a `truth[]`/`expected`
+  entry, a genuine false alarm becomes a `not_expected[]` entry (then it counts toward the confirmed FP-rate).
+- **Mean $/finding** and **time-to-first-finding** are the efficiency axes — a capability gain that doubles cost
+  is not a free win.
+- A `--check` regression (recall, precision, confirmed-FP rate, or a variance blowout) means a change made
+  Redstrike worse: investigate before merging. Improvements are printed too (consider re-recording the baseline).
+- `benchmark/results/` is git-ignored scratch; commit a baseline (and the regenerated `SCOREBOARD.md`)
+  deliberately, not every score.

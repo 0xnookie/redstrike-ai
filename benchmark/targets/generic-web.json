@@ -2,7 +2,9 @@
   "target": "generic-web",
   "name": "Generic web app (expected-findings benchmark)",
   "answer_key": {"type": "findings-match"},
-  "notes": "Target-agnostic recall benchmark: no live solved-API needed. Score a run by matching its findings.json (accepted/verified findings) against this expected-vuln manifest — `python scripts/benchmark.py --score --target generic-web --engagement <dir>`. Clone this file per real target and trim `expected` to that app's known vulnerabilities. A matcher fires when EVERY declared key matches (cwe exact, owasp prefix, wstg substring, title_regex). This is how recall generalizes beyond Juice-Shop-style apps (counters benchmark overfitting).",
+  "notes": "Target-agnostic recall+precision benchmark: no live solved-API needed. Score a run by matching its findings.json (accepted/verified findings) against this manifest — `python scripts/benchmark.py --score --target generic-web --engagement <dir>`. Clone this file per real target and trim `expected` to that app's known vulnerabilities. A matcher fires when EVERY declared key matches (cwe exact, owasp prefix, wstg substring, title_regex). PRECISION: `expected` doubles as the TRUTH set, so a reported finding matching it is a true positive; add `truth[]` entries (same {id,name,match} shape) for known-true vulns you don't want scored for recall. `not_expected[]` lists known-FALSE claims — a reported finding matching one is a CONFIRMED false positive. A reported finding matching NEITHER is an FP *candidate* (real-but-unlabelled findings exist): it is flagged for adjudication, never auto-counted as an FP or auto-failed. This is how recall + precision generalize beyond Juice-Shop-style apps (counters overfitting).",
+  "truth": [],
+  "not_expected": [],
   "expected": [
     {"id": "sqli",            "name": "SQL injection",                 "group": "A03 Injection",        "match": {"cwe": "CWE-89"}},
     {"id": "nosql",           "name": "NoSQL injection",               "group": "A03 Injection",        "match": {"cwe": "CWE-943"}},

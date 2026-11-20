@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/audit.schema.json",
+  "title": "Redstrike Audit / Chain-of-Custody Record",
+  "description": "ONE append-only custody record. The engagement's audit log lives at runtime/audit.jsonl and is JSON LINES: one object matching this schema per line, appended (never rewritten) as the engagement proceeds. It is the timestamped who/what/when trail roe-gate.md §4 promises — every gate decision, target-reaching tool invocation, and independent evidence capture leaves a line here, binding it to the scope in force (the sha256 field carries the scope.yaml/scope.json fingerprint for a gate event, or the captured-artifact hash for an evidence event). Producers (the scope-gate hook, scripts/evidence_capture.py, scripts/evidence_seal.py) append best-effort and NON-FATALLY — a failed append must never break the hook/run flow — so this log is tamper-EVIDENT (a missing or altered line is detectable against the manifest + report), not tamper-proof. Because each line is an independent JSON object, the file as a whole is NOT a single JSON document; validate it line-by-line against this schema.",
+  "type": "object",
+  "required": ["ts", "actor", "action", "target", "detail"],
+  "additionalProperties": false,
+  "properties": {
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 (UTC, timezone-aware) timestamp of when the event occurred / was recorded."
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Who/what produced the event, e.g. 'scope-gate', 'evidence-capture', 'evidence-seal', or an executor/skill name."
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The event verb. Gate decisions: 'deny' | 'defer' | 'pass'. Evidence: 'capture' | 'seal' | 'verify'. Open set (new producers may add verbs); constrained by convention, not enum, so the trail stays extensible."
+    },
+    "target": {
+      "type": "string",
+      "description": "What the action was about — the host/URL/path it reached, the tool invoked (e.g. 'Bash', 'WebFetch:api.acme.example'), or the evidence ref written. May be empty when the event has no single target."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Human-readable context: the decision reason, a truncated command/URL snippet, the evidence type + finding id, etc. May be an empty string. Best-effort redaction only — producers avoid writing raw secret values here."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Optional 64-hex binding hash. For a gate event: the fingerprint of the scope record in force (binds the decision to the exact authorized scope). For an evidence event: the sha256 of the captured/sealed artifact. Omitted when no binding hash applies."
+    }
+  }
+}

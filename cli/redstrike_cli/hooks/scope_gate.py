@@ -479,6 +479,63 @@ def _load_approvals(approvals_path: str) -> frozenset:
         return frozenset()
 
 
+# --- chain-of-custody producer ---------------------------------------------
+# The gate is the one component that sees EVERY target-reaching tool call before it runs, so it is the
+# natural producer of the engagement's immutable audit log (roe-gate.md §4) — the timestamped who/what/
+# when trail that no engagement previously carried. It appends one record per gate decision (deny/defer,
+# and every active/target-reaching pass) to runtime/audit.jsonl (schema: skills/_contract/audit.schema.json),
+# binding the decision to the scope in force via sha256(scope.json). Self-contained + best-effort: a
+# custody-log failure must NEVER break the hook flow, so every append is wrapped and swallowed.
+_AUDIT_FILENAME = "audit.jsonl"
+
+
+def _file_sha256(path) -> str:
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except Exception:
+        return ""
+
+
+def _audit_target(tool_name: str, tool_input: dict) -> str:
+    """A concise target for the custody line: tool + the primary host/URL it reaches (when resolvable)."""
+    ti = tool_input or {}
+    host = ""
+    try:
+        if tool_name == "WebFetch":
+            raw = str(ti.get("url", ""))
+            host = _host_of_url(raw) or (extract_targets(raw) or [""])[0]
+        elif tool_name in _SHELL_TOOLS:
+            hosts = extract_targets(str(ti.get("command", "")))
+            host = hosts[0] if hosts else ""
+        elif tool_name.startswith("mcp__"):
+            hosts = extract_targets(json.dumps(ti, default=str))
+            host = hosts[0] if hosts else ""
+    except Exception:
+        host = ""
+    return f"{tool_name}:{host}" if host else (tool_name or "unknown")
+
+
+def _append_audit(runtime_dir, *, actor: str, action: str, target: str, detail: str,
+                  sha256: str = "") -> None:
+    """Append one custody record (JSONL) to <runtime_dir>/audit.jsonl. Never raises."""
+    try:
+        rec = {
+            "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "actor": actor,
+            "action": action,
+            "target": target or "",
+            "detail": (detail or "")[:300],
+        }
+        if sha256:
+            rec["sha256"] = sha256
+        p = Path(runtime_dir) / _AUDIT_FILENAME
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, sort_keys=True) + "\n")
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Redstrike PreToolUse scope gate.")
     ap.add_argument("--scope", default=os.environ.get("REDSTRIKE_SCOPE_FILE", ""))
@@ -500,7 +557,13 @@ def main(argv: list[str] | None = None) -> int:
         # Fail closed: the gate only matches active tools, so deny rather than
         # run an offensive action with no scope record.
         _emit_deny("scope record unavailable (runtime/scope.json missing) — refusing active tool")
+        if scope_file is not None:  # best-effort custody line even on a missing-scope deny
+            _append_audit(scope_file.parent, actor="scope-gate", action="deny",
+                          target=_audit_target(tool_name, tool_input),
+                          detail="scope record unavailable — refusing active tool")
         return 0
+    scope_sha = _file_sha256(scope_file)
+    runtime_dir = scope_file.resolve().parent
     try:
         scope = json.loads(scope_file.read_text(encoding="utf-8"))
         decision = evaluate(
@@ -512,11 +575,25 @@ def main(argv: list[str] | None = None) -> int:
         )
     except Exception as e:  # fail closed on any internal error
         _emit_deny(f"scope-gate internal error ({type(e).__name__}) — failing closed")
+        _append_audit(runtime_dir, actor="scope-gate", action="deny",
+                      target=_audit_target(tool_name, tool_input),
+                      detail=f"internal error ({type(e).__name__}) — failing closed", sha256=scope_sha)
         return 0
 
-    if decision["decision"] == "deny":
+    # Chain of custody: record every deny/defer, and every active/target-reaching PASS (Bash/PowerShell/
+    # WebFetch/mcp__). Local file reads/searches (the bulk of PASSes) are not target-reaching and are not
+    # logged, keeping the trail the meaningful who/what/when of the engagement's offensive surface.
+    dec = decision["decision"]
+    is_active = tool_name in _ACTIVE_TOOLS or tool_name.startswith("mcp__")
+    if dec != "pass" or is_active:
+        _append_audit(runtime_dir, actor="scope-gate", action=dec,
+                      target=_audit_target(tool_name, tool_input),
+                      detail=(decision.get("reason") or f"{tool_name} passed scope gate"),
+                      sha256=scope_sha)
+
+    if dec == "deny":
         _emit_deny(decision["reason"])
-    elif decision["decision"] == "defer":
+    elif dec == "defer":
         _emit_defer(decision["reason"])
     return 0
 

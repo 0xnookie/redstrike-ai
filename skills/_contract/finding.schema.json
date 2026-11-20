@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://redstrike.ai/schemas/finding.schema.json",
   "title": "Redstrike Finding",
-  "description": "One security finding. A findings-producing skill emits an array of these as findings.json. verify.md (the semantic gate) fills the `review` block; the reporting skill consumes accepted findings.",
+  "description": "One security finding. A findings-producing skill emits an array of these as findings.json. verify.md (the semantic gate) fills the `review` block; the cross-model adversarial-verify reviewer fills `secondary_review`; the reporting skill consumes accepted findings.",
   "type": "array",
   "items": { "$ref": "#/$defs/finding" },
   "$defs": {
@@ -38,16 +38,7 @@
         "evidence": {
           "type": "array",
           "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["type", "ref"],
-            "additionalProperties": false,
-            "properties": {
-              "type": { "enum": ["request_response", "tool_output", "screenshot", "dom_capture", "log", "poc_script"] },
-              "ref": { "type": "string", "description": "Path under the engagement evidence vault." },
-              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-            }
-          }
+          "items": { "$ref": "#/$defs/evidence" }
         },
         "reproduction": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Ordered steps to reproduce. Wrap every inline payload, request line, JSON body or command in Markdown backticks (e.g. `POST /tokens {\"username\":\"admin'-- -\"}`) so the console renders it verbatim as code." },
         "impact": { "type": "string", "description": "What the evidence proves an attacker can do. Backtick any inline payload/command/JSON as in `reproduction`." },
@@ -67,28 +58,59 @@
             "ref": { "type": "string", "description": "evidence-vault path to the cleanup proof (e.g. cleanup.md or the removal command output)." }
           }
         },
-        "review": {
+        "review": { "$ref": "#/$defs/review", "description": "Filled by verify.md (the independent per-class reviewer). Absent = not yet semantically verified." },
+        "secondary_review": { "$ref": "#/$defs/review", "description": "Optional SECOND, cross-model verdict — the same shape as `review{}`, written by the model-pinned `adversarial-verify` reviewer (a different model than the executor/primary reviewer) so a shared-model hallucination cannot pass both. Required (gated) for a High/Critical accepted finding or any composite/chain finding once a report exists; absent = no cross-model second check yet." }
+      }
+    },
+    "evidence": {
+      "description": "One evidence artifact. EITHER a vault-referenced artifact (a `ref` to a saved file in the engagement evidence vault) OR an inline `code_citation` (verbatim source bytes at file:line, for white-box findings) whose `ref` is optional.",
+      "anyOf": [
+        {
           "type": "object",
-          "description": "Filled by verify.md. Absent = not yet semantically verified.",
-          "required": ["verdict", "reviewer"],
+          "required": ["type", "ref"],
           "additionalProperties": false,
           "properties": {
-            "verdict": { "enum": ["accepted", "rejected", "needs-evidence", "blocked"], "description": "The AUTHORITATIVE reviewer decision (`reviews/<id>.verdict.json` is canonical; the finding's `status` is DERIVED from this). accepted=confirmed (-> status verified); rejected=not real/out-of-scope (-> status rejected; set rejection_class); needs-evidence=real but a missing artifact the executor can still produce (bounce back; status stays open); blocked=confirmed real but full demonstration is prevented by target/environment state the executor cannot change (e.g. unseeded DB) -> status verified, report WITH a caveat, do not bounce. Only accepted + blocked reach reporting." },
-            "reviewer": { "type": "string" },
-            "reviewed_at": { "type": "string", "format": "date-time" },
-            "rubric": {
-              "type": "object",
-              "description": "Per-check results from verify-base.md.",
-              "additionalProperties": { "enum": ["pass", "fail", "n/a"] }
-            },
-            "false_positive_checks": { "type": "array", "items": { "type": "string" } },
-            "rejection_class": { "enum": ["false-positive", "out-of-scope", "duplicate", "open-proof-gap"], "description": "REQUIRED when verdict=rejected — why. false-positive/out-of-scope/duplicate are clean drops. 'open-proof-gap' = real-looking but undemonstrable here (env/creds/WAF/time); it is REPORTED as a known gap / recall caveat, never silently dropped. Recall rule: when genuinely unsure between false-positive and open-proof-gap, choose open-proof-gap — a false positive is caught downstream, a false negative is invisible." },
-            "scope_ok": { "type": "boolean" },
-            "notes": { "type": "string" },
-            "decisive": { "type": "string", "description": "The decisive rationale behind the verdict — the single reason this finding was accepted/rejected/blocked (mirrors the reviewer's one-line decisive reason; the sidecar reviews/<id>.verdict.json carries the same field). Optional and backward-compatible." },
-            "method": { "type": "string", "description": "How the verdict was reached — the verification method the reviewer applied (e.g. re-read the traced file:line path + ran the PoC; recomputed the CVSS vector; two-identity replay). Optional and backward-compatible." }
+            "type": { "enum": ["request_response", "tool_output", "screenshot", "dom_capture", "log", "poc_script"] },
+            "ref": { "type": "string", "description": "Path under the engagement evidence vault." },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "file", "line", "snippet"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "enum": ["code_citation"] },
+            "file": { "type": "string", "minLength": 1, "description": "Repo-relative source file path the bytes were read from (e.g. src/Controller/Order.php)." },
+            "line": { "type": ["integer", "string"], "description": "Line number (or start line, or a `start-end` range) of the cited bytes." },
+            "commit": { "type": "string", "description": "Repo commit (or branch/tag) the bytes were read at — provenance so the citation is re-findable. Recommended; omit only when no VCS revision is available (local-path audit)." },
+            "snippet": { "type": "string", "minLength": 1, "description": "VERBATIM source bytes at file:line — the independent white-box artifact that proves the code path (copied exactly, not paraphrased)." },
+            "ref": { "type": "string", "description": "OPTIONAL path under the engagement evidence vault to a saved copy of the citation (the inline snippet is the primary artifact)." },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
           }
         }
+      ]
+    },
+    "review": {
+      "type": "object",
+      "description": "A reviewer verdict block (verify.md fills the finding's `review{}`; the cross-model adversarial-verify fills `secondary_review{}`). Closed object — the only allowed keys are those below.",
+      "required": ["verdict", "reviewer"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "enum": ["accepted", "rejected", "needs-evidence", "blocked"], "description": "The AUTHORITATIVE reviewer decision (`reviews/<id>.verdict.json` is canonical; the finding's `status` is DERIVED from this). accepted=confirmed (-> status verified); rejected=not real/out-of-scope (-> status rejected; set rejection_class); needs-evidence=real but a missing artifact the executor can still produce (bounce back; status stays open); blocked=confirmed real but full demonstration is prevented by target/environment state the executor cannot change (e.g. unseeded DB) -> status verified, report WITH a caveat, do not bounce. Only accepted + blocked reach reporting." },
+        "reviewer": { "type": "string" },
+        "reviewed_at": { "type": "string", "format": "date-time" },
+        "rubric": {
+          "type": "object",
+          "description": "Per-check results from verify-base.md.",
+          "additionalProperties": { "enum": ["pass", "fail", "n/a"] }
+        },
+        "false_positive_checks": { "type": "array", "items": { "type": "string" } },
+        "rejection_class": { "enum": ["false-positive", "out-of-scope", "duplicate", "open-proof-gap"], "description": "REQUIRED when verdict=rejected — why. false-positive/out-of-scope/duplicate are clean drops. 'open-proof-gap' = real-looking but undemonstrable here (env/creds/WAF/time); it is REPORTED as a known gap / recall caveat, never silently dropped. Recall rule: when genuinely unsure between false-positive and open-proof-gap, choose open-proof-gap — a false positive is caught downstream, a false negative is invisible." },
+        "scope_ok": { "type": "boolean" },
+        "notes": { "type": "string" },
+        "decisive": { "type": "string", "description": "The decisive rationale behind the verdict — the single reason this finding was accepted/rejected/blocked (mirrors the reviewer's one-line decisive reason; the sidecar reviews/<id>.verdict.json carries the same field). Optional and backward-compatible." },
+        "method": { "type": "string", "description": "How the verdict was reached — the verification method the reviewer applied (e.g. re-read the traced file:line path + ran the PoC; recomputed the CVSS vector; two-identity replay). Optional and backward-compatible." }
       }
     }
   }

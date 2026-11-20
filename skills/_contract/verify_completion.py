@@ -1128,7 +1128,23 @@ def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: se
     if not isinstance(ev, list) or not ev:
         return False, "no evidence items", warns
     for i, item in enumerate(ev, 1):
-        ref = (item or {}).get("ref")
+        item = item or {}
+        # code_citation = inline VERBATIM source bytes (white-box evidence); its vault `ref` is OPTIONAL —
+        # the proof is file/line/snippet. A vault `ref`, when present, is still validated as a real file.
+        if item.get("type") == "code_citation":
+            miss = [k for k in ("file", "line", "snippet")
+                    if item.get(k) in (None, "") or str(item.get(k)).strip() == ""]
+            if miss:
+                return False, f"evidence #{i} code_citation missing verbatim source bytes ({', '.join(miss)})", warns
+            ref = item.get("ref")
+            if ref:
+                p = eng / ref
+                if not p.is_file():
+                    return False, f"evidence #{i} code_citation ref not found: {ref}", warns
+                if p.stat().st_size == 0:
+                    return False, f"evidence #{i} code_citation ref is 0 bytes: {ref}", warns
+            continue
+        ref = item.get("ref")
         if not ref:
             return False, f"evidence #{i} has no ref", warns
         p = eng / ref
@@ -1161,13 +1177,13 @@ def check_finding(f: dict, eng: Path, scope_text: str, cvss_mod, verdict_ids: se
             return False, f"cleanup ref is 0 bytes: {cu['ref']}", warns
 
     # --- soft checks (warnings only) ---
+    # CVSS DRIFT (declared severity != recomputed rating, no potential_severity) is gated at engagement
+    # altitude by _cvss_drift_check (R7): a soft warning while hunting, a HARD fail once a report exists
+    # (same escalation shape as the self-attestation gate). Here we only surface an UNSCORABLE vector as a
+    # per-finding hygiene warning.
     if cvss_mod and f.get("cvss_vector"):
         try:
-            score, rating, _ = cvss_mod.score_vector(f["cvss_vector"])
-            declared = str(f.get("severity", "")).lower()
-            if rating.lower() != declared and not f.get("potential_severity"):
-                warns.append(f"{fid}: severity '{declared}' != CVSS rating "
-                             f"'{rating.lower()}' ({score}); set potential_severity or fix the vector")
+            cvss_mod.score_vector(f["cvss_vector"])
         except Exception as e:
             warns.append(f"{fid}: cvss_vector not scorable ({e})")
 
@@ -1385,6 +1401,263 @@ def _independent_review_check(eng: Path, findings: list) -> tuple:
     return hard, warns
 
 
+# --- CVSS-drift HARD gate (R7) ------------------------------------------------------------------- #
+# The gate recomputes each finding's CVSS vector (scripts/cvss.py). A declared `severity` that differs
+# from the recomputed rating, with NO `potential_severity` set, is DRIFT — the severity the report would
+# print is not what the vector proves. This USED to only warn; now it follows the self-attestation
+# escalation shape: a soft warning while hunting, a HARD fail once a report exists (a report must not
+# ship a finding whose severity contradicts its own CVSS vector and isn't flagged demonstrated-vs-
+# potential). A finding carrying `potential_severity` is a legitimate demonstrated-vs-potential gap and
+# is never drift.
+def _cvss_drift_check(eng: Path, findings: list, cvss_mod) -> tuple:
+    """(hard_errors, warnings) for the CVSS-drift gate (R7). [] / [] when cvss.py is unavailable."""
+    if not cvss_mod:
+        return [], []
+    armed = _gates_armed(eng, findings)
+    hard, warns = [], []
+    for f in findings:
+        if not isinstance(f, dict) or not f.get("cvss_vector") or f.get("potential_severity"):
+            continue
+        try:
+            score, rating, _ = cvss_mod.score_vector(f["cvss_vector"])
+        except Exception:  # noqa: BLE001 — the per-finding 'not scorable' warning already surfaces this
+            continue
+        declared = str(f.get("severity", "")).lower()
+        if rating.lower() == declared:
+            continue
+        fid = f.get("id", "<no-id>")
+        msg = (f"{fid}: declared severity '{declared}' != recomputed CVSS rating '{rating.lower()}' "
+               f"({score}) with no potential_severity set — fix the vector/severity (do not hand-override "
+               f"the score), or set potential_severity (demonstrated-vs-potential)")
+        if armed:
+            hard.append("cvss-drift gate (report present → a finding's severity must match its recomputed "
+                        f"CVSS rating or be flagged demonstrated-vs-potential): {msg}")
+        else:
+            warns.append(msg + " [becomes a hard gate once a report exists]")
+    return hard, warns
+
+
+# --- Independent-reproducible-evidence HARD gate (R1) -------------------------------------------- #
+# Today the per-finding gate only checks an evidence ref exists + is non-zero, so a confirmed/Medium+
+# finding passes with its ONLY evidence being the executor's own analysis/log/tool_output (circular
+# evidence — the thing that produced the finding is not proof of the finding; the shopware run did this
+# 48/48). This gate adds a severity×confidence rule: a `confirmed` OR Medium+ REPORTABLE finding must
+# carry >=1 INDEPENDENT artifact. Independent = a reproducible artifact a reviewer can re-check:
+# request_response | poc_script | screenshot | dom_capture, or the white-box code_citation (verbatim
+# source bytes at file:line). Evidence that is ONLY log/tool_output inside the producing skill's own dir
+# is circular and caps confidence at `probable` (cannot read `confirmed`). Same escalation shape as the
+# self-attestation gate: warn while hunting, HARD once a report exists. Only reportable findings
+# (verdict accepted/blocked) are in scope — a rejected/needs-evidence finding never reaches a report.
+_INDEPENDENT_EVIDENCE_TYPES = {"request_response", "poc_script", "screenshot", "dom_capture", "code_citation"}
+_WEAK_EVIDENCE_TYPES = {"log", "tool_output"}
+_MEDIUM_PLUS_SEVERITIES = {"critical", "high", "medium"}
+
+
+def _independent_evidence_check(eng: Path, findings: list) -> tuple:
+    """(hard_errors, warnings) for the independent-reproducible-evidence gate (R1)."""
+    armed = _gates_armed(eng, findings)
+    hard, warns = [], []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        verdict, _ = _review_of(f, eng)
+        if verdict not in ("accepted", "blocked"):
+            continue  # not reportable → the gate doesn't apply
+        conf = str(f.get("confidence", "")).lower()
+        sev = str(f.get("severity", "")).lower()
+        if conf != "confirmed" and sev not in _MEDIUM_PLUS_SEVERITIES:
+            continue
+        ev = [it for it in (f.get("evidence") or []) if isinstance(it, dict)]
+        if any(it.get("type") in _INDEPENDENT_EVIDENCE_TYPES for it in ev):
+            continue  # has at least one independent artifact → ok
+        fid = f.get("id", "<no-id>")
+        # circular-evidence detail: ALL evidence is log/tool_output inside the producing skill's own dir
+        src = f.get("_rs_source_skill")
+        weak_only = bool(ev) and all(it.get("type") in _WEAK_EVIDENCE_TYPES for it in ev)
+        own_dir = bool(src) and all(
+            str(it.get("ref", "")).replace("\\", "/").startswith(f"{src}/") for it in ev)
+        if conf == "confirmed" and weak_only and own_dir:
+            msg = (f"{fid} [{sev}/confirmed] cites ONLY log/tool_output inside its own producing dir "
+                   f"'{src}/' (circular evidence) — that caps confidence at 'probable'. A 'confirmed' "
+                   f"reading needs an INDEPENDENT artifact: request_response / poc_script / screenshot / "
+                   f"dom_capture / code_citation")
+        else:
+            why = "confirmed" if conf == "confirmed" else f"{sev}-severity"
+            msg = (f"{fid} [{sev}/{conf or 'n/a'}] is {why} but cites no INDEPENDENT artifact "
+                   f"(request_response / poc_script / screenshot / dom_capture / code_citation) — its "
+                   f"evidence is only log/tool_output/analysis (circular). Add a reproducible artifact, "
+                   f"or lower severity/confidence to match what the evidence proves")
+        if armed:
+            hard.append("independent-evidence gate (report present → a confirmed/Medium+ finding needs a "
+                        f"reproducible independent artifact): {msg}")
+        else:
+            warns.append(msg + " [becomes a hard gate once a report exists]")
+    return hard, warns
+
+
+# --- Cross-model second-verification HARD gate (R3) --------------------------------------------- #
+# Every `*-verify` agent runs `model: inherit` (the executor's model), so a shared-model hallucination
+# can pass BOTH the executor and its reviewer. The model-pinned `adversarial-verify` agent re-runs the
+# base checks on a DIFFERENT model and records a `secondary_review`. This gate requires that second
+# verdict for the high-cost-to-be-wrong findings — an `accepted` finding with severity high/critical, or
+# ANY composite/chain finding — and no others (bounded so cost stays controlled). Such a finding carrying
+# only ONE model's verdict ⇒ WARN pre-report, HARD once a report exists (same escalation shape).
+_SECONDARY_REQUIRED_SEVERITIES = {"critical", "high"}
+
+
+def _secondary_verdict_present(eng: Path, f: dict) -> bool:
+    """True iff a cross-model second verdict exists for this finding — inline `secondary_review{}` with a
+    verdict+reviewer, or a sidecar `reviews/<id>.secondary.verdict.json` (root or per-skill)."""
+    sr = f.get("secondary_review")
+    if isinstance(sr, dict) and sr.get("verdict") and sr.get("reviewer"):
+        return True
+    fid = f.get("id")
+    if not fid:
+        return False
+    cands = [eng / "reviews" / f"{fid}.secondary.verdict.json"] + \
+        sorted(eng.glob(f"*/reviews/{fid}.secondary.verdict.json"))
+    for vp in cands:
+        if vp.is_file():
+            try:
+                vd = json.loads(vp.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001
+                continue
+            if vd.get("verdict") and vd.get("reviewer"):
+                return True
+    return False
+
+
+def _secondary_review_check(eng: Path, findings: list) -> tuple:
+    """(hard_errors, warnings) for the cross-model second-verification gate (R3)."""
+    armed = _gates_armed(eng, findings)
+    hard, warns = [], []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        is_chain = bool(f.get("composite") or f.get("_composite"))
+        verdict, _ = _review_of(f, eng)
+        sev = str(f.get("severity", "")).lower()
+        in_scope = is_chain or (verdict == "accepted" and sev in _SECONDARY_REQUIRED_SEVERITIES)
+        if not in_scope or _secondary_verdict_present(eng, f):
+            continue
+        fid = f.get("id", "<no-id>")
+        what = "composite/chain finding" if is_chain else f"accepted {sev}-severity finding"
+        msg = (f"{fid} ({what}) carries only one model's verdict — no cross-model secondary_review. Run "
+               f"the model-pinned adversarial-verify reviewer and record its verdict in secondary_review "
+               f"(or reviews/{fid}.secondary.verdict.json)")
+        if armed:
+            hard.append("secondary-review gate (report present → a High/Critical accepted finding or any "
+                        f"chain needs a cross-model second verdict): {msg}")
+        else:
+            warns.append(msg + " [becomes a hard gate once a report exists]")
+    return hard, warns
+
+
+# --- Deliverable-consistency HARD gate (R4): attestation bound to measured recall ---------------- #
+# A report/attestation must not NARRATE a clean/hardened posture while the measured signals contradict it:
+# the recall reviewer flagged unadjudicated gaps (reviews/recall_audit.verdict.json), or the run itself was
+# degraded/failed (runtime/diagnostics.json outcome ∈ {degraded-empty, failed}). This is the shopware-style
+# failure — "held the line / hardened" narrated over an incomplete/degraded audit. HARD once a report
+# exists; silent before. The machine-filled "Assurance & Coverage" clause (skills/engagement-docs) is the
+# fix that keeps the deliverable honest; this gate is its enforcement.
+_CLEAN_POSTURE_RE = re.compile(
+    r"(hardened|held the line|clean bill of health"
+    r"|no\s+(?:confirmed\s+|exploitable\s+|material\s+|significant\s+|critical\s+|high[-\s]severity\s+)*"
+    r"(?:vulnerabilit(?:y|ies)|findings?|issues?|weakness(?:es)?)\b"
+    r"|(?:strong|robust|solid|good|secure)\s+(?:security\s+)?posture)",
+    re.IGNORECASE)
+# A recall-gap verdict that means the gap is ACCOUNTED FOR (a clean/adjudicated close or a carried caveat).
+# Anything else (missing verdict, a real-miss marker, escalate/open/pending) is UNADJUDICATED.
+_RECALL_ADJUDICATED = {"justified-clear", "justified", "justified-clean", "clean", "blocked",
+                       "open-proof-gap", "accepted", "resolved", "closed", "re-hunted", "rehunted"}
+
+
+def _recall_verdict_unadjudicated(eng: Path) -> list:
+    """Human-readable descriptions of recall gaps in reviews/recall_audit.verdict.json that remain
+    UNADJUDICATED (no verdict, or a real-miss/open marker not in the adjudicated set). [] when the file is
+    absent/unreadable or every gap is accounted for."""
+    p = eng / "reviews" / "recall_audit.verdict.json"
+    if not p.is_file():
+        return []
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(d, dict):
+        return []
+    out = []
+    for g in (d.get("gaps") or []):
+        if not isinstance(g, dict):
+            continue
+        v = str(g.get("verdict") or "").strip().lower()
+        if v in _RECALL_ADJUDICATED:
+            continue
+        cat = g.get("category") or "?"
+        typ = g.get("type") or "?"
+        out.append(f"{cat} [{typ}]: verdict={v or 'none'}")
+    # a gaps-less verdict file that still records real_misses is itself an unadjudicated signal
+    if not d.get("gaps"):
+        rm = d.get("real_misses")
+        n = len(rm) if isinstance(rm, list) else (rm if isinstance(rm, int) else 0)
+        if n:
+            out.append(f"{n} recorded real_miss(es) with no per-gap adjudication")
+    return out
+
+
+def _deliverable_doc_paths(eng: Path) -> list:
+    """The engagement's human deliverables that could assert a posture — report.md / attestation.md /
+    summary.md at the engagement root and one level down (the reporting + engagement-docs OUT dirs)."""
+    paths = []
+    for name in ("report.md", "attestation.md", "summary.md"):
+        paths.append(eng / name)
+        paths.extend(sorted(eng.glob(f"*/{name}")))
+    seen, out = set(), []
+    for p in paths:
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def _deliverable_consistency_errors(eng: Path, findings: list) -> list:
+    """HARD deliverable-consistency gate (R4) — active once the gates arm. [] until then."""
+    if not _gates_armed(eng, findings):
+        return []
+    contradictions = []
+    run = _latest_run(_load_diagnostics(eng))
+    if isinstance(run, dict) and run.get("outcome") in ("degraded-empty", "failed"):
+        reason = str(run.get("degraded_reason") or "").strip()
+        contradictions.append(f"runtime/diagnostics.json latest run outcome is '{run['outcome']}'"
+                              + (f" ({reason})" if reason else ""))
+    unadj = _recall_verdict_unadjudicated(eng)
+    if unadj:
+        shown = "; ".join(unadj[:4]) + (" …" if len(unadj) > 4 else "")
+        contradictions.append(f"{len(unadj)} unadjudicated recall gap(s) in "
+                              f"reviews/recall_audit.verdict.json ({shown})")
+    if not contradictions:
+        return []
+    errs = []
+    for p in _deliverable_doc_paths(eng):
+        if not p.is_file():
+            continue
+        try:
+            txt = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            continue
+        m = _CLEAN_POSTURE_RE.search(txt)
+        if not m:
+            continue
+        rel = p.relative_to(eng)
+        errs.append("deliverable-consistency gate (report present → a clean/hardened posture claim must "
+                    f"match measured recall + run health): {rel} asserts a clean/hardened posture "
+                    f"(\"{m.group(0).strip()}\") while {'; '.join(contradictions)} — correct the "
+                    "machine-filled 'Assurance & Coverage' clause (coverage_ledger + recall_audit verdict "
+                    "+ diagnostics) so the deliverable states the real coverage, or close/adjudicate the "
+                    "gaps (reviews/recall_audit.verdict.json) / record the run outcome first")
+    return errs
+
+
 def validate_engagement(eng: Path, as_json: bool) -> bool:
     cvss_mod = _try_import_cvss()
     scope_text = _scope_text(eng)
@@ -1460,6 +1733,23 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     whitebox_errors = _whitebox_shape_errors(eng)
     candidate_errors = _candidate_reconciliation_errors(eng, findings)
 
+    # CVSS-drift gate (R7): a finding whose declared severity != recomputed CVSS rating (no
+    # potential_severity) is drift — a warning while hunting, HARD once a report exists.
+    cvss_errors, cvss_warns = _cvss_drift_check(eng, findings, cvss_mod)
+    top_warnings.extend(cvss_warns)
+    # Independent-reproducible-evidence gate (R1): a confirmed/Medium+ reportable finding needs >=1
+    # independent artifact (request_response/poc_script/screenshot/dom_capture/code_citation), never only
+    # its own log/tool_output/analysis (circular). Warn while hunting, HARD once a report exists.
+    evidence_errors, evidence_warns = _independent_evidence_check(eng, findings)
+    top_warnings.extend(evidence_warns)
+    # Cross-model second-verification gate (R3): a High/Critical accepted finding or any chain needs a
+    # second, model-pinned (adversarial-verify) verdict. Warn while hunting, HARD once a report exists.
+    secondary_errors, secondary_warns = _secondary_review_check(eng, findings)
+    top_warnings.extend(secondary_warns)
+    # Deliverable-consistency gate (R4): a report/attestation must not assert a clean/hardened posture
+    # while recall gaps are unadjudicated or the run was degraded/failed. HARD once a report exists.
+    deliverable_errors = _deliverable_consistency_errors(eng, findings)
+
     results = []
     for f in findings:
         ok, detail, warns = check_finding(f, eng, scope_text, cvss_mod, verdict_ids)
@@ -1505,7 +1795,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     gate_ok = ((not failed) and (not coverage_errors) and (not review_errors)
                and (not dup_errors) and (not integrity_errors) and (not recall_errors)
                and (not chain_errors) and (not diagnostics_errors)
-               and (not whitebox_errors) and (not candidate_errors))
+               and (not whitebox_errors) and (not candidate_errors)
+               and (not cvss_errors) and (not evidence_errors)
+               and (not secondary_errors) and (not deliverable_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -1519,6 +1811,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "diagnostics_errors": diagnostics_errors,
                           "whitebox_errors": whitebox_errors,
                           "candidate_reconciliation_errors": candidate_errors,
+                          "cvss_drift_errors": cvss_errors,
+                          "independent_evidence_errors": evidence_errors,
+                          "secondary_review_errors": secondary_errors,
+                          "deliverable_consistency_errors": deliverable_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -1567,6 +1863,26 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "must become a finding or be accounted for):")
             for ce2 in candidate_errors:
                 print(f"  - {ce2}")
+        if cvss_errors:
+            print("\n✗ cvss-drift gate FAILED (a report is present, so a finding's severity must match its "
+                  "recomputed CVSS rating or be flagged demonstrated-vs-potential):")
+            for cde in cvss_errors:
+                print(f"  - {cde}")
+        if evidence_errors:
+            print("\n✗ independent-evidence gate FAILED (a confirmed/Medium+ finding cites no reproducible "
+                  "independent artifact — circular evidence):")
+            for eve in evidence_errors:
+                print(f"  - {eve}")
+        if secondary_errors:
+            print("\n✗ secondary-review gate FAILED (a High/Critical accepted finding or a chain lacks a "
+                  "cross-model second verdict):")
+            for sre in secondary_errors:
+                print(f"  - {sre}")
+        if deliverable_errors:
+            print("\n✗ deliverable-consistency gate FAILED (a deliverable asserts a clean/hardened posture "
+                  "the measured recall / run health contradicts):")
+            for dle in deliverable_errors:
+                print(f"  - {dle}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:
@@ -1583,7 +1899,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
               f"{len(integrity_errors)} coordination-integrity error(s), {len(recall_errors)} recall-audit "
               f"error(s), {len(chain_errors)} attack-chain error(s), {len(diagnostics_errors)} diagnostics "
               f"error(s), {len(whitebox_errors)} white-box-shape error(s), {len(candidate_errors)} "
-              f"candidate-reconciliation error(s), {len(all_warnings)} warning(s).")
+              f"candidate-reconciliation error(s), {len(cvss_errors)} cvss-drift error(s), "
+              f"{len(evidence_errors)} independent-evidence error(s), {len(secondary_errors)} "
+              f"secondary-review error(s), {len(deliverable_errors)} deliverable-consistency error(s), "
+              f"{len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
         if coverage_errors:
@@ -1617,6 +1936,21 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("A source_context candidate was never confirmed/refuted as a finding nor accounted for => "
                   "cite it in a finding's candidate_refs, or mark its source-lead surface tested/skipped, "
                   "before reporting.")
+        if cvss_errors:
+            print("A finding's declared severity contradicts its recomputed CVSS vector => fix the "
+                  "vector/severity (don't hand-override the score), or set potential_severity "
+                  "(demonstrated-vs-potential), before reporting.")
+        if evidence_errors:
+            print("A confirmed/Medium+ finding rests on circular evidence (its own log/tool_output/analysis) "
+                  "=> add a reproducible INDEPENDENT artifact (request_response/poc_script/screenshot/"
+                  "dom_capture/code_citation), or lower severity/confidence, before reporting.")
+        if secondary_errors:
+            print("A High/Critical accepted finding or a chain has only one model's verdict => run the "
+                  "model-pinned adversarial-verify reviewer and record its secondary_review before reporting.")
+        if deliverable_errors:
+            print("A deliverable narrates a clean/hardened posture the measured recall/run health "
+                  "contradicts => correct the 'Assurance & Coverage' clause, or adjudicate the recall gaps / "
+                  "record the real run outcome, before shipping the report/attestation.")
     return gate_ok
 
 

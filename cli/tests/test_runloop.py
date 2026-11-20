@@ -5,8 +5,25 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from types import SimpleNamespace
+
+
+@contextmanager
+def _set_env(name, value):
+    """Temporarily set (or, if value is None, unset) an env var; restore it afterward."""
+    old = os.environ.get(name)
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = str(value)
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = old
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # cli/
 
@@ -100,12 +117,14 @@ class _Eng:
         self._td.cleanup()
 
 
-def _drive(engine, eng_dir, *, gate, max_budget_usd=100.0, first_resume=False, now=None):
+def _drive(engine, eng_dir, *, gate, max_budget_usd=100.0, first_resume=False, now=None,
+           prep=None):
     return runloop.drive(
-        engine, _prep(), pathlib.Path("/repo"), eng_dir,
+        engine, prep or _prep(), pathlib.Path("/repo"), eng_dir,
         first_prompt="GO", extra_allow=[], max_turns=50, max_budget_usd=max_budget_usd,
         first_resume=first_resume, audit=eng_dir / "runtime" / "autorun.jsonl",
         engagement_id="acme-eng", gate_verify=gate, emit=_silent, now=now,
+        sleep=lambda _s: None,   # no real backoff sleeps in tests
     )
 
 
@@ -386,6 +405,181 @@ class TestBlockedCategoriesRedriven(unittest.TestCase):
             # the old "stop at the gate" framing must be gone from resume prompts
             self.assertNotIn("instead of proceeding", p)
             self.assertNotIn("STOP/defer", p)
+
+
+# --- rc-branching: crashed leg vs stalled leg --------------------------------
+class TestDriveCrashBranching(unittest.TestCase):
+    """The defect: a leg whose `claude -p` exits rc!=0 used to be indistinguishable from a leg that
+    merely did no work — two crashes tripped NO_PROGRESS ("the run is stuck") and each non-final
+    crash's cause was thrown away. Now a crash is branched on rc, retried, and (for resume legs)
+    recovered via a fresh-session fallback; only an unrecoverable crash stops, with engine-crash."""
+
+    def test_unrecoverable_crash_is_engine_crash_not_no_progress(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])  # never clears
+            engine = _FakeEngine([_Leg(cost=0.1, tool_calls=0, rc=1)])  # always crashes
+            res = _drive(engine, eng, gate=_gate([2]), max_budget_usd=100.0)
+            # the whole point: NOT reported as a stall
+            self.assertEqual(res.reason, runloop.ENGINE_CRASH)
+            self.assertNotEqual(res.reason, runloop.NO_PROGRESS)
+            self.assertEqual(res.invocations, 1)              # one logical leg (retries are not legs)
+            # default 2 retries => 3 attempts, all captured as legs (none thrown away)
+            self.assertEqual(engine.run_count, 3)
+            self.assertEqual(len(res.legs), 3)
+            self.assertEqual([l["kind"] for l in res.legs], ["initial", "retry", "retry"])
+            self.assertTrue(all(l["rc"] == 1 for l in res.legs))
+            # the honest terminal reason names an ENGINE crash and explicitly disclaims "stuck"
+            detail = res.stop_detail.lower()
+            self.assertIn("crash", detail)
+            self.assertIn("engine", detail)
+            self.assertIn("not a stuck run", detail)
+            # combined result propagates the non-zero rc so diagnostics classifies FAILED
+            self.assertNotEqual(res.result.rc, 0)
+
+    def test_retry_recovers_then_loop_completes(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+
+            def done(e):
+                _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+
+            # attempt 1 crashes, the retry succeeds (and finishes the engagement)
+            legs = [_Leg(cost=0.1, tool_calls=0, rc=1),
+                    _Leg(cost=0.1, tool_calls=5, rc=0, side_effect=done)]
+            engine = _FakeEngine(legs)
+            # the retry completes the engagement within the first logical leg -> gate clear at once
+            res = _drive(engine, eng, gate=_gate([0]), max_budget_usd=100.0)
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 1)       # recovered within the one logical leg
+            self.assertEqual(engine.run_count, 2)      # initial crash + the successful retry
+            self.assertEqual([l["kind"] for l in res.legs], ["initial", "retry"])
+            self.assertEqual(res.legs[0]["rc"], 1)
+            self.assertEqual(res.legs[1]["rc"], 0)
+
+    def test_crash_retries_are_bounded_and_budget_capped(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+            engine = _FakeEngine([_Leg(cost=0.1, tool_calls=0, rc=1)])
+            with _set_env("REDSTRIKE_CRASH_RETRIES", "4"):
+                res = _drive(engine, eng, gate=_gate([2]), max_budget_usd=100.0)
+            self.assertEqual(res.reason, runloop.ENGINE_CRASH)
+            self.assertEqual(engine.run_count, 5)      # 1 + 4 bounded retries
+            self.assertEqual(len(res.legs), 5)
+
+
+class TestResumeFailureFallback(unittest.TestCase):
+    """A resume leg that crashes is a common un-resumable-session cause. Before giving up, the loop
+    starts ONE fresh --session-id leg seeded by the continue-prompt (engagement state is persisted on
+    disk), and only an unrecoverable crash after that stops the run."""
+
+    def test_resume_crash_falls_back_to_fresh_session_and_recovers(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+
+            def still_pending(e):
+                _write_ledger(e, [{"id": "xss", "status": "pending"}])  # leg1: work, not done
+
+            def complete(e):
+                _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+
+            legs = [_Leg(cost=0.1, tool_calls=5, rc=0, side_effect=still_pending),  # leg1 ok (resume=False)
+                    _Leg(cost=0.1, tool_calls=0, rc=1),                              # leg2 resume CRASH
+                    _Leg(cost=0.1, tool_calls=5, rc=0, side_effect=complete)]        # fresh fallback -> done
+            engine = _FakeEngine(legs)
+            prep = _prep()
+            with _set_env("REDSTRIKE_CRASH_RETRIES", "0"):   # straight to the fallback
+                res = _drive(engine, eng, gate=_gate([2, 0]), max_budget_usd=100.0, prep=prep)
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 2)
+            self.assertEqual(engine.run_count, 3)                 # leg1 + crashed resume + fresh fallback
+            # the fallback leg is a FRESH --session-id leg (resume=False), after a resume (True)
+            self.assertEqual(engine.resumes, [False, True, False])
+            self.assertIn("Continue Redstrike engagement", engine.prompts[2])  # seeded by continue-prompt
+            # a fresh session id was minted for the fallback (the resume anchor was reseeded)
+            self.assertNotEqual(prep.session_id, "sess-1")
+            # the crashed resume attempt + the fallback are both captured
+            kinds = [l["kind"] for l in res.legs]
+            self.assertIn("resume", kinds)
+            self.assertIn("resume-fallback", kinds)
+
+    def test_resume_crash_then_fallback_crash_is_engine_crash(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+
+            def still_pending(e):
+                _write_ledger(e, [{"id": "xss", "status": "pending"}])
+
+            legs = [_Leg(cost=0.1, tool_calls=5, rc=0, side_effect=still_pending),  # leg1 ok
+                    _Leg(cost=0.1, tool_calls=0, rc=1),                              # resume crash
+                    _Leg(cost=0.1, tool_calls=0, rc=1)]                             # fallback also crashes
+            engine = _FakeEngine(legs)
+            with _set_env("REDSTRIKE_CRASH_RETRIES", "0"):
+                res = _drive(engine, eng, gate=_gate([2, 2]), max_budget_usd=100.0)
+            self.assertEqual(res.reason, runloop.ENGINE_CRASH)
+            self.assertEqual(res.invocations, 2)
+            self.assertEqual(engine.resumes, [False, True, False])  # fallback attempted once
+            self.assertNotEqual(res.result.rc, 0)
+            kinds = [l["kind"] for l in res.legs]
+            self.assertIn("resume-fallback", kinds)
+
+
+class TestLegRecord(unittest.TestCase):
+    """diagnostics.leg_record: per-leg cause capture (the structure the loop's legs[] holds)."""
+
+    def test_captures_subtype_exception_and_sample(self):
+        s = autorun.RunSummary(subtype="error_during_execution", tool_calls=3,
+                               non_json_lines=2, non_json_sample="traceback boom")
+        rec = diagnostics.leg_record(attempt=2, kind="resume", rc=1, cost=0.5, summary=s)
+        self.assertEqual(rec["attempt"], 2)
+        self.assertEqual(rec["kind"], "resume")
+        self.assertEqual(rec["rc"], 1)
+        self.assertEqual(rec["subtype"], "error_during_execution")
+        self.assertEqual(rec["tool_calls"], 3)
+        self.assertAlmostEqual(rec["cost"], 0.5)
+        self.assertIsNotNone(rec["first_exception"])
+        self.assertEqual(rec["non_json_sample"], "traceback boom")
+
+    def test_bare_nonzero_exit_synthesizes_cause(self):
+        rec = diagnostics.leg_record(attempt=1, kind="initial", rc=2, cost=0.0, summary=None)
+        self.assertEqual(rec["rc"], 2)
+        self.assertIsNotNone(rec["first_exception"])
+        self.assertIn("code 2", diagnostics.leg_cause(rec))
+
+    def test_clean_leg_has_no_exception(self):
+        s = autorun.RunSummary(subtype="success", tool_calls=10)
+        rec = diagnostics.leg_record(attempt=1, kind="initial", rc=0, cost=1.0, summary=s)
+        self.assertIsNone(rec["first_exception"])
+        self.assertIsNone(rec["non_json_sample"])
+
+
+class TestAnnotateRecordEngineCrash(unittest.TestCase):
+    def _loop(self, reason, detail, legs=None):
+        return runloop.LoopResult(result=engines.RunResult(rc=1), reason=reason,
+                                  stop_detail=detail, legs=legs or [])
+
+    def test_engine_crash_is_failed_not_degraded(self):
+        rec = diagnostics.Diagnostics(outcome=diagnostics.FAILED, engine_rc=1).to_record()
+        legs = [diagnostics.leg_record(attempt=1, kind="resume", rc=1, cost=0.2, summary=None)]
+        out = runloop.annotate_record(
+            rec, self._loop(runloop.ENGINE_CRASH, "the engine CRASHED and could not be recovered", legs))
+        self.assertEqual(out["outcome"], diagnostics.FAILED)
+        self.assertIn("crash", out["degraded_reason"].lower())
+        self.assertEqual(out["legs"], legs)          # per-leg causes are attached to the record
+
+    def test_engine_crash_overrides_stale_clean_and_is_not_downgraded(self):
+        # even if classify had said CLEAN, an engine-crash loop forces FAILED (never DEGRADED-empty)
+        rec = diagnostics.Diagnostics(outcome=diagnostics.CLEAN).to_record()
+        out = runloop.annotate_record(
+            rec, self._loop(runloop.ENGINE_CRASH, "engine crashed; retries + fallback exhausted"))
+        self.assertEqual(out["outcome"], diagnostics.FAILED)
+        self.assertNotEqual(out["outcome"], diagnostics.DEGRADED)
+
+    def test_legs_attached_for_non_crash_outcomes_too(self):
+        rec = diagnostics.Diagnostics(outcome=diagnostics.CLEAN).to_record()
+        legs = [diagnostics.leg_record(attempt=1, kind="initial", rc=0, cost=0.1, summary=None)]
+        out = runloop.annotate_record(rec, self._loop(runloop.DONE, None, legs))
+        self.assertEqual(out["outcome"], diagnostics.CLEAN)   # DONE untouched
+        self.assertEqual(out["legs"], legs)                   # but legs still surfaced
 
 
 if __name__ == "__main__":

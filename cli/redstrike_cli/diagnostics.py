@@ -514,6 +514,58 @@ def summary_from_run(summary, findings_count: int, engine_rc: int) -> dict:
     }
 
 
+# --- per-leg cause capture (pure) --------------------------------------------
+# An autonomous run is many resumed `claude -p` legs (see runloop.drive). When a NON-final leg
+# CRASHES (rc != 0), its captured cause used to be thrown away — only the LAST leg's RunSummary
+# survived, so a crash loop that finally stopped looked like a generic "no-progress" stall. A
+# ``legs[]`` array on the diagnostics record keeps EVERY leg's own outcome (including each crashed
+# attempt + any retry/fallback), so the terminal reason can name the real engine cause. This is the
+# canonical per-leg entry shape; runloop builds the array (one entry per attempt) and attaches it.
+LEG_KINDS = frozenset({"initial", "resume", "retry", "resume-fallback"})
+
+
+def leg_record(*, attempt: int, kind: str, rc: int, cost: float, summary=None) -> dict:
+    """Render ONE leg attempt's pinned diagnostics entry.
+
+    ``attempt`` is the 1-based attempt number within its logical leg; ``kind`` is the leg role
+    (``initial`` | ``resume`` | ``retry`` | ``resume-fallback``). ``summary`` is the attempt's
+    ``autorun.RunSummary`` (or None). The entry carries the attempt's ``rc``, result ``subtype``,
+    ``cost``, ``tool_calls``, the FIRST parsed exception (result-subtype / stream-parse), and the
+    first unparseable stream line — enough to attribute a crash to THIS attempt. A bare non-zero exit
+    with no stream still yields a synthetic ``engine-exit`` exception so a crash never renders
+    cause-less."""
+    sm = summary_from_run(summary, 0, int(rc))
+    exc_list = sm["exceptions"]
+    first_exc = exc_list[0] if exc_list else None
+    rc = int(rc)
+    if first_exc is None and rc not in (0, None):
+        first_exc = {"where": "engine-exit", "message": f"engine exited with code {rc}"}
+    non_json_sample = str(getattr(summary, "non_json_sample", "") or "")[:200]
+    return {
+        "attempt": int(attempt),
+        "kind": str(kind),
+        "rc": rc,
+        "subtype": str(getattr(summary, "subtype", "") or ""),
+        "cost": round(float(cost or 0.0), 6),
+        "tool_calls": int(getattr(summary, "tool_calls", 0) or 0),
+        "first_exception": first_exc,
+        "non_json_sample": non_json_sample or None,
+    }
+
+
+def leg_cause(leg: dict | None) -> str:
+    """A short human cause for a crashed leg entry (the terminal ``engine-crash`` reason uses it):
+    prefer the first exception's message, else the result subtype, else the bare exit code."""
+    if not isinstance(leg, dict):
+        return "engine crashed (no leg detail captured)"
+    exc = leg.get("first_exception")
+    if isinstance(exc, dict) and exc.get("message"):
+        return str(exc["message"])[:160]
+    if leg.get("subtype"):
+        return f"result subtype '{leg['subtype']}'"
+    return f"engine exited with code {leg.get('rc')}"
+
+
 # --- assembly (impure glue) --------------------------------------------------
 def _load_json(path: Path):
     try:
