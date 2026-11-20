@@ -243,8 +243,9 @@ def build_argv(
     prep: Prepared,
     prompt: str,
     permission_mode: str = "default",
+    model: str | None = None,
 ) -> list[str]:
-    return [
+    argv = [
         claude_bin,
         prompt,
         "--add-dir",
@@ -260,11 +261,19 @@ def build_argv(
         str(prep.mcp_config),
         "--permission-mode",
         permission_mode,
+    ]
+    # Per-run model override. When None (the default), emit NO `--model` so `claude` keeps using the
+    # single global default (its own config / the ANTHROPIC_MODEL env var) — no behavior change for
+    # existing callers. See `build_autonomous_argv` for the model-routing policy.
+    if model:
+        argv += ["--model", str(model)]
+    argv += [
         "--session-id",
         prep.session_id,
         "-n",
         prep.engagement_id,
     ]
+    return argv
 
 
 def autonomous_prompt(engagement_id: str) -> str:
@@ -294,7 +303,25 @@ def build_autonomous_argv(
     max_turns: int,
     max_budget: float,
     resume: bool = False,
+    model: str | None = None,
+    shard_models: list[str] | str | None = None,
 ) -> list[str]:
+    """Build the headless `claude -p` argv for an autonomous leg.
+
+    MODEL ROUTING POLICY (``--model`` / ``--shard-models``)
+    ------------------------------------------------------
+    The engine model is selectable per run instead of being fixed to one global default:
+      * ``model`` → ``--model <m>`` for THIS leg. Route reasoning-heavy work (the orchestrator driving
+        the hunt, chaining, the white-box code-audit, the adversarial second reviewer) to a top model
+        (opus); mechanical / reviewer / recon legs (coverage marking, de-dupe, host/content discovery,
+        per-class ``*-verify`` reviewers) can run a cheaper model. When ``model`` is None the flag is
+        omitted and ``claude`` keeps its single global default (its config / the ANTHROPIC_MODEL env
+        var) — no behavior change for existing callers.
+      * ``shard_models`` → ``--shard-models a,b,...`` is plumbed through for the FUTURE concurrent
+        multi-process hunt pool (a different model per shard = a cheap diversity pass that raises recall).
+        It is carried verbatim today; the engine-core worker pool consumes it later. Accepts a list or a
+        pre-joined comma string; when empty/None the flag is omitted (no behavior change).
+    """
     argv = [
         claude_bin,
         "-p",
@@ -320,10 +347,27 @@ def build_autonomous_argv(
         "--max-budget-usd",
         str(max_budget),
     ]
+    # Model routing (before --allowedTools, which must stay last). Omitted when unset → global default.
+    if model:
+        argv += ["--model", str(model)]
+    sm = _join_shard_models(shard_models)
+    if sm:
+        argv += ["--shard-models", sm]
     argv += ["--resume", prep.session_id] if resume else ["--session-id", prep.session_id, "-n", prep.engagement_id]
     # --allowedTools consumes the rest of the line, so it goes LAST.
     argv += ["--allowedTools", *allowed_tools]
     return argv
+
+
+def _join_shard_models(shard_models: list[str] | str | None) -> str:
+    """Normalize a shard-model spec (list or comma string) to a clean comma-joined string ('' when empty)."""
+    if not shard_models:
+        return ""
+    if isinstance(shard_models, (list, tuple)):
+        parts = [str(x).strip() for x in shard_models]
+    else:
+        parts = [p.strip() for p in str(shard_models).split(",")]
+    return ",".join(p for p in parts if p)
 
 
 def gate(prep: Prepared, *, now=None) -> list[str]:

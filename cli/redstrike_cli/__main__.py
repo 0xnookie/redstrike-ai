@@ -554,7 +554,12 @@ def cmd_run(args, repo: Path) -> int:
         return 2
 
     prompt = args.prompt or launch.default_prompt(prep.engagement_id)
-    inv = engine.build_invocation(prep, repo, prompt, mode="interactive", permission_mode=args.permission_mode)
+    # Per-run model override is passed only when given, so an engine adapter without the kwarg (e.g. a
+    # test double) is unaffected when no --model is set — preserving the no-flag default behavior.
+    inv_kwargs = {"mode": "interactive", "permission_mode": args.permission_mode}
+    if getattr(args, "model", None):
+        inv_kwargs["model"] = args.model
+    inv = engine.build_invocation(prep, repo, prompt, **inv_kwargs)
     available = engine.is_available()
 
     if args.dry_run or not available:
@@ -629,6 +634,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
     inv = engine.build_invocation(
         prep, repo, prompt, mode="autonomous", allow=extra_allow,
         max_turns=args.max_turns, max_budget=args.max_budget_usd, resume=args.resume,
+        model=getattr(args, "model", None), shard_models=getattr(args, "shard_models", None),
     )
     available = engine.is_available()
 
@@ -637,6 +643,9 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
         print(ui.rule("DRY RUN — autonomous argv"))
         print(ui.kv("allowlist", " ".join(inv.allowed or [])))
         print(ui.kv("caps", f"max_turns={args.max_turns}  budget=${args.max_budget_usd}"))
+        _sm = getattr(args, "shard_models", None)
+        print(ui.kv("model", (getattr(args, "model", None) or "(global default / ANTHROPIC_MODEL)")
+                             + (f"  ·  shards: {_sm}" if _sm else "")))
         print("  " + " ".join(shlex.quote(a) for a in inv.argv))
         if not available and not args.dry_run:
             print(ui.err(f"`{engine.name}` engine not available on PATH — printed the plan instead of launching."))
@@ -883,6 +892,12 @@ def build_parser() -> argparse.ArgumentParser:
     au.add_argument("--max-turns", type=int, default=200, help="autonomous: hard turn cap (default 200)")
     au.add_argument("--max-budget-usd", type=float, default=20.0, help="autonomous: USD budget cap (default 20)")
     au.add_argument("--resume", action="store_true", help="autonomous: resume the engagement's stored session")
+    au.add_argument("--model", metavar="MODEL",
+                    help="engine model for this run (default: the global ANTHROPIC_MODEL). "
+                         "Route reasoning-heavy work to opus; mechanical/reviewer/recon can run cheaper.")
+    au.add_argument("--shard-models", dest="shard_models", metavar="A,B,...",
+                    help="comma-separated per-shard models for the future concurrent hunt pool "
+                         "(a different model per shard = a cheap diversity pass); carried through today")
     au.add_argument("--console", action="store_true",
                     help="when the run finishes, bring up the web console over engagements/")
     au.add_argument("--console-port", type=int, default=8787, help="port for --console (default 8787)")
@@ -899,6 +914,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--max-turns", type=int, default=200, help="autonomous: hard turn cap (default 200)")
     r.add_argument("--max-budget-usd", type=float, default=20.0, help="autonomous: USD budget cap (default 20)")
     r.add_argument("--resume", action="store_true", help="autonomous: resume the engagement's stored session")
+    r.add_argument("--model", metavar="MODEL",
+                   help="engine model for this run (default: the global ANTHROPIC_MODEL). "
+                        "Route reasoning-heavy work to opus; mechanical/reviewer/recon can run cheaper.")
+    r.add_argument("--shard-models", dest="shard_models", metavar="A,B,...",
+                   help="comma-separated per-shard models for the future concurrent hunt pool "
+                        "(a different model per shard = a cheap diversity pass); carried through today")
     r.add_argument("--console", action="store_true",
                    help="when the run finishes, bring up the web console over engagements/ (or set REDSTRIKE_CONSOLE=1)")
     r.add_argument("--console-port", type=int, default=8787, help="port for --console (default 8787)")

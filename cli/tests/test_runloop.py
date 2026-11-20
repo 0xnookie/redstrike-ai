@@ -582,5 +582,143 @@ class TestAnnotateRecordEngineCrash(unittest.TestCase):
         self.assertEqual(out["legs"], legs)                   # but legs still surfaced
 
 
+def _write_hunt_plan(eng_dir, queue):
+    (pathlib.Path(eng_dir) / "hunt_plan.json").write_text(
+        json.dumps({"version": 1, "engagement": "acme-eng", "generated_at": "x",
+                    "iteration": 0, "queue": queue}), encoding="utf-8")
+
+
+class TestHuntPlanOrdering(unittest.TestCase):
+    """#4: continue_prompt consumes hunt_plan.json — orders the outstanding set by `rank` and emits each
+    class's depth_budget / diversity_pass. Absent/malformed plan falls back to ledger order."""
+
+    def test_order_outstanding_by_rank_unranked_last(self):
+        outstanding = [{"id": "xss", "status": "pending"},
+                       {"id": "sqli", "status": "pending"},
+                       {"id": "idor", "status": "pending"}]  # idor is NOT in the plan
+        plan = {"queue": [{"rank": 2, "class": "xss", "depth_budget": {"tier": "standard"}},
+                          {"rank": 1, "class": "sqli",
+                           "depth_budget": {"tier": "deep", "diversity_pass": True}}]}
+        ordered = runloop.order_outstanding(outstanding, plan)
+        # rank 1 first, rank 2 next, unranked (idor) keeps its ledger position AFTER the ranked ones
+        self.assertEqual([c["id"] for c in ordered], ["sqli", "xss", "idor"])
+        self.assertEqual(ordered[0]["_rank"], 1)
+        self.assertEqual(ordered[0]["_depth"], "deep")
+        self.assertTrue(ordered[0]["_diversity"])
+        self.assertEqual(ordered[1]["_rank"], 2)
+        self.assertFalse(ordered[1]["_diversity"])
+        self.assertIsNone(ordered[2]["_rank"])      # unranked -> no annotation
+
+    def test_order_outstanding_family_fallback(self):
+        # a family-level plan class (ssrf / xss) still ranks its hyphenated category ids
+        outstanding = [{"id": "ssrf-cloud", "status": "pending"},
+                       {"id": "xss-reflected", "status": "pending"}]
+        plan = {"queue": [{"rank": 1, "class": "ssrf", "depth_budget": {"tier": "standard"}},
+                          {"rank": 2, "class": "xss", "depth_budget": {"tier": "deep"}}]}
+        ordered = runloop.order_outstanding(outstanding, plan)
+        self.assertEqual([c["id"] for c in ordered], ["ssrf-cloud", "xss-reflected"])
+        self.assertEqual(ordered[0]["_rank"], 1)
+        self.assertEqual(ordered[1]["_depth"], "deep")
+
+    def test_order_outstanding_no_plan_keeps_ledger_order(self):
+        outstanding = [{"id": "ssrf-cloud", "status": "pending"},
+                       {"id": "xss-reflected", "status": "pending"}]
+        ordered = runloop.order_outstanding(outstanding, None)
+        self.assertEqual([c["id"] for c in ordered], ["ssrf-cloud", "xss-reflected"])
+        self.assertIsNone(ordered[0]["_rank"])
+
+    def test_continue_prompt_orders_by_rank_and_emits_depth(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"},
+                                {"id": "sqli", "status": "pending"}])
+            _write_hunt_plan(eng, [
+                {"rank": 2, "class": "xss", "depth_budget": {"tier": "standard"}},
+                {"rank": 1, "class": "sqli",
+                 "depth_budget": {"tier": "deep", "diversity_pass": True}}])
+            p = runloop.continue_prompt("acme-eng", eng)
+            # ordered by rank: sqli (rank 1) listed before xss (rank 2)
+            self.assertLess(p.index("- sqli"), p.index("- xss"))
+            # each class's rank + depth budget + diversity pass is emitted
+            self.assertIn("rank 1", p)
+            self.assertIn("depth deep", p)
+            self.assertIn("diversity pass", p)
+            self.assertIn("rank 2", p)
+            # still a resume prompt that drives concurrent waves
+            self.assertIn("Continue Redstrike engagement", p)
+            self.assertIn("WAVES", p)
+
+    def test_continue_prompt_without_plan_still_names_outstanding(self):
+        with _Eng() as eng:  # ledger but no hunt_plan.json
+            _write_ledger(eng, [{"id": "sqli", "status": "pending"}])
+            p = runloop.continue_prompt("acme-eng", eng)
+            self.assertIn("- sqli", p)
+            self.assertNotIn("[rank", p)  # no plan -> no per-bullet rank/depth annotation
+
+
+class TestPlanPreSteps(unittest.TestCase):
+    """#4: the loop runs the plan scripts ITSELF as deterministic pre-steps instead of relying on the model.
+    surface.py --plan is an idempotent merge (safe every resume); coverage.py --plan only runs when the
+    ledger is absent (a rebuild would clobber progress)."""
+
+    def test_coverage_plan_only_when_ledger_missing(self):
+        calls = []
+        orig = runloop._run_script
+        runloop._run_script = lambda repo, rel, args, **k: (calls.append((rel, list(args))) or True)
+        try:
+            with _Eng() as eng:
+                runloop.run_plan_steps(pathlib.Path("/repo"), eng)
+                rels = [c[0] for c in calls]
+                self.assertIn("surface.py", rels)
+                self.assertIn("coverage.py", rels)   # ledger absent -> deterministically plan it
+                calls.clear()
+                _write_ledger(eng, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+                runloop.run_plan_steps(pathlib.Path("/repo"), eng)
+                rels = [c[0] for c in calls]
+                self.assertIn("surface.py", rels)        # idempotent merge still runs
+                self.assertNotIn("coverage.py", rels)    # guarded off -> attempted/count preserved
+        finally:
+            runloop._run_script = orig
+
+    def test_coverage_plan_passes_signals_when_present(self):
+        calls = []
+        orig = runloop._run_script
+        runloop._run_script = lambda repo, rel, args, **k: (calls.append((rel, list(args))) or True)
+        try:
+            with _Eng() as eng:
+                (eng / "signals.json").write_text("[]", encoding="utf-8")
+                runloop.run_plan_steps(pathlib.Path("/repo"), eng)
+                cov_args = next(a for r, a in calls if r == "coverage.py")
+                self.assertIn("--signals", cov_args)
+        finally:
+            runloop._run_script = orig
+
+    def test_run_plan_steps_best_effort_no_scripts(self):
+        with _Eng() as eng:
+            # real _run_script against a repo with no scripts/ -> no-op: must not raise, must not fabricate
+            # a coverage ledger
+            runloop.run_plan_steps(pathlib.Path(eng) / "no-such-repo", eng)
+            self.assertFalse((eng / "coverage_ledger.json").is_file())
+
+    def test_drive_runs_plan_steps_before_each_resume_leg_only(self):
+        calls = []
+        orig = runloop.run_plan_steps
+        runloop.run_plan_steps = lambda repo, eng, **k: calls.append(str(eng))
+        try:
+            with _Eng() as eng:
+                _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+
+                def done(e):
+                    _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+
+                legs = [_Leg(cost=0.1, tool_calls=5),
+                        _Leg(cost=0.1, tool_calls=5, side_effect=done)]
+                engine = _FakeEngine(legs)
+                res = _drive(engine, eng, gate=_gate([2, 0]))
+                self.assertEqual(res.invocations, 2)
+                self.assertEqual(len(calls), 1)   # ran before the one resume leg, NOT the first leg
+        finally:
+            runloop.run_plan_steps = orig
+
+
 if __name__ == "__main__":
     unittest.main()

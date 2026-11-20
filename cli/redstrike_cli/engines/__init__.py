@@ -161,8 +161,15 @@ class Engine(abc.ABC):
         max_turns: int = 200,
         max_budget: float = 20.0,
         resume: bool = False,
+        model: str | None = None,
+        shard_models: list[str] | str | None = None,
     ) -> Invocation:
-        """Build (but do not run) the engine invocation for ``mode`` in {interactive, autonomous}."""
+        """Build (but do not run) the engine invocation for ``mode`` in {interactive, autonomous}.
+
+        ``model`` selects the engine model for THIS run (omitted → the engine's global default);
+        ``shard_models`` is a per-shard model list carried through for the future concurrent hunt pool.
+        See ``launch.build_autonomous_argv`` for the model-routing policy (reasoning-heavy → opus;
+        mechanical / reviewer / recon can run cheaper)."""
 
     @abc.abstractmethod
     def run(
@@ -259,18 +266,23 @@ class ClaudeCodeEngine(Engine):
         ]
 
     def build_invocation(self, prep, repo, prompt, *, mode="interactive", permission_mode="default",
-                         allow=None, max_turns=200, max_budget=20.0, resume=False) -> Invocation:
+                         allow=None, max_turns=200, max_budget=20.0, resume=False,
+                         model=None, shard_models=None) -> Invocation:
         from .. import launch, settings as settingsmod
         cb = self._bin()
         if mode == "autonomous":
             allowed = settingsmod.autonomous_allowlist(allow or [])
+            # `--model` routes THIS leg's model; `--shard-models` is carried for the future concurrent
+            # hunt pool. Both omitted when unset → `claude` keeps its single global default (ANTHROPIC_MODEL).
             argv = launch.build_autonomous_argv(
                 cb, repo, prep, prompt, allowed,
                 max_turns=max_turns, max_budget=max_budget, resume=resume,
+                model=model, shard_models=shard_models,
             )
-            return Invocation(argv=argv, allowed=allowed)
-        argv = launch.build_argv(cb, repo, prep, prompt, permission_mode)
-        return Invocation(argv=argv, allowed=None)
+            return Invocation(argv=argv, allowed=allowed,
+                              meta={"model": model, "shard_models": shard_models})
+        argv = launch.build_argv(cb, repo, prep, prompt, permission_mode, model=model)
+        return Invocation(argv=argv, allowed=None, meta={"model": model})
 
     def run(self, prep, eng_dir, inv, *, mode="interactive", audit=None) -> RunResult:
         import datetime as _dt

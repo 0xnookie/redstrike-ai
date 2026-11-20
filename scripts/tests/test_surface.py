@@ -9,11 +9,14 @@ are `n/a`; `tested`/reasoned-`skipped` clear.
 
 Stdlib only, runnable as `python test_surface.py` (the CI convention).
 """
+import io
 import json
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
+from contextlib import redirect_stdout
 
 HERE = pathlib.Path(__file__).resolve()
 SCRIPTS = HERE.parents[1]
@@ -446,6 +449,60 @@ class SchemaConformance(unittest.TestCase):
 class SelfTest(unittest.TestCase):
     def test_module_selftest(self):
         sf.selftest()
+
+
+class ConcurrentWriters(unittest.TestCase):
+    """Wave-2: concurrent subagents --mark distinct surfaces at once. Atomic + locked writes mean every
+    mark survives and the ledger never tears into invalid JSON."""
+
+    def _seed(self, eng):
+        items = [{"kind": "param", "value": f"p{i}"} for i in range(8)]
+        led = sf.plan_from_items(eng.name, items)
+        (eng / sf.LEDGER_NAME).write_text(json.dumps(led), encoding="utf-8")
+        return [s["id"] for s in led["surfaces"]]
+
+    def test_concurrent_marks_do_not_clobber(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            sids = self._seed(eng)
+            barrier = threading.Barrier(len(sids))
+            errors = []
+
+            def worker(sid):
+                try:
+                    barrier.wait(timeout=15)
+                    sf.mark(eng, sid, "tested", "sqli", "")
+                except SystemExit as e:            # mark() uses sys.exit on failure
+                    errors.append((sid, "exit", str(e)))
+                except Exception as e:             # noqa: BLE001
+                    errors.append((sid, repr(e)))
+
+            threads = [threading.Thread(target=worker, args=(s,)) for s in sids]
+            with redirect_stdout(io.StringIO()):   # mute the per-mark 'marked ...' chatter
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(timeout=30)
+            self.assertEqual(errors, [], errors)
+            final = json.loads((eng / sf.LEDGER_NAME).read_text(encoding="utf-8"))  # valid JSON
+            by = {s["id"]: s for s in final["surfaces"]}
+            for sid in sids:
+                self.assertEqual(by[sid]["status"], "tested", f"{sid} mark was clobbered")
+
+    def test_update_ledger_merge_safe_with_merge_plan(self):
+        # the documented merge-safe wave path: fold newly-discovered surface in without a race.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._seed(eng)
+            out = sf.update_ledger(eng, lambda led: sf.merge_plan(led, [{"kind": "identity", "value": "userB"}]))
+            self.assertIsNotNone(out)
+            on_disk = json.loads((eng / sf.LEDGER_NAME).read_text(encoding="utf-8"))
+            self.assertNotIn("_last_merge_added", on_disk, "transient merge counter must not persist")
+            self.assertIn("userB", {s["value"] for s in on_disk["surfaces"]})
+
+    def test_update_ledger_absent_is_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(sf.update_ledger(pathlib.Path(d), lambda led: led))
 
 
 if __name__ == "__main__":

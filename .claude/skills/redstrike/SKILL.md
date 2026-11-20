@@ -94,8 +94,37 @@ with a recorded reason. The formerly un-triggered classes are now wired in: `nos
 `ldap-injection`, `prototype-pollution`, `race-condition`, `parameter-pollution`, `crypto-attacks`,
 `tls-attacks`, `supply-chain`. (`ai-llm`/`web3`/internal phases auto-activate from their signal.)
 
-**b. Run every `pending` category.** For each, run its `<class>-context` feeder (families) then its
-variant/category agents, and flip its ledger entry to `attempted` (set `findings_count`) or `blocked`.
+**b. Run every `pending` category — as CONCURRENT, model-diverse WAVES (not one at a time).** The hunt is
+a parallel multi-model swarm batched by rank, not a single serial pass. This is the DEFAULT, in-process:
+- **Batch by rank into waves.** Take the `pending` categories in ascending `hunt_plan.json` `rank` (§2.5;
+  fall back to routing-map order when no plan) and split them into WAVES of a handful of classes each —
+  the highest-value, best-evidenced classes in the first wave.
+- **Fan out each wave as CONCURRENT subagents.** Spawn the wave's executors as parallel `Agent`/Task
+  subagents that run at the SAME time (the same mechanism the per-class `*-verify` reviewers already use) —
+  do NOT run them one after another. Each executor runs its `<class>-context` feeder (if any) → the
+  variant/category agents for its class.
+- **Model diversity across a wave.** Spawn the executors on a MIX of models (set each subagent's model on
+  the `Agent` tool) — the higher-value / `deep` / high-`severity_ceiling` classes on the stronger model
+  (`opus`), the rest on `sonnet` — because a differently-modelled pass catches bugs one model misses
+  (this is what the manual hunter swarm did, and it is what raised recall on the large engagement). For a
+  class whose `hunt_plan.json` `depth_budget.diversity_pass` is true (typical of a `deep` budget), run a
+  SECOND pass over the same sinks on a DIFFERENT model. Reviewer (`*-verify`) subagents may run on the
+  cheaper model per the routing policy.
+- **Each executor writes ITS OWN `<skill>/findings.json`** — never a shared file — so concurrent executors
+  in a wave never collide on a write.
+- **MERGE / DEDUP CHECKPOINT after each wave (before the next one).** When the wave's executors return:
+  launch each class's independent `<class>-verify` reviewer, then reconcile the ledgers by CALLING the
+  scripts (never hand-editing the JSON): `scripts/coverage.py --mark <class> --status attempted|blocked
+  --count N [--escalations …]` for each class, `scripts/surface.py --mark` for the surface each executor
+  consumed, and `scripts/dedup.py --engagement <dir>` to collapse the same bug found by two executors.
+  These writers are concurrency-safe; `coverage.py` stays the SOLE ledger owner. Then re-invoke
+  `redstrike-strategist` (§2.5) to re-rank the REMAINING queue and run the next wave — until no `pending`
+  category remains.
+- **Depth per class.** Let each class's `hunt_plan.json` `depth_budget` tune how much breadth beyond the
+  escalation floor its executor spends (`standard`/`deep` → invoke `parameter-optimization` proactively on
+  high-value sinks; `deep` → the diversity pass above). The depth budget can only ADD effort — every
+  `pending` class still owes the full escalation floor below, whatever rank or budget it got.
+
 **When a class returns EMPTY on a recon-signalled surface, climb the `scripts/escalation.py` ladder before
 calling it clean, and RECORD each technique you tried:**
 `python scripts/coverage.py --mark <class> --status attempted --count 0 --escalations derive-not-assume,encoding-ladder`

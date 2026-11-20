@@ -36,7 +36,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qsl
@@ -52,6 +54,56 @@ except ImportError:  # pragma: no cover - only hit under path-based loading with
     _amod = _ilu.module_from_spec(_aspec)
     _aspec.loader.exec_module(_amod)
     atomic_write = _amod.atomic_write
+
+
+# --- concurrent-writer safety -------------------------------------------------------------------- #
+# The hunt fans out as CONCURRENT subagents that mark / re-plan this ledger simultaneously. `atomic_write`
+# stops a reader seeing a torn file, but two writers that each read-then-write still clobber each other
+# (last-write-wins). A per-file advisory lock serializes the read-modify-write so every concurrent
+# mark / merge survives. (Mirror of coverage.py's lock; duplicated to keep these CLI scripts standalone.)
+class _FileLock:
+    """Best-effort cross-process advisory lock via an exclusive lock file (stdlib only; no fcntl/msvcrt,
+    so Windows + Linux/WSL behave identically). Spins up to ``timeout``; a lock older than ``stale`` is
+    treated as abandoned and broken. If it still can't acquire by the deadline it proceeds anyway
+    (degraded last-write-wins) rather than deadlock the hunt — ``atomic_write`` keeps the file un-torn."""
+
+    def __init__(self, target, *, timeout: float = 30.0, poll: float = 0.05, stale: float = 120.0):
+        self._path = str(target) + ".lock"
+        self._timeout, self._poll, self._stale = timeout, poll, stale
+        self._held = False
+
+    def __enter__(self):
+        deadline = time.monotonic() + self._timeout
+        while True:
+            try:
+                fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(self._path) > self._stale:
+                        os.unlink(self._path)   # break an abandoned lock
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    return self                 # proceed un-locked rather than block the whole hunt
+                time.sleep(self._poll)
+                continue
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii", "replace"))
+            finally:
+                os.close(fd)
+            self._held = True
+            return self
+
+    def __exit__(self, *exc):
+        if self._held:
+            try:
+                os.unlink(self._path)
+            except OSError:
+                pass
+            self._held = False
+        return False
+
 
 LEDGER_NAME = "surface_ledger.json"
 _OPEN_STATUS = "discovered"            # enumerated but never tested == a gap at close
@@ -591,27 +643,53 @@ def load_source_surfaces(eng: Path) -> list:
 
 def mark(eng: Path, sid: str, status: str, by: str, reason: str):
     p = eng / LEDGER_NAME
-    led = _read_json(p)
-    if not led:
-        sys.exit(f"[!] no {LEDGER_NAME} in {eng} (run --plan first)")
-    hit = None
-    for s in led["surfaces"]:
-        if s["id"] == sid or s.get("value") == sid:
-            hit = s
-            break
-    if not hit:
-        sys.exit(f"[!] surface not found: {sid}")
-    hit["status"] = status
-    if by:
-        hit.setdefault("consumed_by", [])
-        if by not in hit["consumed_by"]:
-            hit["consumed_by"].append(by)
-    if reason:
-        hit["reason"] = reason
-    led["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    atomic_write(p, json.dumps(led, indent=2))
+    # Lock the read-modify-write so concurrent --mark calls (one per wave subagent) can't clobber each
+    # other: the load happens INSIDE the lock, after any prior writer has committed.
+    with _FileLock(p):
+        led = _read_json(p)
+        if not led:
+            sys.exit(f"[!] no {LEDGER_NAME} in {eng} (run --plan first)")
+        hit = None
+        for s in led["surfaces"]:
+            if s["id"] == sid or s.get("value") == sid:
+                hit = s
+                break
+        if not hit:
+            sys.exit(f"[!] surface not found: {sid}")
+        hit["status"] = status
+        if by:
+            hit.setdefault("consumed_by", [])
+            if by not in hit["consumed_by"]:
+                hit["consumed_by"].append(by)
+        if reason:
+            hit["reason"] = reason
+        led["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        atomic_write(p, json.dumps(led, indent=2))
     print(f"marked {sid} -> {status}")
     return 0
+
+
+def update_ledger(eng: Path, mutate):
+    """Merge-safe read-modify-write of surface_ledger.json — the concurrent WAVE-MERGE path.
+
+    Acquires the per-file lock, reads the CURRENT on-disk ledger (so a parallel writer's just-committed
+    mark is seen, never clobbered), applies ``mutate(led)`` (edit the dict in place or return a
+    replacement), refreshes ``generated_at``, then ``atomic_write``s. Returns the written ledger, or None
+    when no ledger exists / it is unreadable. Public + ADDITIVE: the existing writers (``mark`` and the
+    ``--plan`` merge) keep their signatures and are already lock-safe; the engine-core wave-merge folds a
+    wave's newly-discovered surface in race-free with ``update_ledger(eng, lambda led: merge_plan(led, items))``."""
+    p = Path(eng) / LEDGER_NAME
+    with _FileLock(p):
+        led = _read_json(p)
+        if not led:
+            return None
+        out = mutate(led)
+        if out is None:
+            out = led
+        out.pop("_last_merge_added", None)   # merge_plan's transient counter never persists to disk
+        out["generated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        atomic_write(p, json.dumps(out, indent=2))
+        return out
 
 
 def selftest() -> None:
@@ -787,18 +865,21 @@ def main() -> int:
         # pure white-box one has no recon feeders, so one of them is simply empty.
         items = load_recon_surfaces(eng) + load_source_surfaces(eng)
         p = eng / LEDGER_NAME
-        if p.is_file() and not args.fresh:
-            # Idempotent re-plan: emit universally + safely re-run as late feeders add surface,
-            # preserving any tested/skipped progress. --fresh forces a clean rebuild.
-            led = merge_plan(json.loads(p.read_text(encoding="utf-8")), items)
-            added = led.pop("_last_merge_added", 0)
-            atomic_write(p, json.dumps(led, indent=2))
-            print(f"merged {eng / LEDGER_NAME}: +{added} new element(s), "
-                  f"{len(led['surfaces'])} total (progress preserved)")
-        else:
-            led = plan_from_items(eng.name, items)
-            atomic_write(p, json.dumps(led, indent=2))
-            print(f"wrote {eng / LEDGER_NAME}: {len(led['surfaces'])} surface element(s)")
+        # Lock the whole read-merge-write: the merge re-reads the on-disk ledger, so a concurrent wave
+        # subagent's --mark (or another --plan) must not land between this read and its write.
+        with _FileLock(p):
+            if p.is_file() and not args.fresh:
+                # Idempotent re-plan: emit universally + safely re-run as late feeders add surface,
+                # preserving any tested/skipped progress. --fresh forces a clean rebuild.
+                led = merge_plan(json.loads(p.read_text(encoding="utf-8")), items)
+                added = led.pop("_last_merge_added", 0)
+                atomic_write(p, json.dumps(led, indent=2))
+                print(f"merged {eng / LEDGER_NAME}: +{added} new element(s), "
+                      f"{len(led['surfaces'])} total (progress preserved)")
+            else:
+                led = plan_from_items(eng.name, items)
+                atomic_write(p, json.dumps(led, indent=2))
+                print(f"wrote {eng / LEDGER_NAME}: {len(led['surfaces'])} surface element(s)")
         return 0
 
     if args.mark:
