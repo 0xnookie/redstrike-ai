@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useConsole } from "@/lib/store";
 import { cx } from "@/lib/format";
+import { isSourceEngagement } from "@/lib/sourceSurface";
 import { SEVERITY, hexA } from "@/lib/theme";
 import {
   ViewHead, Kpi, Panel, PanelHeader, PanelBody, EmptyState, Pill, Select,
@@ -77,9 +78,10 @@ function Table({ head, children }: { head: React.ReactNode; children: React.Reac
 }
 
 export default function JsReconPage() {
-  const { jsRecon, jsFiles } = useConsole();
+  const { jsRecon, jsFiles, activeEngagement, sourceContext } = useConsole();
   const [tab, setTab] = useState<Tab>("endpoints");
   const [siteIdx, setSiteIdx] = useState(0);
+  const sourceMode = isSourceEngagement(activeEngagement, sourceContext);
 
   const sites = jsRecon?.sites ?? [];
   const site: JsReconSite | undefined = sites[Math.min(siteIdx, Math.max(0, sites.length - 1))];
@@ -96,14 +98,18 @@ export default function JsReconPage() {
         <ViewHead
           crumb="redstrike / js-recon"
           title="JS Recon"
-          sub="Client-side JavaScript intelligence — endpoints, params, APIs, secrets, sinks and libraries mined from the target's JS."
+          sub={sourceMode
+            ? "Client-side JavaScript intelligence — crawled from a live target's served JS."
+            : "Client-side JavaScript intelligence — endpoints, params, APIs, secrets, sinks and libraries mined from the target's JS."}
         />
         <Panel>
           <PanelBody>
             <EmptyState
               icon={<Code2 size={30} />}
-              title="No JS recon yet"
-              hint="Run the js-analysis skill for this engagement. Its findings/*.jsonl + site-summary land under the engagement's js-analysis/ dir and surface here automatically."
+              title={sourceMode ? "Not applicable to a source audit" : "No JS recon yet"}
+              hint={sourceMode
+                ? "This is a white-box source-code audit — there is no live target to crawl for served JavaScript. The equivalent client-side code is inventoried in Source Assets (languages/stacks) and Source Map instead."
+                : "Run the js-analysis skill for this engagement. Its findings/*.jsonl + site-summary land under the engagement's js-analysis/ dir and surface here automatically."}
             />
           </PanelBody>
         </Panel>

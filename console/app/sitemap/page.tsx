@@ -15,7 +15,17 @@ import {
   buildSiteMap, subtreeRoutes, sortedChildren, nodeUrl, routeSeverityRank,
   type SiteNode, type SiteRoute,
 } from "@/lib/siteMap";
+import { isSourceEngagement } from "@/lib/sourceSurface";
+import SourceMap from "@/components/source/SourceMap";
 import { Kpi, Pill, Dot, ViewHead, Panel, PanelHeader, EmptyState, Segmented } from "@/components/ui/primitives";
+
+/* A white-box SOURCE-CODE audit has none of the black-box web artifacts this view reads
+ * (content.json / host_discovery) — only a surface_ledger + source_context. Dispatch to the
+ * source-surface view for those; web engagements keep the existing site map unchanged. */
+export default function SiteMapPage() {
+  const { activeEngagement, sourceContext } = useConsole();
+  return isSourceEngagement(activeEngagement, sourceContext) ? <SourceMap /> : <WebSiteMap />;
+}
 
 /* ── status + type presentation ─────────────────────────────────────────── */
 const codeColor = (s?: number): string =>
@@ -43,7 +53,7 @@ const COLS: { k: SortKey; label: string; num?: boolean }[] = [
   { k: "type", label: "Type" }, { k: "source", label: "Source" }, { k: "issue", label: "Finding" },
 ];
 
-export default function SiteMapPage() {
+function WebSiteMap() {
   const { activeEngagement: eng, activeId, content, hostRaw, history, findings, openHost, openFinding } = useConsole();
   const toast = useToast();
 

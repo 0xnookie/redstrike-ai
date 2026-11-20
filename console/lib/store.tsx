@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, CveIntelEntry, EngagementStatus, ApiEndpoint, JsFile, JsRecon, ContentMap, HttpHistory, Notebook, Severity, Confidence } from "./types";
+import type { ConsoleData, Engagement, Finding, AttackChain, Service, Asset, TestRun, CveFeed, CoverageLedger, CveIntel, CveIntelEntry, EngagementStatus, ApiEndpoint, JsFile, JsRecon, ContentMap, HttpHistory, Notebook, Severity, Confidence, SurfaceLedger, SourceContext } from "./types";
 import {
   emptyData, agentRoster, buildServices, buildAssets, overlayAssetFindings,
   deriveAgentStats, deriveActivity, deriveAssetsFromScope, hostRoot,
@@ -14,7 +14,7 @@ import { resolveStatus, type ControlRuns } from "./engagementStatus";
 type Mode = "empty" | "live";
 
 // Each engagement's own findings/chains/services/assets, loaded on demand.
-interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; jsRecon?: JsRecon; coverage?: CoverageLedger; cveIntel?: CveIntel; content?: ContentMap; history?: HttpHistory; notebook?: Notebook; hostRaw?: any; }
+interface Dataset { findings: Finding[]; chains: AttackChain[]; services: Service[]; assets: Asset[]; apiEndpoints: ApiEndpoint[]; jsFiles: JsFile[]; jsRecon?: JsRecon; coverage?: CoverageLedger; cveIntel?: CveIntel; content?: ContentMap; history?: HttpHistory; notebook?: Notebook; hostRaw?: any; surfaceLedger?: SurfaceLedger; sourceContext?: SourceContext; }
 const EMPTY_DS: Dataset = { findings: [], chains: [], services: [], assets: [], apiEndpoints: [], jsFiles: [] };
 
 const ACTIVE_KEY = "redstrike.activeEngagement";
@@ -32,10 +32,14 @@ const LIVE_REFRESH_MS = 6_000;
 const DATA_RUNNING_REFRESH_MS = 20_000;
 const FRESH_FLASH_MS = 2_600;
 
-// An engagement's canonical files, in datasetFromFiles' argument order.
+// An engagement's canonical files, in datasetFromFiles' argument order. The last two are the
+// WHITE-BOX source-audit artifacts (absent on black-box web engagements); they're served at the
+// paths below by the console launcher — source_context lives under source-audit/, so its route
+// carries that prefix. A miss (web engagement) just leaves the field undefined.
 const ENG_FILES = [
   "findings_consolidated.json", "host_discovery.json", "attack_chains.json", "coverage_ledger.json",
   "cve_intel.json", "js_analysis.json", "content.json", "http_history.json", "notebook.json", "js_recon.json",
+  "surface_ledger.json", "source-audit/source_context.json",
 ] as const;
 
 /** A response's change signature: status + byte length (the server sends no Last-Modified). */
@@ -88,6 +92,9 @@ interface ConsoleCtx {
   history: HttpHistory | undefined;
   notebook: Notebook | undefined;
   hostRaw: any;
+  /** white-box source-audit artifacts (undefined on black-box web engagements) */
+  surfaceLedger: SurfaceLedger | undefined;
+  sourceContext: SourceContext | undefined;
   cveFeed: CveFeed | undefined;
   cveLive: boolean;
   loadFiles: (files: FileList | File[]) => Promise<string[]>;
@@ -209,7 +216,7 @@ const normCveEntries = (arr: any): CveIntelEntry[] | undefined =>
   Array.isArray(arr) ? arr.map(normCveEntry).filter((e): e is CveIntelEntry => e !== null) : undefined;
 
 /** Assemble a dataset from an engagement's parsed canonical files. */
-function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any, contentFile?: any, historyFile?: any, notebookFile?: any, jsReconFile?: any): Dataset {
+function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, intel?: any, js?: any, contentFile?: any, historyFile?: any, notebookFile?: any, jsReconFile?: any, surfaceFile?: any, sourceCtxFile?: any): Dataset {
   let findings: Finding[] = [];
   let chains: AttackChain[] = [];
   if (Array.isArray(cons)) {
@@ -247,15 +254,17 @@ function datasetFromFiles(cons: any, host: any, chainsFile: any, cover?: any, in
   const content = isContentMap(contentFile) ? (contentFile as ContentMap) : undefined;
   const history = normHistory(historyFile);
   const notebook = isNotebook(notebookFile) ? (notebookFile as Notebook) : undefined;
+  const surfaceLedger = isSurfaceLedger(surfaceFile) ? (surfaceFile as SurfaceLedger) : undefined;
+  const sourceContext = isSourceContext(sourceCtxFile) ? (sourceCtxFile as SourceContext) : undefined;
   // keep the raw host_discovery object (hostRaw) too: the Site Map builder reads
   // web_routes_seen + api_endpoints (type/confirmed) + live_hosts, which the derived
   // services/assets above intentionally drop.
-  return { findings, chains, services, assets, apiEndpoints, jsFiles, jsRecon, coverage, cveIntel, content, history, notebook, hostRaw: host };
+  return { findings, chains, services, assets, apiEndpoints, jsFiles, jsRecon, coverage, cveIntel, content, history, notebook, hostRaw: host, surfaceLedger, sourceContext };
 }
 
 /** Assemble a dataset from the raw files array (ENG_FILES order). */
 function datasetFromRaw(r: any[]): Dataset {
-  return datasetFromFiles(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]);
+  return datasetFromFiles(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]);
 }
 
 /** Does a parsed object look like notebook.json (leads / recon_intel / roe / test_accounts)? */
@@ -269,6 +278,17 @@ function isNotebook(o: any): boolean {
 /** Does a parsed object look like the JS Recon payload (js_recon.json)? */
 function isJsRecon(o: any): boolean {
   return !!o && typeof o === "object" && !Array.isArray(o) && Array.isArray(o.sites);
+}
+
+/** Does a parsed object look like a surface_ledger.json (web OR source)? `{surfaces:[…]}`. */
+function isSurfaceLedger(o: any): boolean {
+  return !!o && typeof o === "object" && !Array.isArray(o) && Array.isArray(o.surfaces);
+}
+
+/** Does a parsed object look like the white-box source_context.json (structural map / sink leads)? */
+function isSourceContext(o: any): boolean {
+  return !!o && typeof o === "object" && !Array.isArray(o) &&
+    (Array.isArray(o.structural) || Array.isArray(o.candidates) || Array.isArray(o.dependencies));
 }
 
 /** Does a parsed object look like content-discovery's content.json? */
@@ -304,10 +324,17 @@ function toEngagement(entry: any): Engagement {
     : (!hasFindings && !hasConsolidated) ? "scoping"
     : (hasConsolidated || ended) ? "completed"
     : "running";
+  // White-box source-audit grant: the server projects scope.source → scope.source_repo. Accept
+  // either key, but only as a real repo object (a bare `source: "scope.yaml"` provenance string is
+  // NOT a white-box signal). Present ⇒ the recon views branch to their source-audit layout.
+  const srcRepo = isObj(sc.source_repo) && sc.source_repo.repo_url ? sc.source_repo
+    : isObj(sc.source) && sc.source.repo_url ? sc.source
+    : undefined;
   return {
     id: entry.id,
     name: sc.engagement || entry.id,
-    target: sc.target || "—",
+    target: sc.target || srcRepo?.repo_url || (Array.isArray(sc.in_scope?.urls) ? sc.in_scope.urls[0] : "") || "—",
+    source: srcRepo ? { repo_url: srcRepo.repo_url, local_path: srcRepo.local_path, commit: srcRepo.commit, branch: srcRepo.branch } : undefined,
     goal: sc.notes || "",
     status,
     authorized_by: sc.authorized_by || "—",
@@ -351,6 +378,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const rawRef = useRef<Record<string, any[]>>({});    // per engagement: parsed files (ENG_FILES order)
   const sigRef = useRef<Record<string, string[]>>({}); // per engagement: their change signatures
   const refreshing = useRef(false);
+  const manifestRefreshing = useRef(false); // guards the manifest poll from stacking (see refreshManifest)
   const datasetsRef = useRef(datasets);
   datasetsRef.current = datasets;
   const toast = useToast();
@@ -379,6 +407,8 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const history = active.history;
   const notebook = active.notebook;
   const hostRaw = active.hostRaw;
+  const surfaceLedger = active.surfaceLedger;
+  const sourceContext = active.sourceContext;
   const apiEndpoints = active.apiEndpoints;
   const jsFiles = active.jsFiles;
   const jsRecon = active.jsRecon;
@@ -392,19 +422,36 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const activity = useMemo(() => deriveActivity(active.findings), [active.findings]);
   const tests: TestRun[] = []; // no per-run source yet; the activity timeline drives the heatmap
 
-  /** Fetch + assemble one engagement's dataset (once). */
+  /** Fetch + assemble one engagement's dataset (once). The consolidated findings file is fetched
+   *  FIRST and rendered the moment it lands; the remaining artifacts are folded in afterwards. This
+   *  keeps the findings view from waiting on — and the ten parallel requests from contending over —
+   *  sibling artifacts a pre-reporting engagement hasn't produced yet, which matters most when each
+   *  request is slow to serve (e.g. a white-box engagement whose large source checkout makes the
+   *  server's per-request file discovery expensive): findings used to appear only once ALL ten
+   *  requests resolved, so a single slow/absent sibling left the view empty. Findings populate from
+   *  findings_consolidated.json alone, shape-agnostically — a bare array, a {findings} union, or a
+   *  full report envelope all yield the same findings[] (see datasetFromFiles). */
   const loadEngagement = useCallback(async (id: string) => {
     if (loadedRef.current.has(id)) return;
     loadedRef.current.add(id);
-    const got = await Promise.all(ENG_FILES.map((f) => fetchWithSig(`/e/${id}/${f}`)));
-    // keep the raw files + their signatures: a live refresh re-fetches only what changed
-    rawRef.current[id] = got.map((g) => g.json);
-    sigRef.current[id] = got.map((g) => g.sig);
-    if (got.every((g) => g.json === undefined)) {
+    // full-length raw/sig baselines, filled IN PLACE as each artifact lands — the early findings
+    // render and the live-refresh HEAD-compare both read these, so they must exist up front.
+    const raw: any[] = new Array(ENG_FILES.length).fill(undefined);
+    const sigs: string[] = new Array(ENG_FILES.length).fill("");
+    rawRef.current[id] = raw;
+    sigRef.current[id] = sigs;
+    // ENG_FILES[0] === findings_consolidated.json — show findings as soon as it arrives.
+    const first = await fetchWithSig(`/e/${id}/${ENG_FILES[0]}`);
+    raw[0] = first.json; sigs[0] = first.sig;
+    if (first.json !== undefined) setDatasets((d) => ({ ...d, [id]: datasetFromRaw(raw) }));
+    // then the rest, merged on top of the findings already shown.
+    const rest = await Promise.all(ENG_FILES.slice(1).map((f) => fetchWithSig(`/e/${id}/${f}`)));
+    rest.forEach((g, i) => { raw[i + 1] = g.json; sigs[i + 1] = g.sig; });
+    if (raw.every((j) => j === undefined)) {
       loadedRef.current.delete(id); // nothing served (e.g. scaffold-only) — allow a retry later
       return;
     }
-    setDatasets((d) => ({ ...d, [id]: datasetFromRaw(rawRef.current[id]) }));
+    setDatasets((d) => ({ ...d, [id]: datasetFromRaw(raw) }));
   }, []);
 
   /* ---- live refresh: re-read only the files that changed while a run produces them ---- */
@@ -525,6 +572,16 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         patchActive({ notebook: o as unknown as Notebook });
         return "notebook";
       }
+      // white-box source-audit artifacts — must be checked BEFORE the scope branch below
+      // (surface_ledger also carries an `engagement` key, which that branch keys off).
+      if (isSourceContext(o)) {
+        patchActive({ sourceContext: o as unknown as SourceContext });
+        return "source_context";
+      }
+      if (isSurfaceLedger(o)) {
+        patchActive({ surfaceLedger: o as unknown as SurfaceLedger });
+        return "surface_ledger";
+      }
       if (Array.isArray(o.live_hosts) || Array.isArray(o.hosts)) {
         const services = buildServices(o);
         patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)), apiEndpoints: apiEndpointsOf(o), hostRaw: o });
@@ -615,15 +672,25 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
          a failed or empty fetch is a no-op (a transient blip must never blank the list) and
          engagements are never removed here (control-plane delete owns that). ---- */
   const refreshManifest = useCallback(async () => {
-    const manifest = await fetchJson("/engagements.json");
-    if (!manifest || !Array.isArray(manifest.engagements) || manifest.engagements.length === 0) return;
-    const next: Engagement[] = manifest.engagements.map(toEngagement);
-    const byId = new Map(next.map((e) => [e.id, e]));
-    setEngagements((prev) => {
-      const merged = prev.map((e) => byId.get(e.id) ?? e); // refresh known headers in place
-      for (const e of next) if (!prev.some((p) => p.id === e.id)) merged.push(e); // append new ones
-      return merged;
-    });
+    // Don't stack: /engagements.json is rebuilt server-side on every hit (it re-discovers every
+    // engagement's files), so for a large engagement one poll can take longer than the 15s interval.
+    // Without this guard, polls pile up and starve the on-demand data fetches (a finishing engagement
+    // never rendered its findings). refreshEngagement guards the same way.
+    if (manifestRefreshing.current) return;
+    manifestRefreshing.current = true;
+    try {
+      const manifest = await fetchJson("/engagements.json");
+      if (!manifest || !Array.isArray(manifest.engagements) || manifest.engagements.length === 0) return;
+      const next: Engagement[] = manifest.engagements.map(toEngagement);
+      const byId = new Map(next.map((e) => [e.id, e]));
+      setEngagements((prev) => {
+        const merged = prev.map((e) => byId.get(e.id) ?? e); // refresh known headers in place
+        for (const e of next) if (!prev.some((p) => p.id === e.id)) merged.push(e); // append new ones
+        return merged;
+      });
+    } finally {
+      manifestRefreshing.current = false;
+    }
   }, []);
 
   /* ---- drive the re-poll: an interval while the tab is visible, plus a refresh the moment
@@ -676,7 +743,7 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const value: ConsoleCtx = {
     mode, engagements: shownEngagements, activeEngagement, activeId, setActiveId,
     findings, chains, agents, activity, assets, services, apiEndpoints, jsFiles, jsRecon, tests, coverage, cveIntel,
-    content, history, notebook, hostRaw,
+    content, history, notebook, hostRaw, surfaceLedger, sourceContext,
     cveFeed, cveLive, loadFiles, clearData, reloadEngagements, reloadActive,
     selectedFinding, openFinding, closeFinding,
     selectedHost, openHost, closeHost,
