@@ -34,7 +34,11 @@ constructed request returns a 500 `digest`, so it is **not** curl-/interceptor-b
 (`_contract/proxy.md` §4a) — and **replay it with the object id swapped** across identities (BFLA: replay the
 captured privileged action as the low-priv identity), instead of synthesizing the request. The bound-state
 part stays untouched so the server accepts the replay. `scripts/replay_server_action.py` extracts the entry +
-marks the id-swap slot. Degrades to a human handing over one capture.
+marks the id-swap slot. First invoke the `browser-exploit` capability (`skills/browser-exploit/`,
+`_contract/browser-session.md`, approval-gated) to drive the authed BOLA/BFLA write autonomously
+(login→navigate→action) — the capture tampers the object id / replays the privileged action as the low-priv
+identity; it hands back the proven finding (under this class) + a replay-faithful capture — de-dupe against
+this candidate. Degrade to a human capture only if no browser driver is available.
 
 ## Tools
 - multi-session interceptor, request-diff, `api-context/refs/api_techniques.md`

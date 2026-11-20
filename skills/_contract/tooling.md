@@ -88,8 +88,9 @@ Still **detect and record the rest of what the engagement actually has**, becaus
 - **toolkit location** — which shell/distro/container runs the roster; route tool calls there (`runtime/tooling.json` records which shell was probed).
 - **interception proxy** — is one connected? If so it is the transport + a discovery source (`proxy.md`).
 - **browser automation** — `chrome-devtools-mcp` / `claude-in-chrome` / `playwright`. **Required** for
-  client-rendered surface: SPA/DOM-XSS confirmation, WebSocket/chatbot flows, anything behind JS. When it is
-  **absent**, say so and **flag the browser-gated tests for the human** — do not hand-roll a CLI substitute,
+  client-rendered surface: SPA/DOM-XSS confirmation, WebSocket/chatbot flows, anything behind JS. For browser-gated tests,
+  **invoke `browser-exploit` (`_contract/browser-session.md`) to drive it autonomously; when no browser driver
+  is available, say so and flag for the human** — do not hand-roll a CLI substitute,
   and never spoof a browser fingerprint to slip a scripted client past a WAF (that is evasion, barred by
   `roe-gate.md` and any WAF-safe rule; a WebSocket upgrade that resets with no HTTP status is that signal —
   stop and flag, don't bypass).

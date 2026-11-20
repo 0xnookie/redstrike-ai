@@ -29,11 +29,108 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# atomic_write: one shared helper for findings writes (same resolution as coverage.py / surface.py).
+try:
+    from atomicio import atomic_write
+except ImportError:  # pragma: no cover - only hit under path-based loading without scripts/ on sys.path
+    import importlib.util as _ilu
+    _aspec = _ilu.spec_from_file_location("atomicio", str(Path(__file__).resolve().parent / "atomicio.py"))
+    _amod = _ilu.module_from_spec(_aspec)
+    _aspec.loader.exec_module(_amod)
+    atomic_write = _amod.atomic_write
+
+
+# --- concurrent-writer safety -------------------------------------------------------------------- #
+# dedup's `main` is read-only (it PRINTS proposed merges), but the engine-core wave-merge step persists
+# the result (stamping `status:"duplicate"` on a consolidated findings file) while concurrent hunters
+# may also be writing. `write_findings` / `update_findings` give it an atomic + per-file-locked path so
+# two concurrent writers can't clobber each other. (Mirror of coverage.py's lock; duplicated to keep
+# these CLI scripts standalone.)
+class _FileLock:
+    """Best-effort cross-process advisory lock via an exclusive lock file (stdlib only; no fcntl/msvcrt,
+    so Windows + Linux/WSL behave identically). Spins up to ``timeout``; a lock older than ``stale`` is
+    treated as abandoned and broken. If it still can't acquire by the deadline it proceeds anyway
+    (degraded last-write-wins) rather than deadlock — ``atomic_write`` keeps the file un-torn either way."""
+
+    def __init__(self, target, *, timeout: float = 30.0, poll: float = 0.05, stale: float = 120.0):
+        self._path = str(target) + ".lock"
+        self._timeout, self._poll, self._stale = timeout, poll, stale
+        self._held = False
+
+    def __enter__(self):
+        deadline = time.monotonic() + self._timeout
+        while True:
+            try:
+                fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(self._path) > self._stale:
+                        os.unlink(self._path)   # break an abandoned lock
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    return self                 # proceed un-locked rather than block
+                time.sleep(self._poll)
+                continue
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii", "replace"))
+            finally:
+                os.close(fd)
+            self._held = True
+            return self
+
+    def __exit__(self, *exc):
+        if self._held:
+            try:
+                os.unlink(self._path)
+            except OSError:
+                pass
+            self._held = False
+        return False
+
+
+def write_findings(path, findings) -> Path:
+    """Atomically + lock-safely persist a findings list to ``path`` (a consolidated findings file).
+    Concurrent-writer safe: the per-file lock serializes writers so a parallel wave-merge can't clobber,
+    and ``atomic_write`` prevents a torn file. Additive — ``main`` stays print-only."""
+    p = Path(path)
+    with _FileLock(p):
+        atomic_write(p, json.dumps(findings, indent=2) + "\n")
+    return p
+
+
+def update_findings(path, mutate):
+    """Merge-safe read-modify-write of a consolidated findings file — the concurrent WAVE-MERGE path.
+    Lock, read the CURRENT list (so a parallel writer's commit is seen, never clobbered), apply
+    ``mutate(findings)`` (edit in place or return a replacement), then ``atomic_write``. Returns the
+    written list, or None when the file is absent / unreadable. Stamp cross-agent duplicates race-free by
+    composing with ``apply_merges``::
+
+        update_findings(path, lambda fs: apply_merges(fs)[0])
+    """
+    p = Path(path)
+    with _FileLock(p):
+        if not p.is_file():
+            return None
+        try:
+            findings = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        out = mutate(findings)
+        if out is None:
+            out = findings
+        atomic_write(p, json.dumps(out, indent=2) + "\n")
+        return out
+
 
 _SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 _CONF_RANK = {"confirmed": 2, "probable": 1, "tentative": 0}

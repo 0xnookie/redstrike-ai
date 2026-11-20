@@ -10,11 +10,14 @@ collapsed routing to baseline-only with no error.
 
 Stdlib only, runnable as `python test_coverage.py` (the CI convention).
 """
+import io
 import json
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
+from contextlib import redirect_stdout
 
 HERE = pathlib.Path(__file__).resolve()
 SCRIPTS = HERE.parents[1]
@@ -189,6 +192,65 @@ class MarkEscalations(unittest.TestCase):
 class SelfTest(unittest.TestCase):
     def test_coverage_selftest_passes(self):
         self.assertEqual(c.selftest(), 0)
+
+
+class ConcurrentWriters(unittest.TestCase):
+    """Wave-2: the hunt fans out as concurrent subagents that --mark the ledger simultaneously. Atomic +
+    locked writes mean every concurrent mark survives (no last-write-wins clobber) and the file never
+    tears into invalid JSON."""
+
+    def _seed(self, eng):
+        m = c.load_map()
+        led = c.plan(m, None, {"web"}, eng.name)   # no signals -> many 'pending' web categories
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return [cat["id"] for cat in led["categories"] if cat["status"] == "pending"]
+
+    def test_concurrent_marks_do_not_clobber(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            ids = self._seed(eng)[:8]
+            self.assertGreaterEqual(len(ids), 4, "need several pending categories to race")
+            barrier = threading.Barrier(len(ids))
+            errors = []
+
+            def worker(cid):
+                try:
+                    barrier.wait(timeout=15)       # release all threads together -> maximal contention
+                    c.mark(eng, cid, "attempted", count=1)
+                except Exception as e:             # noqa: BLE001
+                    errors.append((cid, repr(e)))
+
+            threads = [threading.Thread(target=worker, args=(cid,)) for cid in ids]
+            with redirect_stdout(io.StringIO()):   # mute the per-mark 'ok:' chatter
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(timeout=30)
+            self.assertEqual(errors, [], errors)
+            final = json.loads((eng / "coverage_ledger.json").read_text(encoding="utf-8"))  # valid JSON
+            by = {cat["id"]: cat for cat in final["categories"]}
+            for cid in ids:
+                self.assertEqual(by[cid]["status"], "attempted", f"{cid} mark was clobbered")
+                self.assertEqual(by[cid]["findings_count"], 1, f"{cid} count was clobbered")
+
+    def test_update_ledger_merge_safe_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._seed(eng)
+
+            def bump(led):
+                led["categories"][0]["findings_count"] = 42
+                return led
+
+            out = c.update_ledger(eng, bump)
+            self.assertIsNotNone(out)
+            on_disk = json.loads((eng / "coverage_ledger.json").read_text(encoding="utf-8"))
+            self.assertEqual(on_disk["categories"][0]["findings_count"], 42)
+            self.assertIn("generated_at", on_disk)
+
+    def test_update_ledger_absent_is_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(c.update_ledger(pathlib.Path(d), lambda led: led))
 
 
 if __name__ == "__main__":

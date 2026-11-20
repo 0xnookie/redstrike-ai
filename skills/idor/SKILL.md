@@ -17,11 +17,11 @@ Prove cross-owner object access/modification (or mass-assignment of a privileged
 `findings.json` (`_contract/finding.schema.json`). DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 
 ## Steps  (action · tool · output)
-1. Ingest object refs + identities from `authz_context.json` · `jq` · (into tests)
+1. Ingest object refs + identities from `authz_context.json` (secondary: `flow_context.json` `transitions[]`/`invariants[]` where `guard_kind`/`kind=="ownership"` + `states[].reachable_by` differences, as cross-identity object-access candidates) · `jq` · (into tests)
 2. As identity A, request identity B's object id (GET/PUT/DELETE) · multi-session interceptor · `access_tests.jsonl`
 3. Confirm cross-owner access (B's data returned / B's resource modified) · request-diff (A vs B) · `access_tests.jsonl`
 4. Test id enumeration (sequential) + mass-assignment (set `owner_id`/`role`/`is_admin`) · refs · `access_tests.jsonl`
-5. Capture PoC (A's session + B's id → B's data) · interceptor · `poc/<id>/`
+5. Capture PoC (A's session + B's id → B's data) · interceptor · `poc/<id>/` — when the cross-account WRITE / mass-assignment is browser-gated, first invoke the `browser-exploit` capability (`skills/browser-exploit/`, `_contract/browser-session.md`, approval-gated) to drive it autonomously (login→navigate→action); the capture swaps the object id across identities and it hands back the proven finding (under this class) + a replay-faithful capture — de-dupe against this candidate. Degrade to a human capture only if no browser driver is available
 6. Rate (CVSS) + write finding · synth · `findings.json`
 7. Emit report + curl · synth · `report.md`, `curl_commands.sh`
 8. /REVIEW · `review.md` · 9. /VERIFY · `verify.md`
@@ -32,6 +32,7 @@ Prove cross-owner object access/modification (or mass-assignment of a privileged
 
 ## Inputs
 - `authz_context.json` (objects, mass_assign), `auth.env` (≥2 identities), `scope.yaml`
+- (secondary) `flow-context/flow_context.json` — `transitions[]`/`invariants[]` where `guard_kind`/`kind=="ownership"` + `states[].reachable_by` diffs
 
 ## Outputs
 `access_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

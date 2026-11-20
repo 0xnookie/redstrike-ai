@@ -18,9 +18,9 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 
 ## Steps  (action · tool · output)
 1. Ingest auth flows + session mechanism · `jq auth_context.json` · (into tests)
-2. Test logic bypass: forced browsing past login; response tampering; 2FA-step skip; session fixation; reset weaknesses · interceptor + refs · `bypass_tests.jsonl`
+2. Test logic bypass: forced browsing past login; response tampering; 2FA-step skip; session fixation; reset weaknesses (secondary candidates: `flow_context.json` `transitions[] where guard_kind in {auth-required,role-required,sequence,state-precondition} && enforced_by=="client-only"` + `flows[].enforced_order==false`) · interceptor + refs · `bypass_tests.jsonl`
 3. Confirm authed/privileged state reached without valid auth (benign) · interceptor · `bypass_tests.jsonl`
-4. Capture PoC (the bypass → authed access) · interceptor · `poc/<id>/`
+4. Capture PoC (the bypass → authed access) · interceptor · `poc/<id>/` — when the bypass needs a real multi-step auth flow driven (2FA-skip / fixation / in-browser reset), first invoke the `browser-exploit` capability (`skills/browser-exploit/`, `_contract/browser-session.md`, approval-gated) to drive + confirm the post-auth state in-session (login→navigate→action); it hands back the proven finding (under this class) + a replay-faithful capture — de-dupe against this candidate. Degrade to a human capture only if no browser driver is available
 5. Rate (CVSS) + write finding · synth · `findings.json`
 6. Emit report + curl · synth · `report.md`, `curl_commands.sh`
 7. /REVIEW · `review.md` · 8. /VERIFY · `verify.md`
@@ -31,6 +31,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 
 ## Inputs
 - `auth_context.json` (flows, session), `auth.env` (test account), `scope.yaml`
+- (secondary) `flow-context/flow_context.json` — `transitions[]` with `enforced_by=="client-only"` (forced-browsing / step-skip) + `flows[].enforced_order`
 
 ## Outputs
 `bypass_tests.jsonl` · `findings.json` · `poc/` · `report.md` · `curl_commands.sh` · `logs/`

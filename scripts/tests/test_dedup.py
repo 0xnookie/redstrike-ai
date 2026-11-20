@@ -8,8 +8,11 @@ genuinely different root cause on the same endpoint is NOT merged.
 
 Stdlib only, runnable as `python test_dedup.py` (the CI convention).
 """
+import json
 import pathlib
 import sys
+import tempfile
+import threading
 import unittest
 
 HERE = pathlib.Path(__file__).resolve()
@@ -87,6 +90,56 @@ class ProposeAndApply(unittest.TestCase):
 class SelfTest(unittest.TestCase):
     def test_module_selftest(self):
         dedup.selftest()
+
+
+class ConcurrentFindingsWrite(unittest.TestCase):
+    """Wave-2: the engine-core wave-merge persists deduped findings while concurrent hunters may also
+    write. write_findings / update_findings are atomic + per-file-locked so neither clobbers the other."""
+
+    def test_update_findings_stamps_duplicates_merge_safe(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "findings.json"
+            a = F("RS-2026-001", "https://app.acme.com/o?id=1", sev="high")
+            b = F("RS-2026-002", "https://app.acme.com/o?id=2", sev="medium")
+            dedup.write_findings(p, [a, b])
+            out = dedup.update_findings(p, lambda fs: dedup.apply_merges(fs)[0])
+            self.assertIsNotNone(out)
+            by = {f["id"]: f for f in json.loads(p.read_text(encoding="utf-8"))}
+            self.assertEqual(by["RS-2026-002"]["status"], "duplicate")   # weaker -> duplicate
+            self.assertNotEqual(by["RS-2026-001"].get("status"), "duplicate")
+
+    def test_update_findings_absent_is_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(dedup.update_findings(pathlib.Path(d) / "nope.json", lambda fs: fs))
+
+    def test_concurrent_appends_do_not_clobber(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "findings.json"
+            dedup.write_findings(p, [])
+            n = 8
+            barrier = threading.Barrier(n)
+            errors = []
+
+            def worker(i):
+                try:
+                    barrier.wait(timeout=15)
+
+                    def add(fs):
+                        fs.append(F(f"RS-2026-{i:03d}", f"https://x.test/p{i}"))
+                        return fs
+
+                    dedup.update_findings(p, add)
+                except Exception as e:             # noqa: BLE001
+                    errors.append((i, repr(e)))
+
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=30)
+            self.assertEqual(errors, [], errors)
+            final = json.loads(p.read_text(encoding="utf-8"))           # valid JSON, nothing torn
+            self.assertEqual(len({f["id"] for f in final}), n, "a concurrent append was clobbered")
 
 
 if __name__ == "__main__":

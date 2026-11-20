@@ -129,6 +129,64 @@ class TestSeedNotebook(unittest.TestCase):
             self.assertEqual(args[2], "py")
 
 
+class TestModelRoutingArgv(unittest.TestCase):
+    """#3 model routing: --model / --shard-models are plumbed into the built argv; omitted by default."""
+
+    def _prep(self, repo):
+        fields = engagement.build_fields(client="Acme", authorized_by="s", domains=["*.a.com"])
+        engagement.scaffold(repo, fields, operator="t")
+        eng = repo / "engagements" / fields["engagement"]
+        return launch.prepare_runtime(eng, repo, "py", mode="autonomous", extra_allow=["Bash(nmap *)"])
+
+    def test_model_and_shards_before_allowedtools(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            prep = self._prep(repo)
+            allowed = ["Read", "WebFetch"]
+            argv = launch.build_autonomous_argv(
+                "claude", repo, prep, "go", allowed, max_turns=10, max_budget=1.0,
+                model="claude-opus-x", shard_models=["a", "b"],
+            )
+            self.assertEqual(argv[argv.index("--model") + 1], "claude-opus-x")
+            self.assertEqual(argv[argv.index("--shard-models") + 1], "a,b")
+            at = argv.index("--allowedTools")  # stays last, consuming the allowlist
+            self.assertLess(argv.index("--model"), at)
+            self.assertLess(argv.index("--shard-models"), at)
+            self.assertEqual(argv[at + 1:], allowed)
+
+    def test_defaults_omit_both_flags(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            prep = self._prep(repo)
+            base = launch.build_autonomous_argv("claude", repo, prep, "go", ["Read"],
+                                                max_turns=10, max_budget=1.0)
+            self.assertNotIn("--model", base)          # no flag => claude keeps the global default
+            self.assertNotIn("--shard-models", base)
+
+    def test_shard_models_string_is_normalized(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            prep = self._prep(repo)
+            argv = launch.build_autonomous_argv("claude", repo, prep, "go", ["Read"],
+                                                max_turns=10, max_budget=1.0, shard_models=" a , ,b ")
+            self.assertEqual(argv[argv.index("--shard-models") + 1], "a,b")  # trimmed + blanks dropped
+            # empty / blank spec omits the flag entirely
+            argv2 = launch.build_autonomous_argv("claude", repo, prep, "go", ["Read"],
+                                                 max_turns=10, max_budget=1.0, shard_models="  , ")
+            self.assertNotIn("--shard-models", argv2)
+
+    def test_interactive_build_argv_model(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            fields = engagement.build_fields(client="Acme", authorized_by="s", domains=["*.a.com"])
+            engagement.scaffold(repo, fields, operator="t")
+            eng = repo / "engagements" / fields["engagement"]
+            prep = launch.prepare_runtime(eng, repo, "py")
+            argv = launch.build_argv("claude", repo, prep, "do it", "default", model="claude-x")
+            self.assertEqual(argv[argv.index("--model") + 1], "claude-x")
+            self.assertNotIn("--model", launch.build_argv("claude", repo, prep, "do it", "default"))
+
+
 class TestGatePolicyAlwaysDefer(unittest.TestCase):
     def test_gate_policy_writes_always_defer_tokens(self):
         with tempfile.TemporaryDirectory() as d:

@@ -68,6 +68,26 @@ routed `pending` class represented, no `skipped` state, no ledger written).
   richness, severity ceiling, chaining potential) that justifies the rank and budget.
 - **Re-rankability** — a later pass re-scores the REMAINING queue from the findings that have landed.
 
+## Engine contract — the keys the hunt pool reads (match EXACTLY)
+The orchestrator's resume / `continue_prompt` loop and the concurrent **wave-batcher** consume
+`hunt_plan.json` and read exactly three per-class values, so EVERY queue entry MUST carry all three on
+every (re-)emit — no missing keys, no fallback guessing (full table + the access snippet live in
+`refs/engine-contract.md`):
+- **`rank`** (`queue[i].rank`) — int, `>= 1`, **lower = hunted sooner**; it orders both the pending-class
+  loop and the order waves are batched in.
+- **`depth_budget`** (`queue[i].depth_budget.tier`) — `floor` \| `standard` \| `deep`; how much breadth
+  ABOVE the escalation floor each wave spends.
+- **`diversity_pass`** (`queue[i].depth_budget.diversity_pass`) — bool; whether the wave-batcher schedules
+  a second, differently-seeded pass (a cheap recall boost; typically `true` for `deep`).
+
+These two budget keys are **nested inside the `depth_budget` object** (not flat entry keys) because that is
+the shape `skills/_contract/hunt_plan.schema.json` defines and `scripts/validate.py` enforces
+(`additionalProperties:false` closes both the entry and `depth_budget`). Give every entry's `depth_budget`
+**all of** `tier`, an EXPLICIT `diversity_pass` (`true`/`false`, never omitted), and `min_ladder_steps`, so
+the engine reads `rank` / `depth_budget.tier` / `depth_budget.diversity_pass` on every class without ever
+hitting a missing key. If `hunt_plan.json` is absent/stale the engine falls back to coverage-map order with
+every class at `floor` + `diversity_pass=false` — recall-safe, because the floor is still owed in full.
+
 ## Ranking inputs (how a class is scored — all read-only)
 Combine, per `pending` class (none of these may ever *remove* a class or lower its floor):
 1. **Recon prior** — did recon signal this class's surface as a real candidate? (high/unknown/low;
@@ -88,7 +108,7 @@ Combine, per `pending` class (none of these may ever *remove* a class or lower i
 3. Score each selected class from the ranking inputs above · reasoning · `logs/scoring.md`
 4. For each class, read its escalation-ladder floor (`scripts/escalation.py` ladder_for) and assign a depth budget AT OR ABOVE that floor (`floor`/`standard`/`deep`) · escalation.py (read-only) · (in memory)
 5. Rank into a queue (ascending `rank` = hunt order) with a per-class `rationale` · synth · `hunt_plan.json`
-6. Emit `hunt_plan.json` conforming to `skills/_contract/hunt_plan.schema.json` (`ledger_owner` stays `coverage.py`; no `skipped` state; no ledger touched) · write/JSON · `hunt_plan.json`
+6. Emit `hunt_plan.json` conforming to `skills/_contract/hunt_plan.schema.json` — every queue entry carries `rank` + a `depth_budget` with `tier` + an explicit `diversity_pass` + `min_ladder_steps` (the exact keys the engine reads — see "Engine contract" / `refs/engine-contract.md`); `ledger_owner` stays `coverage.py`; no `skipped` state; no ledger touched · write/JSON · `hunt_plan.json`
 7. Emit summary · synth · `summary.md`
 8. /REVIEW SKILL · `review.md`
 

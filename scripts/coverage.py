@@ -34,6 +34,7 @@ import datetime
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # atomic_write: one shared helper for ledger writes. scripts/ is on sys.path for a direct run and for
@@ -47,6 +48,58 @@ except ImportError:  # pragma: no cover - only hit under path-based loading with
     _amod = _ilu.module_from_spec(_aspec)
     _aspec.loader.exec_module(_amod)
     atomic_write = _amod.atomic_write
+
+
+# --- concurrent-writer safety -------------------------------------------------------------------- #
+# The hunt now fans out as CONCURRENT subagents that update this ledger simultaneously. `atomic_write`
+# already guarantees a reader never sees a torn file, but two writers that each read-then-write would
+# still clobber each other (last-write-wins drops the first writer's mark). A per-file advisory lock
+# serializes the read-modify-write so every concurrent mark/close/merge survives. coverage.py stays the
+# SOLE reconciler — this only makes coverage.py's OWN writes to its ledger mutually exclusive.
+class _FileLock:
+    """Best-effort cross-process advisory lock via an exclusive lock file (stdlib only; no fcntl/msvcrt,
+    so Windows + Linux/WSL behave identically). Spins up to ``timeout``; a lock older than ``stale`` is
+    treated as abandoned (the holder crashed) and broken. If it still can't acquire by the deadline it
+    proceeds anyway (degraded last-write-wins) rather than deadlock the hunt — ``atomic_write`` keeps the
+    file un-torn either way."""
+
+    def __init__(self, target, *, timeout: float = 30.0, poll: float = 0.05, stale: float = 120.0):
+        self._path = str(target) + ".lock"
+        self._timeout, self._poll, self._stale = timeout, poll, stale
+        self._held = False
+
+    def __enter__(self):
+        deadline = time.monotonic() + self._timeout
+        while True:
+            try:
+                fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(self._path) > self._stale:
+                        os.unlink(self._path)   # break an abandoned lock
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    return self                 # proceed un-locked rather than block the whole hunt
+                time.sleep(self._poll)
+                continue
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii", "replace"))
+            finally:
+                os.close(fd)
+            self._held = True
+            return self
+
+    def __exit__(self, *exc):
+        if self._held:
+            try:
+                os.unlink(self._path)
+            except OSError:
+                pass
+            self._held = False
+        return False
+
 
 ROOT = Path(__file__).resolve().parent.parent
 MAP_PATH = ROOT / "skills" / "_contract" / "routing-map.json"
@@ -330,35 +383,38 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
     if status not in _MARK_STATUSES:
         print(f"[!] invalid status {status!r}; choose one of {sorted(_MARK_STATUSES)}")
         return 2
-    try:
-        led = json.loads(ledger_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        print(f"[!] {LEDGER_NAME} invalid JSON: {e}")
-        return 2
-    cats = led.get("categories", [])
-    hit = next((c for c in cats if c.get("id") == cat_id), None)
-    if hit is None:
-        ids = ", ".join(sorted(str(c.get("id")) for c in cats))
-        print(f"[!] no category {cat_id!r} in ledger. known ids: {ids}")
-        return 2
-    if status in _NEED_REASON and not (note or (hit.get("reason") or "").strip()):
-        print(f"[!] status {status!r} requires a reason — pass --note \"...\"")
-        return 2
-    hit["status"] = status
-    if count is not None:
-        hit["findings_count"] = count
-    if note is not None:
-        hit["reason"] = note
-    if escalations:
-        have = list(hit.get("escalations", []) or [])
-        seen = set(have)
-        for t in escalations:
-            t = str(t).strip()
-            if t and t not in seen:
-                seen.add(t)
-                have.append(t)
-        hit["escalations"] = have
-    atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+    # Lock the read-modify-write so concurrent --mark calls (one per wave subagent) can't clobber each
+    # other: the load happens INSIDE the lock, after any prior writer has committed.
+    with _FileLock(ledger_path):
+        try:
+            led = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"[!] {LEDGER_NAME} invalid JSON: {e}")
+            return 2
+        cats = led.get("categories", [])
+        hit = next((c for c in cats if c.get("id") == cat_id), None)
+        if hit is None:
+            ids = ", ".join(sorted(str(c.get("id")) for c in cats))
+            print(f"[!] no category {cat_id!r} in ledger. known ids: {ids}")
+            return 2
+        if status in _NEED_REASON and not (note or (hit.get("reason") or "").strip()):
+            print(f"[!] status {status!r} requires a reason — pass --note \"...\"")
+            return 2
+        hit["status"] = status
+        if count is not None:
+            hit["findings_count"] = count
+        if note is not None:
+            hit["reason"] = note
+        if escalations:
+            have = list(hit.get("escalations", []) or [])
+            seen = set(have)
+            for t in escalations:
+                t = str(t).strip()
+                if t and t not in seen:
+                    seen.add(t)
+                    have.append(t)
+            hit["escalations"] = have
+        atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
     if as_json:
         print(json.dumps({"id": cat_id, "status": status,
                           "findings_count": hit.get("findings_count"),
@@ -428,22 +484,52 @@ def reconcile_counts(led, findings, *, source_category=None):
 
 def close_write(eng: Path, findings=None, *, source_category=None) -> list:
     """Reconcile coverage_ledger.json from the engagement's authoritative findings at CLOSE and persist it
-    (atomic). Best-effort: no ledger / unreadable ledger => no-op ([]). When `findings` is None, discovers
-    them the way the completion gate does (root / per-skill / consolidated). Returns changed category ids."""
+    (atomic + locked). Best-effort: no ledger / unreadable ledger => no-op ([]). When `findings` is None,
+    discovers them the way the completion gate does (root / per-skill / consolidated). Returns changed
+    category ids. The reconcile is run under the ledger lock (findings discovery is done first, outside
+    it, to keep the hold short) so a concurrent wave-subagent --mark can't clobber the reconciled counts."""
     ledger_path = eng / LEDGER_NAME
     if not ledger_path.is_file():
         return []
-    try:
-        led = json.loads(ledger_path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return []
     if findings is None:
         findings = _discover_findings(eng) or []
-    changed = reconcile_counts(led, findings, source_category=source_category)
-    if changed:
-        led["generated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+    with _FileLock(ledger_path):
+        try:
+            led = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return []
+        changed = reconcile_counts(led, findings, source_category=source_category)
+        if changed:
+            led["generated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
     return changed
+
+
+def update_ledger(eng: Path, mutate):
+    """Merge-safe read-modify-write of coverage_ledger.json — the concurrent WAVE-MERGE path.
+
+    Acquires the per-file lock, reads the CURRENT on-disk ledger (so a parallel writer's just-committed
+    mark is seen, never clobbered), applies ``mutate(led)`` (edit the dict in place or return a
+    replacement), refreshes ``generated_at``, then ``atomic_write``s. Returns the written ledger dict, or
+    None when no ledger exists / it is unreadable. Public + ADDITIVE: the existing writers
+    (``mark`` / ``close_write``) keep their signatures and are already lock-safe; the engine-core
+    wave-merge step uses THIS primitive to fold a whole wave's result in atomically without a race.
+    coverage.py remains the sole reconciler — this does not let another module own the ledger, it only
+    gives that owner a race-free write."""
+    ledger_path = Path(eng) / LEDGER_NAME
+    with _FileLock(ledger_path):
+        if not ledger_path.is_file():
+            return None
+        try:
+            led = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        out = mutate(led)
+        if out is None:
+            out = led
+        out["generated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        atomic_write(ledger_path, json.dumps(out, indent=2) + "\n")
+        return out
 
 
 def main() -> int:
@@ -487,7 +573,8 @@ def main() -> int:
         if args.engagement:
             out = Path(args.engagement)
             out.mkdir(parents=True, exist_ok=True)
-            atomic_write(out / LEDGER_NAME, json.dumps(led, indent=2) + "\n")
+            with _FileLock(out / LEDGER_NAME):  # serialize the (re-)plan write vs concurrent --mark/--close
+                atomic_write(out / LEDGER_NAME, json.dumps(led, indent=2) + "\n")
             if args.as_json:
                 print(json.dumps(led, indent=2))
             else:

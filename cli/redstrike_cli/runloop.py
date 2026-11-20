@@ -214,14 +214,98 @@ def made_progress(prev: Snapshot | None, cur: Snapshot,
     return False
 
 
+# --- hunt-plan consumption (deterministic ordering) --------------------------
+# The strategist emits <engagement>/hunt_plan.json (schema skills/_contract/hunt_plan.schema.json): a
+# RANKED queue over the routed classes plus a per-class depth_budget. It is a ranking artifact, never a
+# ledger — coverage.py stays the SOLE ledger owner. The continue-prompt CONSUMES it to order the resume
+# work by `rank` and to tell each class how much depth (standard/deep + a diversity pass) it is worth, so
+# the resume legs drive the same ranked, model-diverse wave order the orchestrator SKILL (§2b/§2.5) runs —
+# instead of walking the ledger in arbitrary order. Absent/malformed plan ⇒ fall back to ledger order
+# (ordering is an efficiency aid, never a gate: its absence can never block or shrink the hunt).
+
+def read_hunt_plan(eng_dir: Path) -> dict | None:
+    return _read_json(Path(eng_dir) / "hunt_plan.json")
+
+
+def _plan_rank_map(plan: dict | None) -> dict:
+    """{class_id -> (rank:int|None, depth_tier:str|None, diversity_pass:bool)} from hunt_plan.json's
+    queue. Tolerant of a missing/malformed plan or entry (skips it)."""
+    out: dict = {}
+    if not isinstance(plan, dict):
+        return out
+    for e in plan.get("queue") or []:
+        if not isinstance(e, dict):
+            continue
+        cid = e.get("class")
+        if not cid:
+            continue
+        try:
+            rank = int(e["rank"]) if e.get("rank") is not None else None
+        except (TypeError, ValueError):
+            rank = None
+        db = e.get("depth_budget") if isinstance(e.get("depth_budget"), dict) else {}
+        tier = db.get("tier")
+        div = bool(db.get("diversity_pass"))
+        out[str(cid)] = (rank, tier, div)
+    return out
+
+
+def _lookup_plan(cid: str, rank_map: dict):
+    """Resolve a coverage category id to its plan (rank, depth_tier, diversity_pass). Exact match first;
+    then a hyphen-family fallback (plan 'xss' covers 'xss-reflected'; 'ssrf' covers 'ssrf-cloud'), picking
+    the lowest-ranked family match deterministically. (None, None, False) when the plan doesn't rank it."""
+    if cid in rank_map:
+        return rank_map[cid]
+    best = None
+    for cls, val in rank_map.items():
+        if cid.startswith(cls + "-") or cls.startswith(cid + "-"):
+            if best is None or (val[0] is not None and (best[0] is None or val[0] < best[0])):
+                best = val
+    return best if best is not None else (None, None, False)
+
+
+def order_outstanding(outstanding: list, plan: dict | None) -> list:
+    """Order the outstanding coverage categories into the hunt sequence the WAVE loop consumes: ascending
+    hunt_plan `rank` (rank 1 first — the batching the orchestrator fans out wave by wave), with classes the
+    plan does not rank kept in their original ledger order AFTER the ranked ones (stable). Each returned
+    dict is the original category annotated with `_rank`, `_depth` (depth_budget.tier) and `_diversity`
+    (depth_budget.diversity_pass) so the prompt can state each class's rank + depth budget."""
+    rank_map = _plan_rank_map(plan)
+    inf = float("inf")
+    annotated = []
+    for i, c in enumerate(outstanding):
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get("id") or c.get("name") or "")
+        rank, tier, div = _lookup_plan(cid, rank_map)
+        item = dict(c)
+        item["_rank"], item["_depth"], item["_diversity"] = rank, tier, div
+        annotated.append((rank if rank is not None else inf, i, item))
+    annotated.sort(key=lambda t: (t[0], t[1]))
+    return [item for _, _, item in annotated]
+
+
+def _depth_annotation(c: dict) -> str:
+    """ ` [rank 3 · depth deep · diversity pass]` for a plan-ranked class, or '' when the plan is absent."""
+    parts = []
+    if c.get("_rank") is not None:
+        parts.append(f"rank {c['_rank']}")
+    if c.get("_depth"):
+        parts.append(f"depth {c['_depth']}")
+    if c.get("_diversity"):
+        parts.append("diversity pass")
+    return f" [{' · '.join(parts)}]" if parts else ""
+
+
 # --- continue-prompt (pure) --------------------------------------------------
 def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) -> str:
-    """The resume prompt for leg 2+: name exactly what's left from the coverage ledger and tell
-    the engine to continue the orchestrator pipeline on those, then re-converge / recall-audit /
-    chain / report — without repeating completed work. Falls back to a generic continue when the
-    ledger can't be read."""
+    """The resume prompt for leg 2+: name exactly what's left from the coverage ledger, ORDERED by the
+    hunt_plan ranking (§2.5), and tell the engine to continue the orchestrator pipeline on those as ranked
+    model-diverse waves, then re-converge / recall-audit / chain / report — without repeating completed
+    work. Falls back to a generic continue when the ledger can't be read, and to ledger order when no
+    hunt_plan exists."""
     ledger = read_ledger(eng_dir)
-    outstanding = outstanding_categories(ledger)
+    outstanding = order_outstanding(outstanding_categories(ledger), read_hunt_plan(eng_dir))
     head = (
         f"Continue Redstrike engagement '{engagement_id}' from where the previous invocation "
         f"stopped (it hit its per-invocation turn cap, not the end of the work). Authorization "
@@ -250,24 +334,29 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
             tag = "blocked as approval-gated — run its NON-DESTRUCTIVE detection now (detection is not gated)"
         else:
             tag = "attempted, 0 findings — escalate deeper"
-        bullets.append(f"- {cid} ({tag})")
+        bullets.append(f"- {cid}{_depth_annotation(c)} ({tag})")
     more = len(outstanding) - len(shown)
     if more > 0:
         bullets.append(f"- …and {more} more still outstanding in coverage_ledger.json")
     return (
         head
-        + " The following vulnerability categories are still OUTSTANDING:\n"
+        + " The following vulnerability categories are still OUTSTANDING, in HUNT-PLAN RANK ORDER "
+        "(rank 1 first; each class's depth budget is noted):\n"
         + "\n".join(bullets)
         + "\nInvoke the redstrike orchestrator skill and run the orchestrator pipeline on exactly "
-        "these: for each, its context feeder (if any) → executor → the independent verify "
-        "subagent, then mark coverage_ledger.json with scripts/coverage.py --mark. Vulnerability "
-        "DETECTION and benign PoCs are NON-destructive and are NOT gated — run them now; a category "
-        "previously left 'blocked' as approval-gated must have its non-destructive detection run. "
-        "Only a genuine exploitation / destructive / RCE command defers at the scope gate: when one "
-        "does, it is queued in runtime/approvals_pending.json for the operator — record it, skip "
-        "that one step, and CONTINUE the rest; never halt the whole run at a gate. When no "
-        "categories remain outstanding, re-converge, run the recall-audit, compose attack chains "
-        "over accepted findings, and write the report."
+        "these, in the listed rank order as CONCURRENT model-diverse WAVES (§2b): per wave, spawn the "
+        "executors as parallel subagents on a mix of models (higher-rank / deep classes on the stronger "
+        "model, the rest on the cheaper one; run the diversity pass for any class so noted), each running "
+        "its context feeder (if any) → executor → its independent verify subagent and writing its own "
+        "skill's findings.json. After each wave, reconcile the ledgers by CALLING the scripts (never "
+        "hand-editing): scripts/coverage.py --mark, scripts/surface.py --mark, scripts/dedup.py. "
+        "Vulnerability DETECTION and benign PoCs are NON-destructive and are NOT gated — run them now; a "
+        "category previously left 'blocked' as approval-gated must have its non-destructive detection run. "
+        "Only a genuine exploitation / destructive / RCE command defers at the scope gate: when one does, "
+        "it is queued in runtime/approvals_pending.json for the operator — record it, skip that one step, "
+        "and CONTINUE the rest; never halt the whole run at a gate. When no categories remain outstanding, "
+        "re-converge, run the recall-audit, compose attack chains over accepted findings, and write the "
+        "report."
     )
 
 
@@ -412,6 +501,48 @@ def close_artifacts(repo: Path, eng_dir: Path, *, emit=None) -> None:
         pass
 
 
+# --- deterministic plan pre-steps (#4: don't let the model route around building the ledgers) ----------
+# The hunt_plan ORDERING (continue_prompt) and the completeness gates can only work off ledgers that
+# actually exist, and "a step the workflow can route around isn't real" — the same lesson that moved the
+# gates out of the prompt. So before each RESUME leg the loop runs the plan scripts ITSELF rather than
+# trusting the model to: surface.py --plan is an IDEMPOTENT merge (it preserves tested/skipped progress and
+# only folds in newly-discovered surface — safe + beneficial on every resume), while coverage.py --plan is
+# run ONLY when the coverage ledger is still MISSING, because it REBUILDS the ledger (non-idempotent) and
+# re-running it over an existing ledger would wipe the attempted/findings_count progress the resume loop
+# depends on. Both are best-effort: a missing script / repo / timeout degrades to a no-op and never breaks
+# the leg. coverage.py remains the SOLE ledger owner — this CALLS its writer, never edits the JSON.
+
+def _run_script(repo: Path, rel: str, args: list, *, timeout: int = 120) -> bool:
+    """Run scripts/<rel> under the current interpreter, best-effort. Returns True iff it was launched (the
+    script exists and no exception escaped); the script's own rc is intentionally ignored."""
+    script = Path(repo) / "scripts" / rel
+    if not script.is_file():
+        return False
+    try:
+        subprocess.run([sys.executable, str(script), *args], cwd=str(repo), check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+def run_plan_steps(repo: Path, eng_dir: Path, *, emit=None) -> None:
+    """Deterministic plan pre-steps the resume loop runs for itself (see the section note above). Entirely
+    best-effort — never raises, never alters the loop outcome."""
+    emit = emit or (lambda _l: None)
+    eng, repo = Path(eng_dir), Path(repo)
+    # 1. surface ledger — idempotent merge: safe on every resume, folds in surface discovered since.
+    _run_script(repo, "surface.py", ["--plan", "--engagement", str(eng)])
+    # 2. coverage ledger — CREATE it only when absent; a rebuild over an existing ledger would clobber the
+    #    attempted/findings_count progress the loop reads. (On resume it normally already exists.)
+    if not (eng / "coverage_ledger.json").is_file():
+        args = ["--plan", "--engagement", str(eng)]
+        sig = eng / "signals.json"
+        if sig.is_file():
+            args += ["--signals", str(sig)]
+        _run_script(repo, "coverage.py", args)
+
+
 def annotate_record(record: dict, loop: "LoopResult") -> dict:
     """Overlay the loop's whole-run stop reason onto a diagnostics record so the OUTCOME is honest:
     a budget-truncated / max-invocation / stuck / blocked run is degraded (coverage partial), not
@@ -493,12 +624,16 @@ def _plural(n: int, word: str) -> str:
 
 
 # --- single-leg execution + crash recovery -----------------------------------
-# WAVE-2 SEAM. A later wave promotes `drive` from a single-session resumer into a worker-pool
-# scheduler of N parallel legs. `_execute_leg` is the ATOMIC unit of engine work — the per-shard call
-# a pool fans out; `_run_leg` wraps it with the rc-branching / bounded-retry / resume-fallback a pool
-# can reuse per shard. Keep these two factored OUT of `drive` so the pool can call the single-leg path
-# directly; do not inline them back. `drive` composes `_run_leg` across resumed legs (the single
-# session) — the pool composes it across shards.
+# WAVE-2 SEAM — the DEFERRED 2b (multi-process worker pool). This wave shipped 2a: the parallel
+# multi-model hunter swarm now runs IN-PROCESS as concurrent `Agent`/Task subagents fanned out per rank
+# wave by the orchestrator SKILL (§2b), with the resume legs ordered by hunt_plan rank (continue_prompt).
+# 2b — promoting `drive` from a single-session resumer into an N-PROCESS scheduler that runs several
+# `claude -p` legs at once, each a shard with its own model (consuming a `--shard-models` argv) — is the
+# NEXT step and is NOT built here. The seam is already in place for it: `_execute_leg` is the ATOMIC unit
+# of engine work (the per-shard call a pool fans out) and `_run_leg` wraps it with the rc-branching /
+# bounded-retry / resume-fallback a pool can reuse per shard. Keep these two factored OUT of `drive` so a
+# future pool can call the single-leg path directly per shard; do not inline them back. `drive` composes
+# `_run_leg` across resumed legs of the single session — a 2b pool would compose it across shards.
 
 @dataclass
 class _LegOutcome:
@@ -666,7 +801,17 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
         remaining = max_budget_usd - cumulative_cost
         leg_budget = max(remaining, BUDGET_FLOOR)
         resume = first_resume if invocations == 0 else True
-        prompt = first_prompt if invocations == 0 else continue_prompt(engagement_id, eng_dir)
+        if invocations == 0:
+            prompt = first_prompt
+        else:
+            # deterministic plan pre-steps (#4): ensure the ledgers the continue-prompt (hunt_plan
+            # ordering) + the completeness gates read are present/current BEFORE we build the resume
+            # prompt — don't rely on the model to have run them. Best-effort; never fails the leg.
+            try:
+                run_plan_steps(repo, eng_dir, emit=emit)
+            except Exception:
+                pass
+            prompt = continue_prompt(engagement_id, eng_dir)
         budgets.append(leg_budget)
         outcome = _run_leg(
             engine, prep, repo, eng_dir, prompt=prompt, resume=resume, extra_allow=extra_allow,

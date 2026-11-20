@@ -269,5 +269,55 @@ class TestCoverageWiring(unittest.TestCase):
             self.assertEqual(led.stat().st_mtime_ns, mtime)
 
 
+class TestModelRoutingCLI(unittest.TestCase):
+    """#3: `--model` / `--shard-models` reach the built argv through the CLI (dry-run), both modes."""
+
+    def _init(self, repo: pathlib.Path) -> str:
+        (repo / "engagements").mkdir()
+        main(["--repo", str(repo), "--no-color", "--no-banner",
+              "init", "Acme", "--authorized-by", "x", "--domain", "*.acme.com",
+              "--i-confirm-authorization"])
+        return engagement.engagement_id("Acme")
+
+    def test_autonomous_model_and_shards_reach_argv(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eid = self._init(repo)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(["--repo", str(repo), "--no-color", "--no-banner",
+                           "run", eid, "--autonomous", "--dry-run",
+                           "--model", "claude-test-opus", "--shard-models", "claude-a,claude-b"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertIn("--model claude-test-opus", out)
+            self.assertIn("--shard-models claude-a,claude-b", out)
+
+    def test_autonomous_default_omits_model_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eid = self._init(repo)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(["--repo", str(repo), "--no-color", "--no-banner",
+                           "run", eid, "--autonomous", "--dry-run"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertNotIn("--model", out)        # no flag in the argv -> engine keeps the global default
+            self.assertNotIn("--shard-models", out)
+
+    def test_interactive_model_reaches_argv(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eid = self._init(repo)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(["--repo", str(repo), "--no-color", "--no-banner",
+                           "run", eid, "--dry-run", "--model", "claude-test-opus"])
+            out = buf.getvalue()
+            self.assertEqual(rc, 0, out)
+            self.assertIn("--model claude-test-opus", out)
+
+
 if __name__ == "__main__":
     unittest.main()
