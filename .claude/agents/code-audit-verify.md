@@ -16,10 +16,31 @@ paths (`C:/...`) for engagement files.
 
 **Procedure**
 1. Confirm the mechanical gate passed: `python skills/_contract/verify_completion.py --skill skills/code-audit --out OUT` (expect exit 0). If it failed, stop.
-2. Load your rubric: `skills/_contract/verify-base.md` + `skills/code-audit/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md`.
-3. Read `OUT/findings.json` and, for each finding, the cited `poc/<id>/` evidence (the annotated trace + the PoC
+2. Load your rubric: `skills/_contract/verify-base.md` + `skills/code-audit/verify.md` + `skills/_contract/finding.schema.json` + `skills/_contract/counterevidence.md` + `skills/_contract/severity-calibration.md` + `skills/_contract/surface-ledger.md`.
+3. **Surface-completeness gate (the `coverage` rubric — do this before judging findings).** An audit must not
+   look clean while surface went untested. Resolve the engagement dir `ENG` (the parent of `OUT`) and run
+   `python scripts/surface.py --validate --engagement ENG --routed-to code-audit --strict` (expect exit 0).
+   - A MISSING/empty `ENG/surface_ledger.json`, or any `discovered` (untested, unskipped) `entry-point` /
+     `source-lead` / `high-risk-file` / `state-op` / `authz-route`, is a **RECALL GAP**: set
+     `rubric.coverage: fail` and bounce the run (`needs-evidence`) with the gap(s) NAMED — the audit skipped
+     surface with no reason. This holds even when every reported finding is individually sound, and makes a
+     clean/empty `findings.json` a FAIL unless the ledger is closed.
+   - **The business-logic-invariant pass (§3a) and the authorization-matrix pass (§3b) must have RUN.** A ledger
+     that enumerates sinks/entry-points but carries ZERO `state-op` rows against an app with state-changing
+     operations, or ZERO `authz-route` rows against an app with privileged/sensitive routes — with no stated
+     reason — is a RECALL GAP (`rubric.coverage: fail`): the two passes that catch an unauthenticated TOCTOU race
+     and a missing-ACL BFLA (the leads grep/taint are blind to) were skipped. A reasoned "enumerated, none
+     breakable/all guarded — cite why" closes them; a silent absence does not.
+   - The ONLY clean exception is EXPLICIT partial coverage: the open gaps are reported in `report.md` with a
+     coverage % and what's pending. Then `rubric.coverage: pass` with the partial figure noted (partial ≠
+     complete; never let partial coverage pass as complete).
+   - Spot-check that `source_context.json` candidate/structural/chain ids and `app_model.json` entry points
+     appear in the ledger as `tested`/`skipped` — a lead dropped from the ledger entirely is the silent skip.
+   - This raises RECALL only; it does NOT lower the evidence bar for any `confirmed` element (completeness ≠
+     hallucination).
+4. Read `OUT/findings.json` and, for each finding, the cited `poc/<id>/` evidence (the annotated trace + the PoC
    sketch / dynamic output) AND re-read the cited `file:line` path in the actual source yourself.
-4. For EACH finding, apply the 7 base checks + the gauntlet. Decisive:
+5. For EACH finding, apply the 7 base checks + the gauntlet. Decisive:
    - **A traced path, not a grep assertion** — the finding cites the real source→sink (or missing-authz /
      broken-invariant) path across the call chain at `file:line`. A restated `source_context.json` lead or a
      pattern match with NO traced path ⇒ `rejected` (`false-positive` if a path control disproves it, else
@@ -33,13 +54,23 @@ paths (`C:/...`) for engagement files.
      over-claim; a finding resting entirely on an unproven runtime assumption ⇒ `needs-evidence`.
    - **Chains from confirmed legs** — every `chains.jsonl` leg finding-id resolves to a confirmed `findings.json`
      entry; a padded/unconfirmed leg invalidates that chain.
+   - **Invariant + authz-matrix passes ran** — `state-op` and `authz-route` elements were ENUMERATED and closed
+     (§3a/§3b), not just sinks chased; their absence against an app that plainly has state-changing ops and
+     privileged routes is a `rubric.coverage: fail` (see step 3), independent of per-finding soundness.
    - **Benign + scope + approval** — any dynamic PoC/fuzz-harness run was benign, authorized/sandboxed, approved.
-5. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}`
-   block into each finding (reviewer `code-audit-verify`) and set `status`.
-6. Return a verdict table: id | verdict | decisive check | one-line reason. Only `accepted` and `blocked`
-   findings proceed to reporting (blocked = confirmed-real but demonstration env-prevented → report with a
-   caveat; do NOT bounce to needs-evidence).
+6. Write `reviews/<id>.verdict.json` per finding (the canonical verdict record) + patch the inline `review{}`
+   block into each finding (reviewer `code-audit-verify`), carrying the engagement-level `rubric.coverage`
+   verdict from step 3, and set `status`.
+7. Return a verdict table: id | verdict | decisive check | one-line reason, PLUS a one-line surface-coverage
+   line (ledger pct closed for `code-audit` + any RECALL GAPs). Only `accepted` and `blocked` findings proceed
+   to reporting (blocked = confirmed-real but demonstration env-prevented → report with a caveat; do NOT bounce
+   to needs-evidence). If `rubric.coverage: fail`, the ENGAGEMENT is not done even when individual findings are
+   accepted — the RECALL GAP must be closed or reported as explicit partial coverage first.
 
 **Rules:** evidence only; be adversarial; reject grep-asserted findings (no traced path = reject), reject
 over-claimed `confirmed` on static-only paths, reject chains with unconfirmed legs, reject non-benign dynamic
-actions; do not edit the executor's non-findings artifacts; stay within scope.
+actions; FAIL `rubric.coverage` (and bounce the run) when the surface ledger was never enumerated or left
+`code-audit` surface untested with no reason — a clean/empty report over untested surface is a recall gap, not a
+pass (the exception is honestly-reported partial coverage); but never lower the evidence bar to inflate recall —
+completeness ≠ hallucination. Surface validation is READ-ONLY; do not edit the executor's non-findings artifacts
+(incl. the surface ledger); stay within scope.

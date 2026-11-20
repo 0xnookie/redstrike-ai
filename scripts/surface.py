@@ -11,6 +11,16 @@ invisible to every category-level gate.
 This ledger makes "tested vs merely discovered" a first-class, visible, GATED state per surface element
 (endpoint / param / identity / form / api-operation / sink / header / upload / auth-flow). A surface
 discovered but never tested (and not skipped with a reason) is a recall gap:
+
+The SAME mechanism serves the white-box / source-code audit: when source access is granted, the
+`code-audit` executor can finish having only looked at the leads `source-audit` happened to route, silently
+missing entry points / sinks / files no lead covered. So the ledger also models a SOURCE surface —
+`entry-point` (routes/handlers/CLI/jobs/queue-consumers/webhooks from app_model.json), `source-lead`
+(each source_context.json candidate / structural fact / chain candidate), and `high-risk-file` (a file
+hosting any of that surface) — all routed to the `code-audit` consumer. `load_source_surfaces(eng)` reads
+those two artifacts; `validate(..., routed_to="code-audit")` scopes the gate to one consumer's slice so a
+white-box executor can prove IT closed the whole source surface without being blocked by a sibling's
+still-pending black-box recon surface in the same shared ledger.
   - the recall-audit altitude reports it as an `untested-surface` miss (concrete, not inferred);
   - once a report exists, verify_completion.py HARD-FAILS on it (like a pending category).
 
@@ -61,6 +71,16 @@ KIND_ROUTES = {
     "header":        ["host-header", "security-headers"],
     "upload":        ["file", "upload-rce"],
     "auth-flow":     ["auth", "jwt", "oauth"],
+    # white-box / source-code audit surface — a single executor (code-audit) is the consumer that PROVES
+    # each of these by reading the real code path, so they route to it alone (not the black-box classes).
+    "entry-point":   ["code-audit"],   # route/handler/CLI/job/queue-consumer/webhook from app_model.json
+    "source-lead":   ["code-audit"],   # a source_context.json candidate / structural fact / chain candidate
+    "high-risk-file": ["code-audit"],  # a file hosting attack surface (sink / entry point / authz-sensitive)
+    # two FIRST-CLASS enumerated white-box surfaces grep/taint cannot see (no pattern asserts "no lock" or
+    # "no authz annotation") — enumerated from the app model, each PROVEN by the code-audit executor:
+    "state-op":      ["code-audit"],   # a state-changing op + the invariant it must hold (single-use / limit /
+                                       #   quota / stock / price / ownership / idempotency) — TOCTOU/double-spend pass
+    "authz-route":   ["code-audit"],   # a route/handler x its required privilege (one authorization-matrix cell)
 }
 
 # The CLOSED set of surface kinds — identical to surface_ledger.schema.json $defs/surface/kind/enum.
@@ -147,12 +167,28 @@ def merge_plan(existing: dict, items) -> dict:
     return existing
 
 
-def validate(led: dict, strict: bool = False):
-    """Return (ok, lines, msgs). ok=False => a surface gap (discovered-but-untested, or skipped w/o reason)."""
+def _routed_subset(surfaces, routed_to):
+    """The surfaces routed to a given consumer (e.g. 'code-audit'), or all when routed_to is None.
+    Lets a single executor gate its OWN slice of a shared ledger without being blocked by a sibling's
+    still-pending surface. Pure (no I/O)."""
+    if routed_to is None:
+        return surfaces
+    return [s for s in surfaces if routed_to in (s.get("routed_to") or [])]
+
+
+def validate(led: dict, strict: bool = False, routed_to: str | None = None):
+    """Return (ok, lines, msgs). ok=False => a surface gap (discovered-but-untested, or skipped w/o reason).
+
+    `routed_to` scopes the check to one consumer category (e.g. 'code-audit' for the white-box audit):
+    only elements that route to it are gated, so a white-box executor can prove it closed the whole
+    SOURCE surface (entry-points / source-leads / high-risk-files) independently of a sibling's untested
+    black-box recon surface living in the same shared ledger."""
     errors, lines = [], []
     surfaces = led.get("surfaces", [])
     if not isinstance(surfaces, list):
         return False, [], ["surfaces is not a list"]
+    surfaces = _routed_subset(surfaces, routed_to)
+    scope = f" routed to {routed_to}" if routed_to else ""
     from collections import Counter
     tally = Counter(s.get("status") for s in surfaces)
     for s in surfaces:
@@ -162,18 +198,20 @@ def validate(led: dict, strict: bool = False):
                           f"(routes to {', '.join(s.get('routed_to', []))}) — untested surface")
         if st in _NEED_REASON and not (s.get("reason") or "").strip():
             errors.append(f"surface {s.get('kind')}:{s.get('value')!r} is '{st}' without a reason")
-    lines.append("surfaces: " + ", ".join(f"{k}={tally[k]}" for k in sorted(tally)) if tally
-                 else "surfaces: (none enumerated)")
-    # empty-but-present ledger isn't automatically a pass under --strict (recon enumerated nothing?)
+    lines.append((f"surfaces{scope}: " + ", ".join(f"{k}={tally[k]}" for k in sorted(tally))) if tally
+                 else f"surfaces{scope}: (none enumerated)")
+    # empty-but-present ledger isn't automatically a pass under --strict (feeders enumerated nothing?)
     if strict and not surfaces:
-        errors.append("surface ledger is empty — recon enumerated no surface (did the feeders run?)")
+        errors.append(f"surface ledger has no elements{scope} — the inventory enumerated nothing "
+                      "(did the feeders / the white-box surface-inventory step run?)")
     return (not errors), lines, errors
 
 
-def surface_gaps(led: dict) -> list:
-    """Ranked recall gaps for the recall-audit altitude: each discovered-but-untested routed surface."""
+def surface_gaps(led: dict, routed_to: str | None = None) -> list:
+    """Ranked recall gaps for the recall-audit altitude: each discovered-but-untested routed surface.
+    `routed_to` scopes it to one consumer (e.g. 'code-audit')."""
     gaps = []
-    for s in led.get("surfaces", []):
+    for s in _routed_subset(led.get("surfaces", []), routed_to):
         if s.get("status") == _OPEN_STATUS and s.get("routed_to"):
             gaps.append({"category": (s.get("routed_to") or [None])[0], "type": "untested-surface",
                          "severity": "high",
@@ -181,6 +219,23 @@ def surface_gaps(led: dict) -> list:
                                    f"{s.get('discovered_by','recon')} but fed to no executor",
                          "suggested_action": "route it to " + ", ".join(s.get("routed_to", [])) + " and test it"})
     return gaps
+
+
+def coverage_stats(led: dict, routed_to: str | None = None) -> dict:
+    """Honest coverage figures over the ledger (optionally one consumer's slice). `closed` = an element
+    that was tested / skipped-with-reason / n-a; `open_gaps` = discovered-but-still-routed (the recall
+    gaps). `pct` is closed/tracked as a whole percent — the honest coverage figure a white-box audit
+    reports, and what makes PARTIAL coverage explicit (pct < 100 with open_gaps named) rather than a
+    partial pass dressed up as complete. Pure (no I/O)."""
+    from collections import Counter
+    surfaces = _routed_subset(led.get("surfaces", []), routed_to)
+    tally = Counter(s.get("status") for s in surfaces)
+    total = len(surfaces)
+    closed = tally.get("tested", 0) + tally.get("skipped", 0) + tally.get("n/a", 0)
+    open_gaps = sum(1 for s in surfaces if s.get("status") == _OPEN_STATUS and s.get("routed_to"))
+    return {"routed_to": routed_to, "total": total, "by_status": dict(tally),
+            "closed": closed, "open_gaps": open_gaps,
+            "pct": (round(100 * closed / total) if total else 100)}
 
 
 # ------------------------------- best-effort recon readers ------------------------------- #
@@ -385,6 +440,134 @@ def load_recon_surfaces(eng: Path) -> list:
     return items
 
 
+def _loc(file, line) -> str:
+    """A stable 'file:line' (or bare 'file') anchor for a source element. Deterministic so --plan ids
+    are stable across re-runs (merge_plan stays idempotent)."""
+    f = str(file or "").strip()
+    if not f:
+        return ""
+    return f"{f}:{line}" if line not in (None, "") else f
+
+
+def load_source_surfaces(eng: Path) -> list:
+    """Enumerate the WHITE-BOX / source surface for a code-audit engagement (best-effort; missing = skipped).
+
+    This is the source-access counterpart of load_recon_surfaces: it reads the two white-box artifacts
+      * <eng>/code-audit/app_model.json   — the app model (entry points + privileged ops + state_ops +
+        authz_routes)
+      * <eng>/source-audit/source_context.json — the routed candidate map (sinks/leads + structural facts
+        + chain candidates)
+    and enumerates EVERY entry point, EVERY source-audit lead, EVERY high-risk file (a file that hosts any of
+    that surface), EVERY state-changing operation + the invariant it must hold (`state-op`), and EVERY route x
+    required-privilege cell (`authz-route`) — the last two being FIRST-CLASS enumerated surfaces grep cannot
+    assert ("no lock" / "no authz annotation") — so none can be silently skipped. Values carry the element's
+    stable id / location so
+    the SAME element is one row across re-plans. All route to the `code-audit` consumer. The high-risk-file
+    set is derived FROM the leads/entry points (not from the whole tree), so a huge repo (29k files) yields
+    a bounded, risk-prioritized file inventory — never one row per repo file."""
+    items = []
+    hr_files = set()  # distinct files that host attack surface -> high-risk-file elements
+
+    def add(kind, value, by):
+        v = str(value or "").strip()
+        if v:
+            items.append({"kind": kind, "value": v, "discovered_by": by})
+
+    def note_file(f):
+        f = str(f or "").strip()
+        if f:
+            hr_files.add(f)
+
+    # --- app_model.json: entry points (routes/handlers/CLI/jobs/queue-consumers/webhooks) + privileged ops ---
+    am = _read_json(eng / "code-audit" / "app_model.json") or {}
+    for ep in am.get("entry_points", []) or []:
+        if not isinstance(ep, dict):
+            add("entry-point", ep, "code-audit:app-model")
+            continue
+        label = (ep.get("symbol") or f"{ep.get('method','')} {ep.get('route','')}".strip()
+                 or ep.get("route") or ep.get("kind") or "entry")
+        loc = _loc(ep.get("file"), ep.get("line"))
+        add("entry-point", f"{label} @ {loc}" if loc else str(label), "code-audit:app-model")
+        note_file(ep.get("file"))
+    for po in am.get("privileged_ops", []) or []:
+        if not isinstance(po, dict):
+            continue
+        loc = _loc(po.get("file"), po.get("line"))
+        op = po.get("op") or "privileged-op"
+        add("source-lead", f"priv-op {op} @ {loc}" if loc else f"priv-op {op}", "code-audit:app-model")
+        note_file(po.get("file"))
+    # --- state-changing operations + the invariant each must hold (business-logic / concurrency pass) ---
+    # A FIRST-CLASS enumerated surface: grep cannot assert "this check-then-act has no lock". The executor
+    # enumerates each state-changing op and its invariant (single-use / redemption-or-usage limit / quota /
+    # stock / price-integrity / ownership / idempotency / monotonic counter) into app_model.state_ops, so EACH
+    # is a ledger row to prove against TOCTOU / double-spend / a client-trusted value not re-derived server-side.
+    for so in am.get("state_ops", []) or []:
+        if not isinstance(so, dict):
+            add("state-op", so, "code-audit:app-model")
+            continue
+        loc = _loc(so.get("file"), so.get("line"))
+        op = so.get("op") or so.get("operation") or "state-op"
+        inv = so.get("invariant") or so.get("invariants") or "?"
+        add("state-op", f"{op} [inv: {inv}] @ {loc}" if loc else f"{op} [inv: {inv}]", "code-audit:app-model")
+        note_file(so.get("file"))
+    # --- authorization matrix: every route/handler x its required privilege (one cell each) ---
+    # A FIRST-CLASS enumerated surface: grep cannot assert "this route has NO authz annotation". The executor
+    # enumerates the route x required-privilege matrix (incl. framework/default-based ACL) into
+    # app_model.authz_routes, so EACH state-changing / sensitive cell is a ledger row to prove carries an
+    # effective guard — including a route that bypasses a central authz backstop (service / queue / raw SQL).
+    for ar in am.get("authz_routes", []) or []:
+        if not isinstance(ar, dict):
+            add("authz-route", ar, "code-audit:app-model")
+            continue
+        loc = _loc(ar.get("file"), ar.get("line"))
+        route = ar.get("route") or ar.get("path") or ar.get("handler") or "route"
+        method = (ar.get("method") or "").strip()
+        label = (f"{method} {route}").strip()
+        priv = (ar.get("required_privilege") or ar.get("privilege") or ar.get("required_role")
+                or ar.get("role") or "?")
+        add("authz-route", f"{label} [priv: {priv}] @ {loc}" if loc else f"{label} [priv: {priv}]",
+            "code-audit:app-model")
+        note_file(ar.get("file"))
+    # files code-audit itself flags high-risk during modeling (crypto / deserializer / auth middleware)
+    # that no source-audit lead points at — declared in app_model so a re-plan folds them in.
+    for hrf in am.get("high_risk_files", []) or []:
+        note_file(hrf.get("file") or hrf.get("path") if isinstance(hrf, dict) else hrf)
+
+    # --- source_context.json: candidates (sa-*) + structural facts (sf-*) + chain candidates (scc-*) ---
+    sc = _read_json(eng / "source-audit" / "source_context.json") or {}
+    for c in sc.get("candidates", []) or []:
+        if not isinstance(c, dict):
+            continue
+        loc = _loc(c.get("file"), c.get("line"))
+        cat = c.get("category") or c.get("route") or "sink"
+        cid = c.get("id") or "sa"
+        add("source-lead", f"{cid} {cat} @ {loc}" if loc else f"{cid} {cat}", "source-audit:candidate")
+        note_file(c.get("file"))
+    # security-relevant structural facts are leads too (an authz absence / route is closed, not skipped).
+    _SEC_STRUCT = {"route", "state-change-route", "auth-guard", "unauth-route", "id-from-param",
+                   "missing-ownership-check", "mass-assignment", "writable-path", "web-exec-path"}
+    for sfact in sc.get("structural", []) or []:
+        if not isinstance(sfact, dict):
+            continue
+        k = sfact.get("kind")
+        loc = _loc(sfact.get("file"), sfact.get("line"))
+        sid = sfact.get("id") or "sf"
+        add("source-lead", f"{sid} {k} @ {loc}" if loc else f"{sid} {k}", "source-audit:structural")
+        if k in _SEC_STRUCT:
+            note_file(sfact.get("file"))
+    for cc in sc.get("chain_candidates", []) or []:
+        if not isinstance(cc, dict):
+            continue
+        ccid = cc.get("id") or "scc"
+        title = cc.get("title") or cc.get("pattern") or "chain"
+        add("source-lead", f"{ccid} {title}", "source-audit:chain")
+
+    for f in sorted(hr_files):
+        add("high-risk-file", f, "code-audit:model")
+
+    return items
+
+
 def mark(eng: Path, sid: str, status: str, by: str, reason: str):
     p = eng / LEDGER_NAME
     led = _read_json(p)
@@ -506,6 +689,49 @@ def selftest() -> None:
     again = merge_plan(merged, [{"kind": "param", "value": "q"}])
     assert again["_last_merge_added"] == 0
 
+    # --- white-box / source surface (code-audit) ---
+    # the three source kinds route to the code-audit consumer (and are in the schema enum via the drift guard)
+    assert route_surface("entry-point") == ["code-audit"]
+    assert route_surface("source-lead") == ["code-audit"]
+    assert route_surface("high-risk-file") == ["code-audit"]
+    assert {"entry-point", "source-lead", "high-risk-file"}.issubset(VALID_KINDS)
+    # the two first-class enumerated white-box surfaces grep can't see (state-op / authz-route) route to
+    # the same code-audit consumer and are in the kind enum (drift-guarded against the schema above).
+    assert route_surface("state-op") == ["code-audit"]
+    assert route_surface("authz-route") == ["code-audit"]
+    assert {"state-op", "authz-route"}.issubset(VALID_KINDS)
+    _invp = plan_from_items("demo", [{"kind": "state-op", "value": "redeem [inv: single-use] @ c.py:9"},
+                                     {"kind": "authz-route", "value": "POST /admin/import [priv: admin] @ a.py:4"}])
+    assert all(s["routed_to"] == ["code-audit"] for s in _invp["surfaces"]) and len(_invp["surfaces"]) == 2
+    assert not validate(_invp, routed_to="code-audit")[0]  # fresh -> an untested code-audit gap until closed
+
+    # a mixed ledger: an untested black-box param AND an untested source-lead. Scoping validate to
+    # code-audit gates ONLY its slice (the param gap is a sibling's problem, not code-audit's).
+    mixed = plan_from_items("demo", [{"kind": "param", "value": "q"},
+                                     {"kind": "entry-point", "value": "handler @ app.py:10"},
+                                     {"kind": "source-lead", "value": "sa-001 sqli @ db.py:20"}])
+    ca_only = _routed_subset(mixed["surfaces"], "code-audit")
+    assert {s["kind"] for s in ca_only} == {"entry-point", "source-lead"}, ca_only
+    # whole-ledger validate fails (param untested); code-audit-scoped validate fails on ITS own gaps only
+    assert not validate(mixed)[0]
+    ok_ca, _l, msgs_ca = validate(mixed, routed_to="code-audit")
+    assert not ok_ca and all("param:" not in m for m in msgs_ca), msgs_ca
+    # close the code-audit slice -> its scoped validate passes even while the param stays discovered
+    for s in mixed["surfaces"]:
+        if "code-audit" in (s.get("routed_to") or []):
+            s["status"] = "tested"
+    assert validate(mixed, routed_to="code-audit")[0]
+    assert not validate(mixed)[0]  # the untested param still fails the whole-ledger gate
+
+    # coverage_stats: honest figures + partial-coverage visibility (pct<100 while a gap is open)
+    cov = coverage_stats(mixed, routed_to="code-audit")
+    assert cov["total"] == 2 and cov["closed"] == 2 and cov["open_gaps"] == 0 and cov["pct"] == 100, cov
+    part = plan_from_items("demo", [{"kind": "source-lead", "value": "sa-001 x @ a.py:1"},
+                                    {"kind": "source-lead", "value": "sa-002 y @ b.py:2"}])
+    part["surfaces"][0]["status"] = "tested"
+    cp = coverage_stats(part, routed_to="code-audit")
+    assert cp["pct"] == 50 and cp["open_gaps"] == 1, cp
+
     print("surface selftest: OK")
 
 
@@ -519,6 +745,8 @@ def main() -> int:
     ap.add_argument("--reason", default="")
     ap.add_argument("--engagement")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--routed-to", dest="routed_to", default=None,
+                    help="--validate: gate only elements routed to this consumer (e.g. code-audit)")
     ap.add_argument("--fresh", action="store_true",
                     help="--plan: rebuild from scratch instead of the default idempotent merge")
     ap.add_argument("--selftest", action="store_true")
@@ -533,7 +761,10 @@ def main() -> int:
         if not args.engagement:
             ap.error("--plan needs --engagement")
         eng = Path(args.engagement)
-        items = load_recon_surfaces(eng)
+        # recon (black-box) surface + white-box source surface (entry points / source-audit leads /
+        # high-risk files). Both best-effort: a pure black-box engagement has no source artifacts and a
+        # pure white-box one has no recon feeders, so one of them is simply empty.
+        items = load_recon_surfaces(eng) + load_source_surfaces(eng)
         p = eng / LEDGER_NAME
         if p.is_file() and not args.fresh:
             # Idempotent re-plan: emit universally + safely re-run as late feeders add surface,
@@ -566,13 +797,17 @@ def main() -> int:
                       + (" (FAIL under --strict)" if args.strict else " (warning)"))
             return 2 if args.strict else 0
         led = json.loads(p.read_text(encoding="utf-8"))
-        ok, lines, msgs = validate(led, args.strict)
+        ok, lines, msgs = validate(led, args.strict, routed_to=args.routed_to)
+        cov = coverage_stats(led, routed_to=args.routed_to)
         if args.as_json:
-            print(json.dumps({"pass": ok, "summary": lines, "messages": msgs}, indent=2))
+            print(json.dumps({"pass": ok, "summary": lines, "messages": msgs, "coverage": cov}, indent=2))
         else:
-            print(f"# Surface validation -- {args.engagement}")
+            print(f"# Surface validation -- {args.engagement}"
+                  + (f" (routed to {args.routed_to})" if args.routed_to else ""))
             for l in lines:
                 print(f"  {l}")
+            print(f"  coverage: {cov['pct']}% closed ({cov['closed']}/{cov['total']}), "
+                  f"{cov['open_gaps']} untested gap(s)")
             for m in msgs:
                 print(f"  - {m}")
             print(f"\n{'PASS' if ok else 'FAIL'}: surface ledger "

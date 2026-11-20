@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://redstrike.ai/schemas/surface_ledger.schema.json",
   "title": "Redstrike Surface-Coverage Ledger",
-  "description": "Per-engagement record of which DISCOVERED attack-surface elements (endpoints, params, identities, forms, API operations, sinks, headers, uploads, auth flows) were actually CONSUMED by an executor vs merely discovered by recon. Category coverage (coverage_ledger.json) proves which vuln CLASSES ran; this proves how much of the real SURFACE each class was tested against. A surface discovered but never tested (and not skipped with a reason) is a recall gap a category-level ledger cannot see. Produced by scripts/surface.py --plan from the recon feeders, updated with --mark as executors consume each element.",
+  "description": "Per-engagement record of which DISCOVERED attack-surface elements (endpoints, params, identities, forms, API operations, sinks, headers, uploads, auth flows — plus, for a white-box audit, entry-points / source-leads / high-risk-files) were actually CONSUMED by an executor vs merely discovered by recon. Category coverage (coverage_ledger.json) proves which vuln CLASSES ran; this proves how much of the real SURFACE each class was tested against. A surface discovered but never tested (and not skipped with a reason) is a recall gap a category-level ledger cannot see. Produced by scripts/surface.py --plan from the recon feeders (and, when source access is granted, from app_model.json + source_context.json), updated with --mark as executors consume each element.",
   "type": "object",
   "required": ["engagement", "generated_at", "surfaces"],
   "additionalProperties": false,
@@ -19,10 +19,10 @@
       "properties": {
         "id": { "type": "string", "description": "stable id (e.g. kind:hash-of-value)." },
         "kind": {
-          "enum": ["endpoint", "param", "identity", "form", "api-operation", "sink", "header", "upload", "auth-flow"],
-          "description": "what kind of surface element this is."
+          "enum": ["endpoint", "param", "identity", "form", "api-operation", "sink", "header", "upload", "auth-flow", "entry-point", "source-lead", "high-risk-file", "state-op", "authz-route"],
+          "description": "what kind of surface element this is. The last five are the white-box / source-audit surface the code-audit executor consumes: entry-point, source_context.json lead, high-risk file, plus two FIRST-CLASS enumerated surfaces grep/taint cannot assert — state-op (a state-changing operation + the invariant it must hold, for the business-logic/concurrency TOCTOU pass) and authz-route (a route x its required-privilege cell, for the authorization-matrix pass)."
         },
-        "value": { "type": "string", "description": "the element itself (path, param name, identity label, sink location...)." },
+        "value": { "type": "string", "description": "the element itself (path, param name, identity label, sink location, entry-point symbol@file:line, source-lead id, high-risk file path...)." },
         "discovered_by": { "type": "string", "description": "recon source that found it (host-discovery/content-discovery/js-analysis/authz-context...)." },
         "routed_to": { "type": "array", "items": { "type": "string" }, "description": "category ids whose executors SHOULD consume this element." },
         "status": {

@@ -15,9 +15,31 @@ which recon feeder `discovered_by` it, which categories it is `routed_to`, and i
 - `skipped` — deliberately not tested (needs a `reason`);
 - `n/a` — routes to no in-scope category.
 
+## White-box / source surface (the code-audit consumer)
+When source access is granted, the same ledger also models the SOURCE surface so a white-box `code-audit` run
+cannot silently finish having only looked at the leads `source-audit` routed. `surface.py --plan` additionally
+reads `code-audit/app_model.json` + `source-audit/source_context.json` and enumerates three more kinds, all
+`routed_to` the `code-audit` consumer:
+- `entry-point` — a route/handler/CLI/job/queue-consumer/webhook from the app model;
+- `source-lead` — a `source_context.json` candidate (`sa-*`) / structural fact (`sf-*`) / chain candidate
+  (`scc-*`) / privileged op;
+- `high-risk-file` — a file hosting any of that surface (derived from the leads/entry points, so it is bounded
+  by the surface, not by repo size — a 29k-file repo still yields a finite inventory);
+- `state-op` — a state-changing operation + the invariant it must hold (single-use / limit / quota / stock /
+  price-integrity / ownership / idempotency), enumerated into `app_model.state_ops`; the business-logic &
+  concurrency pass (check-then-act without a lock = TOCTOU, double-spend, client-trusted value). A FIRST-CLASS
+  enumerated surface grep can't see ("no lock" is not a pattern);
+- `authz-route` — a route/handler × its required privilege (one authorization-matrix cell), enumerated into
+  `app_model.authz_routes`; flags a state-changing/sensitive route with NO authz, or one that bypasses a central
+  authz backstop. A FIRST-CLASS enumerated surface grep can't see ("no authz annotation" is an absence).
+`code-audit` closes each (`--mark … --status tested --reason "<confirmed|ruled-out|open-proof-gap>: …"`, or a
+reasoned `skipped`) and gates its OWN slice with `--validate --routed-to code-audit --strict`, so in a combined
+grey+white-box engagement it isn't blocked by a sibling's pending black-box surface in the same shared ledger.
+
 ## Lifecycle
 1. **Plan** (after recon — ALWAYS, every engagement): `python scripts/surface.py --plan --engagement <dir>`
-   reads the feeders (host-discovery, content-discovery, js-analysis, authz-context) and enumerates every
+   reads the feeders (host-discovery, content-discovery, js-analysis, authz-context — and, with source access,
+   app_model.json + source_context.json) and enumerates every
    element as `discovered`, routing each by kind to the categories that should test it. **`--plan` is
    idempotent**: re-running it preserves every element's progress (`tested`/`skipped`/`consumed_by`) and
    appends only newly-discovered elements, so it is safe to emit early and re-emit as late feeders

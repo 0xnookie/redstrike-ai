@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Radio, Terminal, Eraser, ArrowRight, CircleCheck, CircleAlert, Cpu, ChevronRight, ChevronDown, CornerDownLeft, ListChecks } from "lucide-react";
 import { useControl, useRunStream } from "./ControlProvider";
 import type { RunEvent } from "@/lib/control";
@@ -14,6 +14,12 @@ const toneClass: Record<string, string> = {
   muted: "text-muted",
 };
 
+// Windowing: only the rows near the viewport are mounted, not the whole (up-to-500) log.
+// A source-code audit streams thousands of file-read/grep events in bursts; mounting every
+// one as a DOM row and laying the whole list out on each flush is the console's main lag.
+const EST_ROW = 22;      // px, first-paint estimate for an un-measured row
+const OVERSCAN_PX = 180; // render a little above & below the viewport so a fast scroll stays filled
+
 function EventIcon({ kind, tone }: { kind: RunEvent["kind"]; tone?: RunEvent["tone"] }) {
   if (kind === "dispatch") return <ArrowRight size={13} className="mt-0.5 shrink-0 text-cyan-400" />;
   if (kind === "return") return <CornerDownLeft size={13} className={cx("mt-0.5 shrink-0", tone === "warn" ? "text-amber-400" : "text-emerald-400")} />;
@@ -26,10 +32,16 @@ function EventIcon({ kind, tone }: { kind: RunEvent["kind"]; tone?: RunEvent["to
 }
 
 // Events are immutable once parsed (stable `key`), so a memoized row re-renders only when
-// it's new — a flush appending 5 lines to a 500-line log renders 5 rows, not 500.
-const EventRow = memo(function EventRow({ ev, billed }: { ev: RunEvent; billed: boolean }) {
+// it's new — a flush appending 5 lines renders at most 5 rows, not the whole window. `measure`
+// is a stable callback and `billed` a primitive, so neither defeats the memo; a row reports its
+// real height once via the `ref` so the windower can place the spacers without clipping wraps.
+const EventRow = memo(function EventRow({ ev, billed, measure }: { ev: RunEvent; billed: boolean; measure: (key: string, el: HTMLLIElement | null) => void }) {
   return (
-    <li className={cx("row-in flex items-start gap-2", ev.kind === "run" && "mt-2 border-t border-line pt-2")}>
+    <li
+      ref={(el) => measure(ev.key, el)}
+      // spacing is padding (not margin) so the measured offsetHeight is the row's full stride
+      className={cx("row-in flex items-start gap-2 pb-0.5", ev.kind === "run" && "mt-2 border-t border-line pt-2")}
+    >
       <EventIcon kind={ev.kind} tone={ev.tone} />
       <div className="min-w-0 flex-1">
         <div className={cx("flex flex-wrap items-baseline gap-x-2", toneClass[ev.tone ?? "muted"])}>
@@ -71,16 +83,109 @@ export function RunStream() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
 
-  // autoscroll only while the user is already pinned to the bottom
+  // ---- windowing state: viewport metrics + a per-key measured-height cache ----
+  const heights = useRef<Map<string, number>>(new Map());
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
+  const [measureTick, bumpMeasure] = useReducer((n: number) => n + 1, 0);
+  const scrollRaf = useRef<number | null>(null);
+  const measureRaf = useRef<number | null>(null);
+
+  // track the viewport height while the log is open (open toggles its presence; the list also
+  // grows/shrinks the card, and the window can be resized)
   useEffect(() => {
     const el = scrollRef.current;
-    if (open && el && atBottom.current) el.scrollTop = el.scrollHeight;
+    if (!open || !el || typeof ResizeObserver === "undefined") return;
+    const sync = () => setViewportH(el.clientHeight);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);
+
+  // cache a visible row's real height (handles wrapped text / the deferred badge without
+  // clipping); recompute the window once per frame when a height actually changed
+  const measure = useCallback((key: string, el: HTMLLIElement | null) => {
+    if (!el) return;
+    const h = el.offsetHeight;
+    if (h && heights.current.get(key) !== h) {
+      heights.current.set(key, h);
+      if (measureRaf.current == null) {
+        measureRaf.current = requestAnimationFrame(() => {
+          measureRaf.current = null;
+          bumpMeasure();
+        });
+      }
+    }
+  }, []);
+
+  // the slice to mount + the spacer heights that stand in for everything off-screen.
+  // O(n) over the cap (<=500) — a fraction of a millisecond, only on scroll / resize / measure.
+  const win = useMemo(() => {
+    void measureTick; // recompute when a visible row reports a new measured height (heights is a ref)
+    const H = heights.current;
+    const n = events.length;
+    const top = scrollTop - OVERSCAN_PX;
+    const bottom = scrollTop + viewportH + OVERSCAN_PX;
+    let offset = 0;
+    let start = 0;
+    let end = 0;
+    let padTop = 0;
+    let startFound = false;
+    for (let i = 0; i < n; i++) {
+      const h = H.get(events[i].key) ?? EST_ROW;
+      if (!startFound && offset + h > top) {
+        start = i;
+        padTop = offset;
+        startFound = true;
+      }
+      if (offset < bottom) end = i + 1; // last row that begins before the viewport's lower edge
+      offset += h;
+    }
+    const total = offset;
+    if (!startFound) {
+      // before the first measure (viewportH still 0) show the head; the autoscroll below then
+      // pins to the bottom and the RO fills viewportH, so the real slice renders next frame
+      start = 0;
+      padTop = 0;
+      end = Math.min(n, 1);
+    }
+    if (end < start) end = start;
+    let used = padTop;
+    for (let i = start; i < end; i++) used += H.get(events[i].key) ?? EST_ROW;
+    return { start, end, padTop, padBottom: Math.max(0, total - used) };
+  }, [events, scrollTop, viewportH, measureTick]);
+
+  // autoscroll only while the user is already pinned to the bottom (respects scrolling up).
+  // Setting scrollTop state too keeps the window aligned with the bottom in the same commit.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (open && el && atBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      setScrollTop(el.scrollTop);
+    }
   }, [events, open]);
 
   const onScroll = () => {
     const el = scrollRef.current;
-    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (!el) return;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (scrollRaf.current == null) {
+      scrollRaf.current = requestAnimationFrame(() => {
+        scrollRaf.current = null;
+        const e2 = scrollRef.current;
+        if (e2) setScrollTop(e2.scrollTop);
+      });
+    }
   };
+
+  useEffect(
+    () => () => {
+      if (scrollRaf.current != null) cancelAnimationFrame(scrollRaf.current);
+      if (measureRaf.current != null) cancelAnimationFrame(measureRaf.current);
+    },
+    [],
+  );
 
   return (
     <Card className={cx("flex flex-col", open && "min-h-[18rem]")}>
@@ -119,9 +224,11 @@ export function RunStream() {
             </p>
           </div>
         ) : (
-          <ul className="space-y-0.5">
-            {events.map((ev) => (
-              <EventRow key={ev.key} ev={ev} billed={billed} />
+          // only the windowed slice is mounted; the spacers reserve the height of everything
+          // off-screen so the scrollbar and autoscroll behave as if the full log were present
+          <ul style={{ paddingTop: win.padTop, paddingBottom: win.padBottom }}>
+            {events.slice(win.start, win.end).map((ev) => (
+              <EventRow key={ev.key} ev={ev} billed={billed} measure={measure} />
             ))}
           </ul>
         )}

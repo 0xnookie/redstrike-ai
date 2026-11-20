@@ -282,8 +282,7 @@ def cmd_audit(args, repo: Path) -> int:
     # 4) Clone the (untrusted) repo. Only this invocation's fresh artifacts are cleaned up on failure.
     created_dir = not eng_dir.exists()
     if args.force and source_dir.exists():
-        import shutil as _shutil
-        _shutil.rmtree(source_dir, ignore_errors=True)
+        source_audit.rmtree_safe(source_dir)
     eng_dir.mkdir(parents=True, exist_ok=True)
     print(ui.info(f"cloning {url} → {source_dir.relative_to(repo)}  (shallow · untrusted · no code executed)…"))
     try:
@@ -291,11 +290,7 @@ def cmd_audit(args, repo: Path) -> int:
     except source_audit.CloneError as e:
         # Surface the failure (never a silent no-op) and remove only what this run created.
         print(ui.err(f"clone failed: {e}"))
-        import shutil as _shutil
-        if created_dir:
-            _shutil.rmtree(eng_dir, ignore_errors=True)
-        else:
-            _shutil.rmtree(source_dir, ignore_errors=True)
+        source_audit.rmtree_safe(eng_dir if created_dir else source_dir)
         return 1
     print(ui.ok(f"cloned · commit {info['commit'][:12]} · branch {info['branch'] or '(detached)'}"))
 
@@ -315,9 +310,8 @@ def cmd_audit(args, repo: Path) -> int:
         engagement.scaffold(repo, fields, operator=_operator(), force=args.force)
     except FileExistsError as e:
         print(ui.err(str(e)))
-        import shutil as _shutil
         # Don't leave this run's clone behind to wedge the next `redstrike audit` of the same repo.
-        _shutil.rmtree(eng_dir if created_dir else source_dir, ignore_errors=True)
+        source_audit.rmtree_safe(eng_dir if created_dir else source_dir)
         return 1
     print(ui.ok(f"source-granted engagement scaffolded: {eng_dir.relative_to(repo)}"))
     print(ui.kv("scope", str((eng_dir / "scope.yaml").relative_to(repo))))
