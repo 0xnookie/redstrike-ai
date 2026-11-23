@@ -12,7 +12,7 @@
 - **TOOLS:** `curl`/`httpx` + a generic JSON-RPC client (MCP `initialize` / `*/list`, read-only), `openssl`/`nmap` (TLS + `host:port` sweep), `jq`; consumes `host-discovery`. Tool-first — `_contract/tooling.md`.
 - **GOAL:** Map the agent-protocol surface — endpoints, protocol/transport, capability inventory, auth + transport posture, ASI-tagged exposures — into `agent_context.json`, so the AI/LLM executors fan out. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `discovery.json`, `enumeration.jsonl`, `agent_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `host-discovery/host_discovery.json` (live `host:port` + HTTP services) + `js-analysis` endpoints + `scope.yaml` (`oob.collaborator`). `refs/` = `agent_protocol_recon.md`. Chains FROM `host-discovery`/`osint`; chains TO `excessive-agency` | `prompt-injection` | `sensitive-disclosure` | `llm-output-handling`; relates to `llm-context`.
+- **DATA / RAG:** inputs = `host-discovery/host_discovery.json` (live `host:port` + HTTP services) + `js-analysis` endpoints + `scope.yaml` (`oob.collaborator`). `refs/` = `agent_protocol_recon.md`. Chains FROM `host-discovery`/`osint`; chains TO the agentic executors `agent-goal-hijack` (ASI01) | `agent-tool-abuse` (ASI02+ASI05) | `agent-memory-poisoning` (ASI06) | `a2a-exploitation` (ASI07), and the LLM executors `excessive-agency` | `prompt-injection` | `sensitive-disclosure` | `llm-output-handling`; relates to `llm-context`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal

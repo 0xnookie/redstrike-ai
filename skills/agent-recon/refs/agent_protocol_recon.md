@@ -110,7 +110,10 @@ clean result.
 
 ## 8. Emit + route
 Consolidate into `agent_context.json` (schema `_contract/agent_context.schema.json`):
-- `tool_targets[]` → `excessive-agency` (enumerated tools to probe for over-permissioned actions)
+- `tool_targets[]` → `agent-tool-abuse` (gated multi-step tool-chain / MCP `tools/call` / malicious tool-definition abuse — ASI02+ASI05); a single induced over-permissioned call → `excessive-agency` (LLM06)
+- multi-step goal/plan surfaces (planning loops; attacker-controllable tool-output / retrieved-content channels) → `agent-goal-hijack` (ASI01)
+- persistent memory / long-term context stores → `agent-memory-poisoning` (ASI06; training/RAG-corpus poisoning stays `data-poisoning`)
+- A2A capability cards / peer-agent channels (`protocol:"a2a"`) → `a2a-exploitation` (ASI07)
 - `injection_points[]` + `variant_hint` → `prompt-injection` / `sensitive-disclosure` / `llm-output-handling`
   (instructions-field leak, resource / prompt channels)
 - generic transport exposures → `tls-attacks` / `cors` / `security-headers` / `exposed-surface` (don't re-report)
