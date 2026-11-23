@@ -164,6 +164,19 @@ def load_and_audit(eng: Path) -> dict:
             res["summary"]["total"] += len(sgaps)
             res["summary"]["high"] += sum(1 for g in sgaps if g["severity"] == "high")
             res["summary"].setdefault("by_type", {})["untested-surface"] = len(sgaps)
+    # fold in the MEASURED evidence-sufficiency numbers (the "no measured numbers" roadmap gap): aggregate
+    # every finding's evidence_score so the recall dump emits how well the findings are actually proven, not
+    # only what was missed. Best-effort + additive (a new `evidence_score` key) — never breaks the gaps contract.
+    try:
+        import evidence_score as _evs  # scripts/ on sys.path
+    except ImportError:  # pragma: no cover - path fallback
+        import importlib.util as _ilu
+        _esp = _ilu.spec_from_file_location("evidence_score", str(_repo_root() / "scripts" / "evidence_score.py"))
+        _evs = _ilu.module_from_spec(_esp); _esp.loader.exec_module(_evs)
+    try:
+        res["evidence_score"] = _evs.aggregate_engagement(eng)
+    except Exception:  # noqa: BLE001 - a scoring hiccup must never take the recall audit down
+        pass
     return res
 
 

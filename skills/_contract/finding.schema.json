@@ -59,7 +59,22 @@
           }
         },
         "review": { "$ref": "#/$defs/review", "description": "Filled by verify.md (the independent per-class reviewer). Absent = not yet semantically verified." },
-        "secondary_review": { "$ref": "#/$defs/review", "description": "Optional SECOND, cross-model verdict — the same shape as `review{}`, written by the model-pinned `adversarial-verify` reviewer (a different model than the executor/primary reviewer) so a shared-model hallucination cannot pass both. Required (gated) for a High/Critical accepted finding or any composite/chain finding once a report exists; absent = no cross-model second check yet." }
+        "secondary_review": { "$ref": "#/$defs/review", "description": "Optional SECOND, cross-model verdict — the same shape as `review{}`, written by the model-pinned `adversarial-verify` reviewer (a different model than the executor/primary reviewer) so a shared-model hallucination cannot pass both. Required (gated) for a High/Critical accepted finding or any composite/chain finding once a report exists; absent = no cross-model second check yet." },
+        "evidence_score": {
+          "type": "object",
+          "description": "Quantified EVIDENCE-SUFFICIENCY score — the measured accept/downgrade floor. Computed by the `<class>-verify` reviewer with scripts/evidence_score.py from INDEPENDENT components, and used as a HARD FLOOR on the verdict: score < 55 ⇒ KILL (cannot be accepted), 55-74 ⇒ DOWNGRADE (severity drop), ≥ 75 ⇒ PASS. It AUGMENTS, never replaces, the reviewer — the semantic reviewer stays the authority; the score is only a floor the reviewer cannot raise above. COMPOSES with the independent-evidence probable-cap rule (verify-base.md check #2): the score is a floor on the accept/downgrade VERDICT, `probable_cap` is a ceiling on CONFIDENCE — both apply. Optional + additive: older findings omit it.",
+          "required": ["score", "decision"],
+          "additionalProperties": false,
+          "properties": {
+            "score": { "type": "integer", "minimum": 0, "maximum": 100, "description": "0-100 evidence-sufficiency score from the named-weight components (scripts/evidence_score.py; do not hand-assert — compute it)." },
+            "decision": { "enum": ["kill", "downgrade", "pass"], "description": "The mechanical band: <55 kill, 55-74 downgrade, ≥75 pass. A floor on the reviewer verdict, not a replacement for it." },
+            "components": { "type": "object", "additionalProperties": { "type": "number" }, "description": "Per-component awarded points (request_response, readback, impact_artifact, browser_verification, reliability, chain_depth) — the breakdown behind the score." },
+            "reliability_runs": { "type": "integer", "minimum": 0, "description": "N reliability runs (0 = a deterministic finding → full reliability credit)." },
+            "reliability_hits": { "type": "integer", "minimum": 0, "description": "M successful hits across the N runs; a hit-rate M/N < 0.8 prorates the reliability credit and flags 'race/timing — needs chaining'." },
+            "probable_cap": { "type": "boolean", "description": "True when the only evidence is the skill's own log/tool_output (no INDEPENDENT artifact) → confidence is capped at `probable` (verify-base.md check #2). A separate axis that composes with the score floor." },
+            "flags": { "type": "array", "items": { "type": "string" }, "description": "Human-readable notes the scorer raised (e.g. a race/timing hit-rate, a white-box code_citation substitution, the circular-evidence probable-cap)." }
+          }
+        }
       }
     },
     "evidence": {

@@ -659,6 +659,76 @@ else:
         if run_def.get("additionalProperties") is not False:
             err("diagnostics.schema.json: $defs/run must be additionalProperties:false (closed run record)")
 
+
+# 21 — evidence-sufficiency score consistency: the quantified accept/downgrade floor. The schema field
+# (finding.evidence_score), the contract instruction (verify-base.md), and the scorer's band constants
+# (scripts/evidence_score.py) must stay in agreement, so a drift (a dropped field, a renamed band, a
+# contract that stops telling reviewers to compute it) fails the suite. A standalone check fn + one call.
+def check_evidence_score():
+    checked["evidence_score"] = 1
+    # (a) the schema declares finding.evidence_score, closed, with the floor bands + reliability fields.
+    fsp = skills_dir / "_contract" / "finding.schema.json"
+    es_schema = None
+    if fsp.is_file():
+        try:
+            fd = json.loads(fsp.read_text(encoding="utf-8"))
+            es_schema = (((fd.get("$defs") or {}).get("finding") or {}).get("properties") or {}).get("evidence_score")
+        except json.JSONDecodeError:
+            es_schema = None  # invalid-JSON already reported by check 4
+    if not isinstance(es_schema, dict):
+        err("finding.schema.json: $defs/finding must declare an 'evidence_score' property "
+            "(the quantified evidence-sufficiency floor)")
+    else:
+        if es_schema.get("additionalProperties") is not False:
+            err("finding.schema.json: evidence_score must be additionalProperties:false (closed scoring block)")
+        esp = es_schema.get("properties") or {}
+        for req in ("score", "decision", "components", "reliability_runs", "reliability_hits"):
+            if req not in esp:
+                err(f"finding.schema.json: evidence_score must declare a '{req}' property")
+        dec_enum = set((esp.get("decision") or {}).get("enum") or [])
+        if dec_enum != {"kill", "downgrade", "pass"}:
+            err("finding.schema.json: evidence_score.decision enum must be exactly "
+                f"['kill','downgrade','pass'] (got {sorted(dec_enum)})")
+        score_p = esp.get("score") or {}
+        if score_p.get("minimum") != 0 or score_p.get("maximum") != 100:
+            err("finding.schema.json: evidence_score.score must be bounded 0..100")
+    # (b) verify-base.md instructs every reviewer to COMPUTE the score, WRITE it, and apply the FLOOR.
+    vbp = skills_dir / "_contract" / "verify-base.md"
+    if not vbp.is_file():
+        err("skills/_contract/verify-base.md missing (cannot check the evidence-score reviewer instruction)")
+    else:
+        vbt = vbp.read_text(encoding="utf-8", errors="replace")
+        if "scripts/evidence_score.py" not in vbt:
+            err("verify-base.md: must instruct reviewers to compute the score with scripts/evidence_score.py")
+        if "evidence_score" not in vbt:
+            err("verify-base.md: must tell reviewers to write the finding's evidence_score block")
+        for band in ("55", "75"):
+            if band not in vbt:
+                err(f"verify-base.md: must state the evidence-score band threshold {band}")
+    # (c) the scorer exists and its band constants AGREE with the schema/contract (55 / 75), selftest passes.
+    esf = ROOT / "scripts" / "evidence_score.py"
+    if not esf.is_file():
+        err("scripts/evidence_score.py missing (the evidence-sufficiency scorer)")
+        return
+    try:
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location("rs_evidence_score_lint", esf)
+        _es = importlib.util.module_from_spec(_spec)
+        sys.modules["rs_evidence_score_lint"] = _es  # dataclasses need the module registered
+        _spec.loader.exec_module(_es)
+        if (_es.BAND_KILL, _es.BAND_PASS) != (55, 75):
+            err(f"evidence_score.py: band constants ({_es.BAND_KILL},{_es.BAND_PASS}) must be (55,75) "
+                "to match the schema + verify-base.md")
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _es.selftest()
+    except BaseException as e:  # noqa: BLE001
+        err(f"evidence_score.py selftest failed: {e}")
+
+
+check_evidence_score()
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))

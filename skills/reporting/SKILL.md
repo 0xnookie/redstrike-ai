@@ -65,7 +65,7 @@ blocked / produced nothing" visible, so a report never presents an inconclusive 
 3. De-dupe across agents — run the DETERMINISTIC engine `python scripts/dedup.py --engagement <dir> --json`: it groups findings by canonical key (asset-host + normalized endpoint/param + vuln-class), keeps the strongest as primary, and marks the rest `status:"duplicate"` (excluded from counts). Use its merge map; don't eyeball the merge (same bug from `idor`+`bola-bfla`, `ssrf-inband`+`ssrf-cloud`, `exposed-surface`+`secrets` = one entry) · `scripts/dedup.py` · `findings_consolidated.json`
 4. Normalize severity/CVSS; order Critical→Info. Findings with `composite: true` (kill chains) are listed under an **Attack Chains** section and EXCLUDED from the severity counts — non-additive, they re-state already-counted components · `refs/report_template.md` · `findings_consolidated.json`
 5. Write per-finding sections (template) + executive summary — the summary's **risk posture is gated by §0.5** (a degraded/blocked run reports as "assessment incomplete / inconclusive," never "no issues found") · synth · `report.md`
-6. Emit a short stats summary · synth · `summary.md`
+6. Emit a short stats summary — INCLUDING the **measured evidence-sufficiency numbers** (see §Evidence-sufficiency): run `python scripts/evidence_score.py --engagement <dir> --aggregate` and fold its output into `summary.md` + the executive summary · `scripts/evidence_score.py` · `summary.md`
 7. **Seal the evidence vault (chain of custody)** — `python scripts/evidence_seal.py --engagement <dir>`: hashes every evidence/poc artifact into `evidence/manifest.json` and populates each finding's `evidence[].sha256`. Then self-verify — `python scripts/evidence_seal.py --engagement <dir> --verify` (exit 0 required; exit 3 = a tamper signal: an altered/missing/unsealed artifact — STOP and reconcile, do not ship a report over unverifiable evidence) · `scripts/evidence_seal.py` · `evidence/manifest.json` · §Chain of custody
 8. /REVIEW SKILL · `review.md`
 
@@ -102,6 +102,24 @@ blocked full demonstration) in a clearly-labeled "confirmed — demonstration li
 counts. Never include `rejected`/`needs-evidence` items as confirmed. Normalize every CVSS score with
 `scripts/cvss.py` (do not trust hand-written numbers). Keep redacted secrets redacted. The report + evidence
 stay in the engagement dir (git-ignored); deliver to the client through the agreed channel only.
+
+## Evidence-sufficiency  (measured numbers — the engagement finally quantifies its proof)
+Every accepted/blocked finding carries an `evidence_score` block (0–100), written by its `<class>-verify`
+reviewer and used as the accept/downgrade floor (`skills/_contract/verify-base.md`). Reporting AGGREGATES
+them so the report states, in numbers, how well the findings are actually proven — not just how many there are:
+
+```
+python scripts/evidence_score.py --engagement <dir> --aggregate
+# -> {n, scored_by_reviewer, derived, mean, min, max,
+#     by_decision:{pass,downgrade,kill}, flagged_race_timing, probable_capped}
+```
+
+Fold these into `summary.md` and the executive summary: report the **mean evidence-sufficiency score**, the
+PASS/DOWNGRADE count, how many findings are **flagged race/timing — needs chaining** (`flagged_race_timing`)
+and how many rest on probable-capped (circular) evidence (`probable_capped`). A finding whose reviewer left no
+`evidence_score` falls back to a derived baseline (counted in `derived`) so the numbers cover the whole set —
+surface a nonzero `derived` as a gap to backfill. These are the measured evidence numbers the roadmap asked
+for; they sit beside the severity counts, never replace them.
 
 ## Chain of custody  (court-grade: tamper-evidence + a who/what/when trail)
 Evidence that cannot be shown unaltered is not evidence. Two artifacts carry the custody, and the report
