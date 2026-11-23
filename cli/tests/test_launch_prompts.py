@@ -69,6 +69,50 @@ class TestAutonomousRoeFullPipeline(unittest.TestCase):
         self.assertNotIn("deferred for operator approval", t)
 
 
+class TestEngagementDisciplinePreamble(unittest.TestCase):
+    """The always-on anti-pattern reminder is folded into the appended prompt for EVERY leg
+    (autonomous AND interactive) — the cross-cutting discipline the hunter carries at all times."""
+
+    PROJ = TestAutonomousRoeFullPipeline.PROJ
+
+    def _assert_discipline(self, t):
+        # section header (demoted from the contract file's standalone H1 to an `##` section)
+        self.assertIn("## Engagement discipline", t)
+        # the cross-cutting anti-patterns
+        self.assertIn("Reflection is not execution", t)
+        self.assertIn("two distinct identities", t)              # IDOR/BOLA
+        self.assertIn("WAF/403", t)                              # path EXISTS != finding
+        self.assertIn("SIGNAL, not a finding", t)                # behaviour divergence
+        self.assertIn("attributable OOB callback or controlled timing", t)  # blind bugs
+        self.assertIn("Benign PoC only", t)                      # defer destructive to the gate
+        self.assertIn("chained or ruled out", t)                 # feeder-class discipline
+
+    def test_discipline_present_autonomous(self):
+        t = roe.render_roe(self.PROJ, "acme-2026-11-16", autonomous=True)
+        self._assert_discipline(t)
+
+    def test_discipline_present_interactive(self):
+        # always-on: present even with NO autonomous note
+        t = roe.render_roe(self.PROJ, "eid", autonomous=False)
+        self._assert_discipline(t)
+        self.assertNotIn("AUTONOMOUS run", t)
+
+    def test_authorization_spine_intact(self):
+        # the discipline block must NOT disturb the §0 "authorization recorded, do not re-ask" spine
+        t = roe.render_roe(self.PROJ, "eid", autonomous=False)
+        self.assertIn("ALREADY ESTABLISHED (do not re-ask)", t)
+        self.assertIn("SATISFIED", t)
+        self.assertNotIn("{discipline}", t)  # f-string placeholder fully substituted
+
+    def test_discipline_falls_back_when_file_unreadable(self):
+        # if the contract file can't be read, the terse inline fallback still carries the block
+        with mock.patch.object(roe, "_DISCIPLINE_PATH",
+                               pathlib.Path("/no/such/engagement-discipline.md")):
+            t = roe.render_roe(self.PROJ, "eid", autonomous=False)
+        self.assertIn("## Engagement discipline", t)
+        self.assertIn("Reflection is not execution", t)
+
+
 class TestSeedNotebook(unittest.TestCase):
     def test_seed_notebook_invokes_notebook_plan(self):
         with tempfile.TemporaryDirectory() as d:

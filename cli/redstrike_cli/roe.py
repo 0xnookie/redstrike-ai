@@ -6,7 +6,40 @@ launched session doesn't stall re-asking for a go-ahead it cannot collect headle
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from . import scope as scopemod
+
+# Canonical always-on anti-pattern reminder. The markdown file is the single source of truth; this module
+# reads it and folds it into the appended prompt so every launched leg (autonomous AND interactive) carries
+# the cross-cutting discipline — the recurring mistakes avoided BEFORE the reviewer, not only at verify time.
+_DISCIPLINE_PATH = Path(__file__).resolve().parents[2] / "skills" / "_contract" / "engagement-discipline.md"
+
+# Terse inline fallback so the appended prompt never loses the block if the contract file is unreadable
+# (broken install / relocated module). Kept in sync in spirit with the markdown; the file wins when present.
+_DISCIPLINE_FALLBACK = """## Engagement discipline — always-on anti-pattern reminders
+- Reflection is not execution — prove the sink actually ran the input.
+- IDOR / BOLA need two distinct identities (account A reaching account B's resource).
+- A WAF/403 means the path EXISTS, not that it is vulnerable — pivot, don't bypass.
+- Error-message / behaviour divergence is a SIGNAL, not a finding — confirm the bug.
+- Prove blind bugs with an attributable OOB callback or controlled timing — quantify, don't guess.
+- Benign PoC only; defer destructive / exploit / RCE steps to the approval gate.
+- A feeder-class finding is not a report until chained or ruled out — never silently dropped."""
+
+
+def _discipline_block() -> str:
+    """Return the always-on anti-pattern reminder, folded in as an `##` section.
+
+    Reads the canonical contract file and demotes its standalone `#` title to `##` so it slots into the
+    RoE's `##`-section structure; falls back to a terse inline copy if the file can't be read.
+    """
+    try:
+        text = _DISCIPLINE_PATH.read_text(encoding="utf-8").strip()
+    except Exception:
+        return _DISCIPLINE_FALLBACK
+    if text.startswith("# "):
+        text = "#" + text  # demote the standalone H1 to an `##` section within the appended prompt
+    return text
 
 
 def render_roe(scope: dict, engagement_id: str, *, autonomous: bool = False) -> str:
@@ -39,6 +72,7 @@ HARD STOP.
     )
 
     win = scope.get("window", {})
+    discipline = _discipline_block()
     return f"""# Redstrike engagement — operating context (launcher-injected)
 {autonomous_note}
 
@@ -81,4 +115,6 @@ missing/incomplete, the window is closed, or a target falls outside scope.
   or work around it; if it denies something you believe is in scope, surface it to the
   operator to fix `scope.yaml` rather than routing around it.
 - Write evidence, findings and PoCs under the engagement directory (the chain of custody).
+
+{discipline}
 """
