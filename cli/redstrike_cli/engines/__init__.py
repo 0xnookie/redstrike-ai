@@ -167,7 +167,8 @@ class Engine(abc.ABC):
         """Build (but do not run) the engine invocation for ``mode`` in {interactive, autonomous}.
 
         ``model`` selects the engine model for THIS run (omitted → the engine's global default);
-        ``shard_models`` is a per-shard model list carried through for the future concurrent hunt pool.
+        ``shard_models`` is the per-shard model list CONSUMED by the concurrent multi-process hunt pool
+        (``runloop.drive_pool`` runs one shard per entry, each on its own model — a cheap diversity pass).
         See ``launch.build_autonomous_argv`` for the model-routing policy (reasoning-heavy → opus;
         mechanical / reviewer / recon can run cheaper)."""
 
@@ -272,8 +273,9 @@ class ClaudeCodeEngine(Engine):
         cb = self._bin()
         if mode == "autonomous":
             allowed = settingsmod.autonomous_allowlist(allow or [])
-            # `--model` routes THIS leg's model; `--shard-models` is carried for the future concurrent
-            # hunt pool. Both omitted when unset → `claude` keeps its single global default (ANTHROPIC_MODEL).
+            # `--model` routes THIS leg's model; `--shard-models` is consumed by the concurrent hunt pool
+            # (runloop.drive_pool, one shard per model). Both omitted when unset → `claude` keeps its single
+            # global default (ANTHROPIC_MODEL).
             argv = launch.build_autonomous_argv(
                 cb, repo, prep, prompt, allowed,
                 max_turns=max_turns, max_budget=max_budget, resume=resume,

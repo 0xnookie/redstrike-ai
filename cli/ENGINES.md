@@ -83,6 +83,25 @@ three (no reliance on an external hook contract). Work: the loop, tool wiring, a
 for reviewers, turn/budget accounting. `PLAN.md` already names the Agent SDK the escape hatch for
 autonomous / in-process approval UI (M5+).
 
+## Model routing + the concurrent shard pool
+
+`build_invocation` takes two model knobs, both omitted-by-default (no flag ⇒ the engine keeps its single
+global default, byte-for-byte the legacy behavior):
+
+- **`--model <m>`** routes THIS leg to one model — reasoning-heavy work (orchestration, chaining, the
+  white-box code-audit, the adversarial second reviewer) to a top model; mechanical / reviewer / recon
+  legs to a cheaper one.
+- **`--shard-models a,b,…`** drives the **concurrent multi-process hunt pool** (`runloop.drive_pool`).
+  With **>1** entry, `redstrike run --autonomous` fans one **shard per model** out at once — each a fresh
+  `claude -p` leg on its own session — and joins them into a *wave*, then resumes wave after wave until the
+  completion contract trips. A different model per shard is a cheap **diversity pass** that raises recall.
+  With no / one entry the run stays on the single-session resumer (`runloop.drive`), unchanged.
+
+The pool is threads over subprocess-blocking legs (not `ProcessPoolExecutor`): one crashed shard is isolated
+and never kills the others; the global budget is **partitioned** across shards up front (no shared mutable
+counter); the shared ledgers (`coverage.py` / `surface.py` / `dedup.py`) are concurrency-safe via a
+cross-process file lock + atomic rename; and every shard's attempts are aggregated into the run diagnostics.
+
 ## Wiring (done)
 
 1. `redstrike --engine <id> …` (global flag; default `$REDSTRIKE_ENGINE` or `claude-code`) selects
