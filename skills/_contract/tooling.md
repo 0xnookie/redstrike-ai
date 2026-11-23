@@ -68,14 +68,15 @@ HTTP **transport** for the whole toolchain, and `proxy-context` exports its Hist
 The roster above *assumes a Linux host that ships these*. Do not confuse that assumption with the shell a
 command happens to run in. **A tool missing from one shell's `PATH` is not absent** — the toolkit may live in
 a WSL distro, a container, a `pipx`/`go/bin` dir, or a different user. Before concluding a capability is
-unavailable, probe the **real execution environment** (e.g. `wsl bash -lc 'command -v ffuf nmap sqlmap'`,
+unavailable, probe the **real execution environment** (e.g. `wsl.exe -e bash -lc 'command -v ffuf nmap sqlmap'`,
 `docker run … which …`, `pipx list`), and run tools from wherever they actually are. **Never report a tool
 "missing" — or a surface "untestable / exhausted" — off a single shell's `PATH`.** (Field lesson: "no ffuf"
 was read from the wrong shell while the whole toolkit sat in WSL, and nearly closed a host that had an
 unenumerated app on it.)
 
 At engagement start the launcher **runs the toolchain producer** — it probes the **real execution
-environment** (on Windows via `wsl.exe bash -lc 'command -v …'`) for each recon/web **capability** (a JOB:
+environment** (on Windows via `wsl.exe -e bash -lc 'command -v …'` — the `-e` is required, or wsl.exe
+mangles the script and every capability falsely reads as degraded) for each recon/web **capability** (a JOB:
 subdomain-enum / dns-resolve / http-probe / port-scan / content-discovery), records the per-capability
 result (`primary` present? which `fallback`? `ok`|`degraded`) to **`runtime/tooling.json`**, and surfaces a
 `degraded` capability in the run's outcome diagnostics (`degraded-empty`) instead of letting a missing primary
