@@ -1,6 +1,19 @@
 {
   "version": 1,
   "description": "Deterministic routing map for the Redstrike orchestrator. Each category lists the recon SIGNALS that route it; scripts/coverage.py --plan turns (map + signals + active phases) into a coverage_ledger.json so that EVERY category is recorded as attempted, skipped (with a reason) or n/a (phase not in scope). This replaces model-interpreted routing and wires the formerly un-triggered executors (nosql-injection, ldap-injection, prototype-pollution, race-condition, parameter-pollution, crypto-attacks, tls-attacks, supply-chain) into triggers.",
+  "depth_substance": {
+    "_comment": "DEPTH-SUBSTANCE BAR (no rubber-stamped recall). Before a category may count as COVERED via status 'attempted' with ZERO findings (a 'clear'), scripts/coverage.py requires the mark to PROVE depth: at least `min_attempts` distinct probe attempts AND `min_variants` technique variants (variants_tried / escalation-ladder ids), PLUS a differential/blocker note of real length OR an evidence pointer. A category that produced >=1 finding is self-evidently substantiated and is exempt. A shallow (unsubstantiated) 'attempted' is REJECTED by the completion gate (coverage.py --validate / cli gate) and re-driven by the resume loop, so a shallow pass can never masquerade as done. Shape: `default` {min_attempts,min_variants} applies to every category; `classes` overrides by category id (keys must be real category ids). Exempt a class with {min_attempts:0, min_variants:0} — a deterministic, version-controlled carve-out, never a per-mark runtime bypass. scripts/validate.py lints this shape.",
+    "default": { "min_attempts": 3, "min_variants": 2 },
+    "classes": {
+      "sqli": { "min_attempts": 5, "min_variants": 2 },
+      "xss": { "min_attempts": 5, "min_variants": 2 },
+      "injection": { "min_attempts": 4, "min_variants": 2 },
+      "ssrf": { "min_attempts": 4, "min_variants": 2 },
+      "authz": { "min_attempts": 4, "min_variants": 2 },
+      "auth": { "min_attempts": 4, "min_variants": 2 },
+      "api": { "min_attempts": 4, "min_variants": 2 }
+    }
+  },
   "phases": {
     "web": {
       "default": true,

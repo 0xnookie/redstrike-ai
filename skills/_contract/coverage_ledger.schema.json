@@ -38,6 +38,12 @@
         "triggers_matched": { "type": "array", "items": { "type": "string" }, "description": "recon signals that routed this category." },
         "escalations": { "type": "array", "items": { "type": "string" }, "description": "escalation-ladder technique ids already tried for this category (scripts/escalation.py tokens, e.g. derive-not-assume/browser-render/token-cookie-and-header). Fed by executors/engine as they climb the ladder; the recall-audit shallow-clear gate reads this to tell an exhausted, honest clear from an untrustworthy first-payload clear." },
         "findings_count": { "type": "integer", "minimum": 0, "description": "accepted findings this category produced (filled after the run)." },
+        "attempts": { "type": "integer", "minimum": 0, "description": "DEPTH-SUBSTANCE BAR: count of distinct probe attempts run for this category. A zero-finding 'attempted' clear must meet depth_substance.min_attempts (routing-map.json) or the completion gate re-drives it." },
+        "variants_tried": { "type": "array", "items": { "type": "string" }, "description": "DEPTH-SUBSTANCE BAR: distinct technique-variant ids actually tried; counts toward depth_substance.min_variants. Unioned with `escalations` when the bar is evaluated." },
+        "depth_note": { "type": "string", "description": "DEPTH-SUBSTANCE BAR: a differential/blocker note of real length recording what the depth work observed (satisfies the note requirement for a zero-finding clear)." },
+        "differential": { "type": "string", "description": "DEPTH-SUBSTANCE BAR: alias for depth_note — the observed differential/blocker on the worked surface." },
+        "evidence": { "type": "string", "description": "DEPTH-SUBSTANCE BAR: an evidence pointer for the depth work (notebook/log/path), an alternative to depth_note for proving a zero-finding clear." },
+        "depth_substantiated": { "type": "boolean", "description": "DEPTH-SUBSTANCE BAR: computed by coverage.py on an 'attempted' flip — true when the clear proved depth (enough attempts + variants + a note/evidence) or carries >=1 finding; false for a shallow clear the completion gate will re-drive." },
         "decided_by": { "enum": ["deterministic-map", "operator", "model"], "description": "deterministic-map for a planned route/skip; operator/model when a human or the agent overrode it (with reason)." }
       }
     }

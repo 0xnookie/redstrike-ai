@@ -22,15 +22,39 @@ def _coverage_script(repo_root: Path) -> Path:
 
 def coverage_validate(repo_root: Path, eng_dir: Path, *, as_json: bool = False) -> int:
     """Validate the coverage ledger — every routing-map category accounted for, nothing left
-    `pending`, every skip reasoned. Returns 0 when coverage.py is absent (nothing to enforce).
-    In --json mode the output is suppressed so the completion-gate JSON stays the single
-    document on stdout; only the exit code reflects the coverage verdict."""
+    `pending`, every skip reasoned, and every `attempted` clear clearing the DEPTH-SUBSTANCE BAR (a
+    zero-finding 'attempted' that doesn't prove depth is a rubber-stamped clear — rejected, re-drivable).
+    Returns 0 when coverage.py is absent (nothing to enforce). In --json mode the output is suppressed so
+    the completion-gate JSON stays the single document on stdout; only the exit code reflects the verdict."""
     script = _coverage_script(repo_root)
     if not script.is_file():
         return 0
     cmd = [sys.executable, str(script), "--validate", "--engagement", str(eng_dir)]
     kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL} if as_json else {}
     return subprocess.run(cmd, cwd=str(repo_root), check=False, **kw).returncode
+
+
+def coverage_redrivable(repo_root: Path, eng_dir: Path) -> list[str]:
+    """The categories the coverage gate does NOT count as genuinely covered — status `pending`/`blocked`
+    PLUS any depth-unsubstantiated ('shallow') `attempted` clear. These are RE-DRIVABLE: the completion
+    gate rejects them so the resume loop re-runs them instead of counting a rubber-stamped clear as done.
+
+    Reads coverage.py's machine-readable `--validate --json` output (coverage.py is the SOLE owner of what
+    'genuinely covered' means). Fail-open: returns [] when coverage.py is absent or its output can't be
+    parsed, so a reporting/diagnostics consumer never invents a gate failure from a plumbing hiccup — the
+    authoritative pass/fail is still coverage_validate()'s exit code."""
+    script = _coverage_script(repo_root)
+    if not script.is_file():
+        return []
+    cmd = [sys.executable, str(script), "--validate", "--engagement", str(eng_dir), "--json"]
+    try:
+        out = subprocess.run(cmd, cwd=str(repo_root), check=False,
+                             capture_output=True, text=True)
+        data = json.loads(out.stdout or "{}")
+    except Exception:
+        return []
+    red = data.get("redrivable")
+    return [str(x) for x in red] if isinstance(red, list) else []
 
 
 def verify(repo_root: Path, eng_dir: Path, *, skill: str | None = None, as_json: bool = False) -> int:

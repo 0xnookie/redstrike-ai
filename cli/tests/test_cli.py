@@ -268,6 +268,57 @@ class TestCoverageWiring(unittest.TestCase):
             launch._seed_coverage_ledger(eng, REPO, sys.executable)
             self.assertEqual(led.stat().st_mtime_ns, mtime)
 
+    # --- DEPTH-SUBSTANCE BAR at the gate layer (real coverage.py through gate.py) ------------------
+    def _seed_all_terminal(self, eng):
+        """Seed a ledger, then force every category terminal (pending/baseline -> skipped-with-reason) so the
+        gate PASSES — a single flipped category then isolates the depth-substance behaviour."""
+        launch._seed_coverage_ledger(eng, REPO, sys.executable)
+        p = eng / "coverage_ledger.json"
+        led = json.loads(p.read_text(encoding="utf-8"))
+        for cat in led["categories"]:
+            if cat["status"] == "pending":
+                cat["status"], cat["reason"] = "skipped", "test: forced terminal (not under test)"
+        p.write_text(json.dumps(led), encoding="utf-8")
+        return p
+
+    def _flip(self, ledger_path, cid, **fields):
+        led = json.loads(ledger_path.read_text(encoding="utf-8"))
+        next(x for x in led["categories"] if x["id"] == cid).update(fields)
+        ledger_path.write_text(json.dumps(led), encoding="utf-8")
+
+    def test_gate_rejects_shallow_attempted_and_lists_it_redrivable(self):
+        if not (REPO / "scripts" / "coverage.py").is_file():
+            self.skipTest("real coverage.py not present")
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d) / "acme-eng"
+            p = self._seed_all_terminal(eng)
+            # clean terminal ledger passes the coverage gate
+            self.assertEqual(gate.coverage_validate(REPO, eng), 0)
+            self.assertEqual(gate.coverage_redrivable(REPO, eng), [])
+            # a hand-edited shallow 'attempted' clear is REJECTED and surfaced as re-drivable
+            self._flip(p, "cors", status="attempted", findings_count=0)
+            self.assertNotEqual(gate.coverage_validate(REPO, eng), 0)
+            self.assertIn("cors", gate.coverage_redrivable(REPO, eng))
+
+    def test_gate_accepts_substantiated_clear(self):
+        if not (REPO / "scripts" / "coverage.py").is_file():
+            self.skipTest("real coverage.py not present")
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d) / "acme-eng"
+            p = self._seed_all_terminal(eng)
+            self._flip(p, "cors", status="attempted", findings_count=0, attempts=4,
+                       variants_tried=["null-origin", "evil-origin"],
+                       depth_note="ACAO not reflected for arbitrary origins; ACAC never true")
+            self.assertEqual(gate.coverage_validate(REPO, eng), 0)
+            self.assertNotIn("cors", gate.coverage_redrivable(REPO, eng))
+
+    def test_coverage_redrivable_empty_when_script_absent(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = pathlib.Path(d)
+            eng = repo / "eng"
+            eng.mkdir()
+            self.assertEqual(gate.coverage_redrivable(repo, eng), [])
+
 
 class TestModelRoutingCLI(unittest.TestCase):
     """#3: `--model` / `--shard-models` reach the built argv through the CLI (dry-run), both modes."""

@@ -189,6 +189,207 @@ class MarkEscalations(unittest.TestCase):
             self.assertFalse(any(g["type"] == "shallow-clear" and g["category"] == "sqli" for g in gaps_after))
 
 
+class DepthSubstanceBar(unittest.TestCase):
+    """Trust / no rubber-stamped recall: a zero-finding `attempted` clear may only count as COVERED when
+    the mark PROVES depth (enough probe attempts + technique variants + a differential note / evidence
+    pointer). A shallow 'attempted' is REJECTED by the completion gate and is re-drivable, not covered."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = c.load_map()
+
+    # --- pure substance check ------------------------------------------------
+    def test_thresholds_default_and_per_class(self):
+        # per-class override (sqli) layered over the map default; an unlisted class falls to default.
+        self.assertEqual(c.depth_thresholds(self.m, "sqli"), {"min_attempts": 5, "min_variants": 2})
+        self.assertEqual(c.depth_thresholds(self.m, "open-redirect"),
+                         c.depth_thresholds({}, "open-redirect"))  # falls back to the built-in default
+        self.assertEqual(c.depth_thresholds({}, "anything"), c._DEFAULT_DEPTH)
+
+    def test_finding_is_self_evident_substance(self):
+        # >=1 finding short-circuits the bar regardless of depth fields.
+        self.assertIsNone(c.attempted_substance_gap({"id": "sqli", "findings_count": 1}, {"min_attempts": 99,
+                                                                                          "min_variants": 99}))
+
+    def test_zero_finding_bare_clear_is_a_gap(self):
+        gap = c.attempted_substance_gap({"id": "sqli", "findings_count": 0}, {"min_attempts": 5,
+                                                                              "min_variants": 2})
+        self.assertIsNotNone(gap)
+        self.assertIn("attempts 0/5", gap)
+        self.assertIn("variants 0/2", gap)
+
+    def test_zero_finding_full_depth_clears(self):
+        entry = {"id": "sqli", "findings_count": 0, "attempts": 6,
+                 "variants_tried": ["derive-not-assume", "encoding-ladder"],
+                 "depth_note": "boolean/time/union differential all negative on id,q,search"}
+        self.assertIsNone(c.attempted_substance_gap(entry, {"min_attempts": 5, "min_variants": 2}))
+
+    def test_variants_union_with_escalations(self):
+        # escalation-ladder ids count toward min_variants (union), and each is >=1 attempt.
+        entry = {"id": "xss", "findings_count": 0,
+                 "escalations": ["browser-render", "context-variants"],
+                 "evidence": "nb://xss/2026-001"}
+        self.assertIsNone(c.attempted_substance_gap(entry, {"min_attempts": 2, "min_variants": 2}))
+
+    def test_note_or_evidence_required(self):
+        # enough attempts + variants but NO note and NO evidence -> still a gap.
+        entry = {"id": "xss", "findings_count": 0, "attempts": 9,
+                 "variants_tried": ["a", "b", "c"]}
+        gap = c.attempted_substance_gap(entry, {"min_attempts": 3, "min_variants": 2})
+        self.assertIsNotNone(gap)
+        self.assertIn("evidence pointer", gap)
+        # ...adding an evidence pointer clears it.
+        entry["evidence"] = "burp://sitemap/item/42"
+        self.assertIsNone(c.attempted_substance_gap(entry, {"min_attempts": 3, "min_variants": 2}))
+
+    def test_class_exempt_via_zero_thresholds(self):
+        # a deterministic, config-level carve-out (not a per-mark bypass): {0,0} exempts the class.
+        self.assertIsNone(c.attempted_substance_gap({"id": "x", "findings_count": 0},
+                                                    {"min_attempts": 0, "min_variants": 0}))
+
+    # --- the completion gate (validate) rejects + re-routes -------------------
+    def _terminal_ledger(self, eng):
+        """A full, GATE-PASSING ledger: every category in a terminal state (plan's skipped/n-a/pipeline,
+        and any remaining pending downgraded to skipped-with-reason). Nothing attempted => validate passes,
+        so a single flipped category isolates the depth-substance behaviour."""
+        led = c.plan(self.m, set(), {"web"}, eng.name)
+        for cat in led["categories"]:
+            if cat["status"] == "pending":
+                cat["status"] = "skipped"
+                cat["reason"] = "test: forced terminal (not under test)"
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def _flip(self, eng, cid, **fields):
+        led = json.loads((eng / "coverage_ledger.json").read_text())
+        hit = next(x for x in led["categories"] if x["id"] == cid)
+        hit.update(fields)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def test_gate_passes_clean_terminal_ledger(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            ok, _lines, _msgs = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _msgs)
+
+    def test_gate_rejects_hand_edited_shallow_attempted(self):
+        # un-gameable: a hand-edited "status":"attempted" with no depth is RECOMPUTED and rejected.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            led = self._flip(eng, "cors", status="attempted", findings_count=0)
+            ok, _lines, msgs = c.validate(eng, self.m, strict=False)
+            self.assertFalse(ok)
+            self.assertTrue(any("'cors' is 'attempted'" in str(x) and "re-drivable" in str(x) for x in msgs), msgs)
+            # it shows up as shallow + re-drivable
+            self.assertIn("cors", c.shallow_attempted_ids(led, self.m))
+            self.assertIn("cors", c.redrivable_ids(led, self.m))
+
+    def test_gate_accepts_substantiated_clear(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            led = self._flip(eng, "cors", status="attempted", findings_count=0, attempts=4,
+                             variants_tried=["null-origin", "evil-origin"],
+                             depth_note="ACAO not reflected for arbitrary origins; ACAC never true")
+            ok, _lines, _msgs = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _msgs)
+            self.assertNotIn("cors", c.shallow_attempted_ids(led, self.m))
+            self.assertNotIn("cors", c.redrivable_ids(led, self.m))
+
+    def test_gate_accepts_attempted_with_findings(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "cors", status="attempted", findings_count=2)
+            ok, _lines, _msgs = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _msgs)
+
+    def test_redrivable_includes_pending_blocked_and_shallow(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "cors", status="attempted", findings_count=0)      # shallow
+            self._flip(eng, "clickjacking", status="pending")                   # pending
+            led = self._flip(eng, "secrets", status="blocked", reason="needs approval")  # blocked
+            red = set(c.redrivable_ids(led, self.m))
+            self.assertTrue({"cors", "clickjacking", "secrets"} <= red, red)
+
+    # --- mark(): record payload + the --require-depth refusal -----------------
+    def _plan_pending(self, eng):
+        led = c.plan(self.m, None, {"web"}, eng.name)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+
+    def test_mark_shallow_records_weaker_and_is_redrivable(self):
+        # default mark (no --require-depth): records attempted but VISIBLY weaker, and the gate re-drives it.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "sqli", "attempted", count=0)
+            self.assertEqual(rc, 0)
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            sqli = next(x for x in led["categories"] if x["id"] == "sqli")
+            self.assertEqual(sqli["status"], "attempted")
+            self.assertFalse(sqli["depth_substantiated"])
+            self.assertIn("sqli", c.shallow_attempted_ids(led, self.m))
+
+    def test_mark_require_depth_refuses_and_leaves_redrivable(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "sqli", "attempted", count=0, require_depth=True)
+            self.assertEqual(rc, 2)  # refused
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            sqli = next(x for x in led["categories"] if x["id"] == "sqli")
+            # the flip NEVER landed — the category stays at its prior re-drivable status, not a shallow clear.
+            self.assertEqual(sqli["status"], "pending")
+            self.assertIn("sqli", c.redrivable_ids(led, self.m))
+
+    def test_mark_require_depth_accepts_full_payload(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "sqli", "attempted", count=0, require_depth=True, attempts=6,
+                            variants=["derive-not-assume", "encoding-ladder"],
+                            depth_note="boolean+time+union differential all negative on id,q,search params")
+            self.assertEqual(rc, 0)
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            sqli = next(x for x in led["categories"] if x["id"] == "sqli")
+            self.assertEqual(sqli["status"], "attempted")
+            self.assertTrue(sqli["depth_substantiated"])
+            self.assertEqual(sqli["variants_tried"], ["derive-not-assume", "encoding-ladder"])
+            self.assertNotIn("sqli", c.shallow_attempted_ids(led, self.m))
+
+    def test_mark_with_findings_is_substantiated(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "sqli", "attempted", count=3, require_depth=True)  # findings => no payload needed
+            self.assertEqual(rc, 0)
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            sqli = next(x for x in led["categories"] if x["id"] == "sqli")
+            self.assertTrue(sqli["depth_substantiated"])
+
+
+class ReconcileSubstance(unittest.TestCase):
+    """close-write reconcile stamps a finding-backed flip as depth_substantiated (the finding is the proof),
+    so the completion gate never re-drives a category that actually produced findings."""
+
+    def test_reconcile_stamps_depth_substantiated(self):
+        led = {"categories": [{"id": "code-audit", "status": "pending", "findings_count": 0}]}
+        c.reconcile_counts(led, [{"id": "RS-1", "_rs_source_skill": "code-audit"}])
+        ca = led["categories"][0]
+        self.assertEqual(ca["status"], "attempted")
+        self.assertTrue(ca["depth_substantiated"])
+        self.assertEqual(c.shallow_attempted_ids(led, c.load_map()), [])
+
+
 class SelfTest(unittest.TestCase):
     def test_coverage_selftest_passes(self):
         self.assertEqual(c.selftest(), 0)

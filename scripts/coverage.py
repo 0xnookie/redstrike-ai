@@ -108,6 +108,139 @@ _OPEN_STATUSES = {"pending"}
 _NEED_REASON = {"skipped", "n/a", "blocked"}
 _MARK_STATUSES = {"pending", "attempted", "blocked", "skipped", "n/a", "pipeline"}
 
+# --- DEPTH-SUBSTANCE BAR (Trust: no rubber-stamped recall) ------------------------------------------ #
+# META-LESSON: "a step/gate the workflow can route around is not real." A bare `--mark <id> --status
+# attempted --count 0` can be RUBBER-STAMPED — "attempted" alone does not PROVE the surface was actually
+# worked, so a shallow pass masquerades as covered and the completion gate passes. The depth-substance bar
+# closes that: an `attempted` category with ZERO findings (a "clear") may only count as covered when the
+# mark carries real depth evidence — enough distinct probe ATTEMPTS and technique VARIANTS, plus a
+# differential/blocker NOTE of real length OR an evidence POINTER. A category that produced >=1 finding is
+# self-evidently substantiated (the finding is the proof) and is exempt. The thresholds are per-class,
+# configured in routing-map.json's `depth_substance` block; _DEFAULT_DEPTH is only the fallback when that
+# block is absent. The bar is enforced in TWO places that can't be routed around:
+#   * mark(): records the depth payload and computes `depth_substantiated`; refuses the flip under
+#             --require-depth (the flip then simply never lands, so the category STAYS re-drivable).
+#   * validate() (the completion gate): RECOMPUTES substance from the entry's own fields, so even a
+#             hand-edited `"status":"attempted"` with no depth is REJECTED and re-driven — never counted.
+_MIN_DEPTH_NOTE = 24                                 # chars — a differential/blocker note "of real length"
+_DEFAULT_DEPTH = {"min_attempts": 3, "min_variants": 2}  # fallback when the map declares no depth_substance
+
+
+def _safe_map() -> dict:
+    """Load the routing map for threshold lookups WITHOUT ever aborting the caller — load_map() sys.exits on
+    a missing/invalid map, but a depth-threshold read must degrade to the built-in default, not kill a mark.
+    Returns {} on any failure (depth_thresholds then falls back to _DEFAULT_DEPTH)."""
+    try:
+        return load_map()
+    except SystemExit:
+        return {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def depth_thresholds(m: dict, cat_id: str) -> dict:
+    """The (min_attempts, min_variants) a zero-finding `attempted` clear must prove for ``cat_id``: the map's
+    ``depth_substance.default`` overlaid by any ``depth_substance.classes[cat_id]`` override, starting from
+    _DEFAULT_DEPTH. Pure; tolerant of a missing/malformed block (falls back to the default)."""
+    out = dict(_DEFAULT_DEPTH)
+    cfg = (m or {}).get("depth_substance") or {}
+    for layer in (cfg.get("default"), (cfg.get("classes") or {}).get(cat_id)):
+        if isinstance(layer, dict):
+            for k in ("min_attempts", "min_variants"):
+                v = layer.get(k)
+                if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+                    out[k] = v
+    return out
+
+
+def _variant_set(entry: dict) -> set:
+    """The distinct technique variants a category has recorded — the UNION of the new ``variants_tried``
+    field and the existing escalation-ladder ``escalations`` field, so an executor that already records
+    ladder ids (the recall shallow-clear fix) automatically earns variant credit here. Pure."""
+    out = set()
+    for key in ("variants_tried", "escalations"):
+        v = entry.get(key)
+        if isinstance(v, list):
+            out |= {str(x).strip() for x in v if str(x).strip()}
+    return out
+
+
+def _depth_signals(entry: dict) -> dict:
+    """Normalize an entry's recorded depth evidence into {attempts, variants, note_len, has_evidence}.
+    `attempts` is the recorded count floored by the variant count (each recorded variant is at least one
+    attempt); `note` is the longest of depth_note/differential; `evidence` is any non-trivial pointer."""
+    variants = _variant_set(entry)
+    try:
+        attempts = int(entry.get("attempts") or 0)
+    except (TypeError, ValueError):
+        attempts = 0
+    attempts = max(attempts, len(variants))
+    note = ""
+    for key in ("depth_note", "differential"):
+        val = entry.get(key)
+        if isinstance(val, str) and len(val.strip()) > len(note):
+            note = val.strip()
+    ev = entry.get("evidence")
+    has_ev = isinstance(ev, str) and len(ev.strip()) >= 4
+    return {"attempts": attempts, "variants": variants, "note_len": len(note), "has_evidence": has_ev}
+
+
+def attempted_substance_gap(entry: dict, thresholds: dict):
+    """Return None when an `attempted` entry is substantiated, else a short reason string naming what is
+    missing. A category with >=1 finding is self-evidently substantiated. A zero-finding ('clear') attempt
+    must prove depth: >= min_attempts distinct probe attempts AND >= min_variants technique variants AND a
+    differential/blocker note of real length OR an evidence pointer. Pure (no I/O). A class configured to
+    {min_attempts:0, min_variants:0} is depth-exempt (a deterministic, version-controlled carve-out — never
+    a per-mark runtime bypass)."""
+    try:
+        n = int(entry.get("findings_count") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n >= 1:
+        return None
+    min_a = int(thresholds.get("min_attempts", 0) or 0)
+    min_v = int(thresholds.get("min_variants", 0) or 0)
+    if min_a <= 0 and min_v <= 0:
+        return None
+    s = _depth_signals(entry)
+    missing = []
+    if s["attempts"] < min_a:
+        missing.append(f"attempts {s['attempts']}/{min_a}")
+    if len(s["variants"]) < min_v:
+        missing.append(f"variants {len(s['variants'])}/{min_v}")
+    if s["note_len"] < _MIN_DEPTH_NOTE and not s["has_evidence"]:
+        missing.append(f"a differential/blocker note (>={_MIN_DEPTH_NOTE} chars) or an evidence pointer")
+    if not missing:
+        return None
+    return "zero-finding 'attempted' clear lacks depth evidence (" + "; ".join(missing) + ")"
+
+
+def shallow_attempted_ids(led: dict, m: dict) -> list:
+    """Category ids whose `attempted` status FAILS the depth-substance bar — a rubber-stamped shallow clear.
+    The completion gate rejects these and the resume loop must re-drive them. Pure."""
+    out = []
+    for c in (led or {}).get("categories", []) or []:
+        if not isinstance(c, dict) or str(c.get("status", "")).lower() != "attempted":
+            continue
+        if attempted_substance_gap(c, depth_thresholds(m, str(c.get("id") or ""))) is not None:
+            out.append(str(c.get("id")))
+    return out
+
+
+def redrivable_ids(led: dict, m: dict) -> list:
+    """Category ids the completion gate does NOT consider genuinely covered: status `pending`/`blocked`
+    PLUS any shallow (depth-unsubstantiated) `attempted`. coverage.py is the single owner of what
+    'genuinely covered' means, so this is the authoritative re-drivable set the resume loop re-runs
+    (runloop's own pending/blocked view is a conservative subset of this). Pure, sorted."""
+    out = set()
+    for c in (led or {}).get("categories", []) or []:
+        if isinstance(c, dict) and str(c.get("status", "")).lower() in ("pending", "blocked"):
+            cid = c.get("id") or c.get("name")
+            if cid:
+                out.add(str(cid))
+    out |= set(shallow_attempted_ids(led, m))
+    return sorted(out)
+
 
 def load_map(path: Path = MAP_PATH) -> dict:
     if not path.is_file():
@@ -267,6 +400,13 @@ def validate(eng: Path, m: dict, strict: bool = False):
             errors.append(f"'{cid}' is still '{st}' at validation — a routed category that never ran is a gap")
         if st in _NEED_REASON and not (c.get("reason") or "").strip():
             errors.append(f"'{cid}' is '{st}' but has no reason")
+        # DEPTH-SUBSTANCE BAR: a zero-finding `attempted` clear that does not PROVE depth is a rubber-stamp.
+        # Reject it (re-computing substance from the entry's own fields, so a hand-edited status can't slip
+        # through) so the gate re-routes it instead of counting a shallow pass as covered.
+        if st == "attempted":
+            _gap = attempted_substance_gap(c, depth_thresholds(m, cid))
+            if _gap is not None:
+                errors.append(f"'{cid}' is 'attempted' but {_gap} — a shallow clear is re-drivable, not covered")
 
     # 3. soft cross-check against the engagement's findings — ANY layout (root / per-skill / consolidated),
     #    not just a root findings.json (the real layout is per-skill <eng>/*/findings.json, so the old
@@ -364,9 +504,22 @@ def selftest() -> int:
     return 0
 
 
+def _merge_list(current, incoming) -> list:
+    """De-duped, order-preserving merge of ``incoming`` into ``current`` (both lists of tokens)."""
+    have = list(current or [])
+    seen = set(have)
+    for t in incoming or []:
+        t = str(t).strip()
+        if t and t not in seen:
+            seen.add(t)
+            have.append(t)
+    return have
+
+
 def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=False,
-         escalations=None) -> int:
-    """Update one ledger category in place (status / findings_count / reason / escalations).
+         escalations=None, attempts=None, variants=None, depth_note=None, evidence=None,
+         require_depth=False) -> int:
+    """Update one ledger category in place (status / findings_count / reason / escalations + depth payload).
 
     This is the first-class way an orchestrator flips an entry after running a
     category, instead of hand-editing the JSON. Enforces the status enum and the
@@ -375,7 +528,18 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
     `escalations` (a list of escalation.py ladder technique ids) is MERGED into the entry's
     `escalations` list — de-duped, order-preserving — so an executor records which ladder steps it
     climbed on an empty-but-signalled surface. The recall-audit shallow-clear gate reads this to tell an
-    exhausted, honest clear from an untrustworthy first-payload clear (fix #3 — persist ladder progress)."""
+    exhausted, honest clear from an untrustworthy first-payload clear (fix #3 — persist ladder progress).
+
+    DEPTH-SUBSTANCE BAR (Trust: no rubber-stamped recall). `attempts` (int), `variants` (technique ids,
+    merged like escalations into ``variants_tried``), `depth_note`/`differential` and `evidence` are the
+    depth payload a zero-finding `attempted` clear must carry so it cannot be rubber-stamped. On an
+    `attempted` flip the entry's `depth_substantiated` is (re)computed from these (a category with >=1
+    finding is self-evidently substantiated). With ``require_depth`` an UNsubstantiated `attempted` flip is
+    REFUSED (rc=2, nothing written) — the category then simply STAYS at its prior re-drivable status rather
+    than being stamped covered. Without it the flip is still recorded but as a VISIBLY weaker
+    `depth_substantiated:false` with a loud warning, and the completion gate rejects/re-drives it — so a
+    shallow clear can never pass SILENTLY. Backward compatible: a mark that supplies the fields (or carries
+    real findings) is unaffected."""
     ledger_path = eng / LEDGER_NAME
     if not ledger_path.is_file():
         print(f"[!] no {LEDGER_NAME} at {eng} (run: scripts/coverage.py --plan --engagement {eng})")
@@ -400,29 +564,61 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
         if status in _NEED_REASON and not (note or (hit.get("reason") or "").strip()):
             print(f"[!] status {status!r} requires a reason — pass --note \"...\"")
             return 2
-        hit["status"] = status
+        # Apply findings/reason/escalations + the depth payload to the entry FIRST, so the substance bar
+        # is evaluated against the fields supplied in THIS same call (not stale on-disk state).
         if count is not None:
             hit["findings_count"] = count
         if note is not None:
             hit["reason"] = note
         if escalations:
-            have = list(hit.get("escalations", []) or [])
-            seen = set(have)
-            for t in escalations:
-                t = str(t).strip()
-                if t and t not in seen:
-                    seen.add(t)
-                    have.append(t)
-            hit["escalations"] = have
+            hit["escalations"] = _merge_list(hit.get("escalations"), escalations)
+        if attempts is not None:
+            try:
+                hit["attempts"] = max(0, int(attempts))
+            except (TypeError, ValueError):
+                pass
+        if variants:
+            hit["variants_tried"] = _merge_list(hit.get("variants_tried"), variants)
+        if depth_note is not None:
+            hit["depth_note"] = depth_note
+        if evidence is not None:
+            hit["evidence"] = evidence
+
+        # DEPTH-SUBSTANCE BAR on the `attempted` flip: a zero-finding clear must PROVE depth or it is a
+        # rubber-stamp. `gap` is None when substantiated (incl. any entry with >=1 finding).
+        depth_gap = None
+        if status == "attempted":
+            depth_gap = attempted_substance_gap(hit, depth_thresholds(_safe_map(), cat_id))
+            hit["depth_substantiated"] = depth_gap is None
+            if depth_gap is not None and require_depth:
+                # Refuse the flip: write NOTHING, so the category keeps its prior (re-drivable) status
+                # instead of being stamped a shallow 'attempted' that the gate would only reject later.
+                print(f"[!] refusing to mark {cat_id!r} attempted — {depth_gap}. Supply the depth payload "
+                      f"(--attempts / --variants / --depth-note or --evidence) or record real findings "
+                      f"(--count). The category stays re-drivable.")
+                return 2
+        hit["status"] = status
         atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+    if depth_gap is not None and not require_depth:
+        # Non-silent: recorded, but visibly weaker (depth_substantiated:false) — the completion gate will
+        # reject and re-drive this shallow clear. (Loud so it can't be rubber-stamped SILENTLY.)
+        print(f"[warn] {cat_id} marked 'attempted' WITHOUT depth evidence — {depth_gap}. Recorded as "
+              f"depth_substantiated:false; the completion gate will re-drive it until depth is proven "
+              f"or real findings land.")
     if as_json:
         print(json.dumps({"id": cat_id, "status": status,
                           "findings_count": hit.get("findings_count"),
                           "reason": hit.get("reason"),
-                          "escalations": hit.get("escalations", [])}, indent=2))
+                          "escalations": hit.get("escalations", []),
+                          "variants_tried": hit.get("variants_tried", []),
+                          "attempts": hit.get("attempts"),
+                          "depth_substantiated": hit.get("depth_substantiated")}, indent=2))
     else:
         tail = (f" findings={count}" if count is not None else "") + (f"  reason={note}" if note else "")
         tail += (f"  escalations+={len(escalations)}" if escalations else "")
+        tail += (f"  variants+={len(variants)}" if variants else "")
+        if status == "attempted":
+            tail += f"  depth_substantiated={hit.get('depth_substantiated')}"
         print(f"ok: {cat_id} -> status={status}{tail}")
     return 0
 
@@ -478,6 +674,9 @@ def reconcile_counts(led, findings, *, source_category=None):
             c["status"] = "attempted"
             dirty = True
         if dirty:
+            # A finding-backed flip is self-evidently substantiated (the finding is the depth proof), so it
+            # clears the depth-substance bar — record that so the completion gate never re-drives it.
+            c["depth_substantiated"] = True
             changed.append(cid)
     return changed
 
@@ -543,6 +742,17 @@ def main() -> int:
     ap.add_argument("--note", help="reason/note for --mark (required when status is skipped/n/a/blocked)")
     ap.add_argument("--escalations", help="--mark: comma-separated escalation.py ladder technique id(s) tried "
                     "(e.g. derive-not-assume,encoding-ladder); MERGED into the entry's escalations list")
+    ap.add_argument("--attempts", type=int, help="--mark: count of distinct probe attempts run for this "
+                    "category (depth-substance bar for a zero-finding 'attempted' clear)")
+    ap.add_argument("--variants", help="--mark: comma-separated technique-variant id(s) actually tried; "
+                    "MERGED into the entry's variants_tried (counts toward the depth-substance bar)")
+    ap.add_argument("--depth-note", dest="depth_note", help="--mark: a differential/blocker note of real "
+                    "length recording what the depth work observed (depth-substance bar)")
+    ap.add_argument("--evidence", help="--mark: an evidence pointer for the depth work (notebook/log/path) "
+                    "(satisfies the depth-substance bar's pointer requirement)")
+    ap.add_argument("--require-depth", action="store_true", dest="require_depth",
+                    help="--mark: REFUSE an 'attempted' flip that fails the depth-substance bar (rc=2, "
+                    "nothing written) so the category stays re-drivable instead of a rubber-stamped clear")
     ap.add_argument("--close", action="store_true",
                     help="reconcile the ledger's findings_count+status from the engagement's findings at "
                          "close (needs --engagement); use --source-category for a white-box run")
@@ -606,16 +816,28 @@ def main() -> int:
         if not args.status:
             ap.error("--mark needs --status (" + "|".join(sorted(_MARK_STATUSES)) + ")")
         esc = [t.strip() for t in (args.escalations or "").split(",") if t.strip()] or None
+        var = [t.strip() for t in (args.variants or "").split(",") if t.strip()] or None
         return mark(Path(args.engagement), args.mark, args.status,
-                    args.count, args.note, args.as_json, escalations=esc)
+                    args.count, args.note, args.as_json, escalations=esc,
+                    attempts=args.attempts, variants=var, depth_note=args.depth_note,
+                    evidence=args.evidence, require_depth=args.require_depth)
 
     if args.validate:
         if not args.engagement:
             ap.error("--validate needs --engagement")
         ok, lines, msgs, = validate(Path(args.engagement), m, args.strict)
         if args.as_json:
+            extra = {}
+            try:
+                _ledp = Path(args.engagement) / LEDGER_NAME
+                if _ledp.is_file():
+                    _led = json.loads(_ledp.read_text(encoding="utf-8"))
+                    extra = {"redrivable": redrivable_ids(_led, m),
+                             "shallow_attempted": shallow_attempted_ids(_led, m)}
+            except Exception:  # noqa: BLE001
+                extra = {}
             print(json.dumps({"engagement": args.engagement, "pass": ok,
-                              "messages": msgs, "summary": lines}, indent=2))
+                              "messages": msgs, "summary": lines, **extra}, indent=2))
         else:
             print(f"# Coverage validation -- {args.engagement}")
             for l in lines:

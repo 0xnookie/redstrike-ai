@@ -62,6 +62,47 @@ def check_frontmatter(md_path, label):
             err(f"{label}: frontmatter missing '{k}'")
 
 
+def check_depth_substance(rmap):
+    """Lint routing-map.json's `depth_substance` threshold shape (the DEPTH-SUBSTANCE BAR a zero-finding
+    `attempted` clear must prove before the completion gate counts it covered). A malformed/incomplete block
+    would silently disable or mis-tune the bar — "a gate the workflow can route around is not real" — so any
+    drift FAILS. The block is OPTIONAL (absent => coverage.py uses its built-in default); when present it
+    must be {default:{min_attempts,min_variants}, classes?:{<category-id>:{min_attempts,min_variants}}} with
+    non-negative integers and class keys that are real category ids. Returns a list of error strings."""
+    out = []
+    cfg = rmap.get("depth_substance")
+    if cfg is None:
+        return out
+    if not isinstance(cfg, dict):
+        return ["routing-map.json: 'depth_substance' must be an object {default, classes?}"]
+
+    def _check_entry(where, obj):
+        if not isinstance(obj, dict):
+            out.append(f"routing-map.json: depth_substance {where} must be an object with integer "
+                       f"min_attempts / min_variants")
+            return
+        for k in ("min_attempts", "min_variants"):
+            if k not in obj:
+                out.append(f"routing-map.json: depth_substance {where} is missing '{k}'")
+            elif not isinstance(obj[k], int) or isinstance(obj[k], bool) or obj[k] < 0:
+                out.append(f"routing-map.json: depth_substance {where} '{k}' must be a non-negative integer")
+
+    if "default" not in cfg:
+        out.append("routing-map.json: depth_substance must declare a 'default' {min_attempts, min_variants}")
+    else:
+        _check_entry("default", cfg["default"])
+    classes = cfg.get("classes", {})
+    if not isinstance(classes, dict):
+        out.append("routing-map.json: depth_substance.classes must be an object keyed by category id")
+    else:
+        valid_ids = {c.get("id") for c in rmap.get("categories", [])}
+        for cid, obj in classes.items():
+            if cid not in valid_ids:
+                out.append(f"routing-map.json: depth_substance.classes has unknown category id '{cid}'")
+            _check_entry(f"classes['{cid}']", obj)
+    return out
+
+
 # 1 + 2 + 3 — skills
 skills_dir = ROOT / "skills"
 for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_contract"):
@@ -245,6 +286,11 @@ else:
                 for missing in sorted(vocab - schema_vocab):
                     err(f"signals.schema.json: enum is MISSING '{missing}' from the routing-map vocab "
                         f"(it could not be validated at ingest)")
+
+        # 7d — depth-substance threshold shape (the DEPTH-SUBSTANCE BAR config; see check_depth_substance)
+        for _dse in check_depth_substance(rmap):
+            err(_dse)
+        checked["depth_substance"] = checked.get("depth_substance", 0) + 1
 
 # 8 — coverage.py routing/ledger self-test
 try:
