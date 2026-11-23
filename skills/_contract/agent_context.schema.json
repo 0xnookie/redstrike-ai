@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://redstrike.ai/schemas/agent_context.schema.json",
   "title": "Redstrike Agent-Protocol Context",
-  "description": "Shared pre-analysis emitted by the agent-recon feeder and consumed by excessive-agency / prompt-injection / sensitive-disclosure / llm-output-handling. Maps an AI agent endpoint's protocol, capability surface, and auth/transport posture (OWASP Top 10 for Agentic Applications, ASI01-ASI10). Enumeration only; nothing discovered is ever invoked.",
+  "description": "Shared pre-analysis emitted by the agent-recon feeder and consumed by the agentic executors (agent-goal-hijack ASI01 / agent-tool-abuse ASI02+ASI05 / agent-memory-poisoning ASI06 / a2a-exploitation ASI07) and the generic LLM executors (excessive-agency / prompt-injection / sensitive-disclosure / llm-output-handling). Maps an AI agent endpoint's protocol, capability surface, and auth/transport posture (OWASP Top 10 for Agentic Applications, ASI01-ASI10). Enumeration only; nothing discovered is ever invoked.",
   "type": "object",
   "required": ["target", "generated_at"],
   "additionalProperties": false,

@@ -805,6 +805,26 @@
       "notes": "agent-recon feeds agent-protocol surface"
     },
     {
+      "id": "agentic",
+      "name": "AI agent protocols (OWASP Agentic Top 10)",
+      "owasp": "ASI",
+      "phase": "ai-llm",
+      "pattern": "family",
+      "feeder": "agent-recon",
+      "agents": [
+        "agent-goal-hijack",
+        "agent-tool-abuse",
+        "agent-memory-poisoning",
+        "a2a-exploitation"
+      ],
+      "baseline": false,
+      "triggers": [
+        "feature:agent-tools"
+      ],
+      "skip_reason": "no agent-protocol (MCP/A2A/OpenAPI tool) surface reachable",
+      "notes": "fed by agent-recon's agent_context.json; ASI01 goal-hijack / ASI02+ASI05 tool-abuse / ASI06 memory-poisoning / ASI07 a2a. The generic LLM-family classes (prompt-injection / excessive-agency / data-poisoning) stay in the 'llm' category."
+    },
+    {
       "id": "ai-supply-chain",
       "name": "AI/ML supply chain (LLM03)",
       "owasp": "LLM",

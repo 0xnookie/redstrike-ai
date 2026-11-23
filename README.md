@@ -17,9 +17,9 @@ Redstrike AI
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20WSTG%20%7C%20LLM%20Top%2010%20%7C%20ATT%26CK-informational)]()
-[![Skills](https://img.shields.io/badge/Skills-111-brightgreen)]()
-[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-83-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-83-blueviolet)]()
+[![Skills](https://img.shields.io/badge/Skills-115-brightgreen)]()
+[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-87-brightgreen)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-87-blueviolet)]()
 [![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-7%20agents-8A2BE2)]()
 [![Families](https://img.shields.io/badge/Vuln%20Families-13-red)]()
 [![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20Web3%20%7C%20AD%20%7C%20Cloud%20%7C%20Mobile%2FIoT%20%7C%20PostEx-red)]()
@@ -118,7 +118,7 @@ Build order and the full spec live in [`skills/_contract/README.md`](skills/_con
 
 ## 🤖 Agents & Skills
 
-**111 skills** — **83 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (83 `*-verify` agents), plus **28 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
+**115 skills** — **87 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (87 `*-verify` agents), plus **28 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 
 Above the per-class reviewers sit two **cross-cutting review agents** — `adversarial-verify` (cross-model second opinion on accepted High/Critical findings + chains) and `exhaustion-adversary` (cross-model challenge to the completion claim) — plus three deterministic **guard hooks** that catch report-integrity slips before they ship: a dangling-evidence-reference guard (never cite an artifact that doesn't exist), a chain-pressure hook (a feeder-class finding isn't done until chained or ruled out), and a bug-bounty-scoped never-submit guard.
 
@@ -135,6 +135,8 @@ Above the per-class reviewers sit two **cross-cutting review agents** — `adver
 **Crypto · TLS · supply chain** ✅ — `crypto-attacks` (padding-oracle / ECB / weak-IV / bit-flip / length-extension) · `tls-attacks` (weak proto / cipher / cert; Heartbleed / POODLE / ROBOT …) · `supply-chain` (A06 dependency / resolver confusion)
 
 **AI / LLM** ✅ (OWASP LLM Top 10 2025) — `llm-context` · `agent-recon` (agent-protocol recon: MCP/A2A/OpenAPI) → `prompt-injection` (LLM01) · `sensitive-disclosure` (LLM02/07/08) · `ai-supply-chain` (LLM03) · `data-poisoning` (LLM04) · `llm-output-handling` (LLM05) · `excessive-agency` (LLM06)
+
+**AI agent protocols** ✅ (OWASP Agentic Top 10 / ASI) — `agent-recon` feeds → `agent-goal-hijack` (ASI01, multi-step goal/plan redirection) · `agent-tool-abuse` (ASI02/ASI05, gated tool-chain / MCP `tools/call` / tool-definition abuse) · `agent-memory-poisoning` (ASI06, cross-session memory) · `a2a-exploitation` (ASI07, inter-agent trust) — the agent-architecture classes beyond the generic LLM Top 10
 
 **Web3 / smart contract** ✅ (OWASP Smart Contract Top 10) — `web3-context` (contracts / proxy / surface + pre-dive worth-it score) → `sc-access-control` · `sc-upgradeability` · `sc-accounting` · `sc-oracle-mev` · `sc-reentrancy` · `sc-signature` — every finding proven on a **local Foundry fork** (no live tx, no real funds)
 
@@ -348,6 +350,7 @@ The roster (168 tools across 19 categories) is defined once in
 - ✅ **Recon + tooling** — `osint` / `host-discovery` / `content-discovery` (custom wordlists) / `js-analysis` / `source-audit`; `scripts/doctor.sh` + `scripts/install.sh` (168 tools / 19 categories) — see [`INSTALL.md`](INSTALL.md)
 - ✅ **Web console** + the **`redstrike` CLI** (Claude Code as the engine)
 - ✅ **Trust & engine hardening** — measured **evidence-sufficiency scoring** + a **depth-substance coverage bar**, a **cross-model exhaustion adversary** gating report-readiness, report-integrity **guard hooks**, a concurrent multi-model **worker-pool** (`--shard-models`), and an offline **bug-bounty program-intel** feeder (scope / policy / duplicate-check)
+- ✅ **Agentic / MCP exploitation** — OWASP Agentic Top 10 (ASI): `agent-goal-hijack` · `agent-tool-abuse` · `agent-memory-poisoning` · `a2a-exploitation` (fed by `agent-recon`)
 
 ---
 
