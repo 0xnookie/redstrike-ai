@@ -1,9 +1,11 @@
+import concurrent.futures
 import io
 import json
 import os
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import contextmanager, redirect_stdout
 from types import SimpleNamespace
@@ -718,6 +720,329 @@ class TestPlanPreSteps(unittest.TestCase):
                 self.assertEqual(len(calls), 1)   # ran before the one resume leg, NOT the first leg
         finally:
             runloop.run_plan_steps = orig
+
+
+# --- Wave-2 (2b) multi-process worker-pool scheduler -------------------------
+class _PoolLeg:
+    """One scripted shard leg (per model, per wave): its cost, tool calls, rc, and an optional side effect
+    that mutates the engagement dir (serialized by the fake engine's lock so test ledger writes can't tear)."""
+
+    def __init__(self, cost=0.1, tool_calls=5, rc=0, side_effect=None):
+        self.cost = cost
+        self.tool_calls = tool_calls
+        self.rc = rc
+        self.side_effect = side_effect
+
+
+class _FakePoolEngine:
+    """Thread-safe fake engine for drive_pool: scripts per-MODEL wave outcomes. Records every
+    build_invocation's (model, max_budget, resume, session_id), and serializes run() — including the ledger
+    side effect — under a lock so concurrent shards can't tear the test's ledger writes."""
+
+    def __init__(self, scripts, default=None):
+        # scripts: {model: [ _PoolLeg per sequential run of THAT model ]}; `default` when a model runs past
+        # the end of its script (e.g. a model that crashes every wave).
+        self.scripts = scripts
+        self.default = default or _PoolLeg(cost=0.1, tool_calls=5)
+        self._lock = threading.Lock()
+        self.calls = []          # (model, max_budget, resume, session_id) per build_invocation
+        self.models_seen = []
+        self.session_ids = []
+        self.prompts = []        # the prompt each build_invocation got
+        self.run_counts = {}     # per-model run index
+
+    def build_invocation(self, prep, repo, prompt, *, mode="autonomous", allow=None, max_turns=200,
+                         max_budget=20.0, resume=False, model=None, shard_models=None):
+        with self._lock:
+            sid = getattr(prep, "session_id", None)
+            self.calls.append((model, max_budget, resume, sid))
+            self.models_seen.append(model)
+            self.session_ids.append(sid)
+            self.prompts.append(prompt)
+        return SimpleNamespace(argv=["fake"], allowed=[], model=model)
+
+    def run(self, prep, eng_dir, inv, *, mode="autonomous", audit=None):
+        with self._lock:  # serialize side effects so concurrent ledger writes stay deterministic in tests
+            model = getattr(inv, "model", None)
+            i = self.run_counts.get(model, 0)
+            self.run_counts[model] = i + 1
+            script = self.scripts.get(model, [])
+            leg = script[i] if i < len(script) else self.default
+            if leg.side_effect:
+                leg.side_effect(pathlib.Path(eng_dir))
+            s = autorun.RunSummary(cost_usd=leg.cost, tool_calls=leg.tool_calls)
+            return engines.RunResult(rc=leg.rc, summary=s, started="2026-01-01T00:00:00Z",
+                                     ended="2026-01-01T00:05:00Z")
+
+
+class _SyncExecutor:
+    """A ThreadPoolExecutor-shaped stand-in that runs each submitted task INLINE (no real threads), so the
+    pool tests are fully deterministic. Mirrors the `with factory(max_workers=n) as ex: ex.submit(...)` +
+    `as_completed` protocol drive_pool uses."""
+
+    def __init__(self, max_workers=None):
+        self.max_workers = max_workers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def submit(self, fn, *args, **kw):
+        f = concurrent.futures.Future()
+        try:
+            f.set_result(fn(*args, **kw))
+        except BaseException as e:   # pragma: no cover - drive_pool traps shard errors itself
+            f.set_exception(e)
+        return f
+
+
+class _RecordingFactory:
+    """Records the max_workers drive_pool requested, then delegates to `cls` (default: the sync executor)."""
+
+    def __init__(self, cls=_SyncExecutor):
+        self.cls = cls
+        self.max_workers = None
+        self.made = 0
+
+    def __call__(self, max_workers=None):
+        self.max_workers = max_workers
+        self.made += 1
+        return self.cls(max_workers=max_workers)
+
+
+def _drive_pool(engine, eng_dir, *, gate, models, max_budget_usd=100.0, first_resume=False,
+                now=None, prep=None, executor_factory=None):
+    return runloop.drive_pool(
+        engine, prep or _prep(), pathlib.Path("/repo"), eng_dir,
+        first_prompt="GO", extra_allow=[], max_turns=50, max_budget_usd=max_budget_usd,
+        first_resume=first_resume, audit=eng_dir / "runtime" / "autorun.jsonl",
+        engagement_id="acme-eng", shard_models=models, gate_verify=gate, emit=_silent,
+        now=now, sleep=lambda _s: None, executor_factory=executor_factory,
+    )
+
+
+class TestShardModelList(unittest.TestCase):
+    """Backward-compat DISPATCH predicate: no / one shard-model stays on `drive`; >1 selects `drive_pool`."""
+
+    def test_normalizes_list_and_string(self):
+        self.assertEqual(runloop.shard_model_list(None), [])
+        self.assertEqual(runloop.shard_model_list(""), [])
+        self.assertEqual(runloop.shard_model_list("x"), ["x"])
+        self.assertEqual(runloop.shard_model_list("a,b"), ["a", "b"])
+        self.assertEqual(runloop.shard_model_list(" a , ,b "), ["a", "b"])  # trimmed, blanks dropped
+        self.assertEqual(runloop.shard_model_list(["a", "", " b "]), ["a", "b"])
+
+    def test_dispatch_threshold(self):
+        # the CLI rule: len(...) > 1 ⇒ pool, else the unchanged single-session drive
+        self.assertFalse(len(runloop.shard_model_list(None)) > 1)
+        self.assertFalse(len(runloop.shard_model_list("solo")) > 1)
+        self.assertTrue(len(runloop.shard_model_list("a,b")) > 1)
+        # drive and drive_pool are distinct entry points
+        self.assertIsNot(runloop.drive, runloop.drive_pool)
+
+
+class TestDrivePool(unittest.TestCase):
+    def test_fanout_threads_models_and_sessions_then_completes(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"},
+                                {"id": "sqli", "status": "pending"}])
+
+            def done(e):  # the "A" shard finishes the engagement in wave 1
+                _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1},
+                                  {"id": "sqli", "status": "attempted", "findings_count": 1}])
+
+            engine = _FakePoolEngine({
+                "A": [_PoolLeg(cost=0.2, tool_calls=5, side_effect=done)],
+                "B": [_PoolLeg(cost=0.3, tool_calls=5)],
+            })
+            factory = _RecordingFactory()
+            prep = _prep()
+            res = _drive_pool(engine, eng, gate=_gate([0]), models="A,B", prep=prep,
+                              executor_factory=factory)
+
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 1)                  # one wave
+            self.assertEqual(factory.max_workers, 2)              # N shards -> N workers
+            # BOTH shard models were threaded through to build_invocation
+            self.assertEqual(set(engine.models_seen), {"A", "B"})
+            # each shard ran as a FRESH (resume=False) leg, each with its OWN (distinct) session id
+            self.assertTrue(all(resume is False for (_, _, resume, _) in engine.calls))
+            self.assertEqual(len(set(engine.session_ids)), 2)
+            self.assertNotIn("sess-1", engine.session_ids)        # cloned, not the shared operator session
+            self.assertEqual(prep.session_id, "sess-1")           # the original prep is untouched
+            # costs combine across both shards
+            self.assertAlmostEqual(res.cumulative_cost, 0.5)
+            self.assertAlmostEqual(res.result.summary.cost_usd, 0.5)
+            # every shard attempt is aggregated + tagged with its shard/model
+            self.assertEqual(len(res.legs), 2)
+            self.assertEqual({l["model"] for l in res.legs}, {"A", "B"})
+            self.assertEqual({l["shard"] for l in res.legs}, {0, 1})
+
+    def test_aggregate_budget_is_partitioned_across_shards(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+            engine = _FakePoolEngine({
+                "A": [_PoolLeg(cost=1.0, tool_calls=5,
+                               side_effect=lambda e: _write_ledger(
+                                   e, [{"id": "xss", "status": "attempted", "findings_count": 1}]))],
+                "B": [_PoolLeg(cost=1.0, tool_calls=5)],
+            })
+            res = _drive_pool(engine, eng, gate=_gate([0]), models="A,B", max_budget_usd=60.0,
+                              executor_factory=_RecordingFactory())
+            self.assertEqual(res.reason, runloop.DONE)
+            shard_budgets = [b for (_, b, _, _) in engine.calls]
+            # the remaining global budget (60) is split evenly: each shard gets 30, never more
+            self.assertEqual(shard_budgets, [30.0, 30.0])
+            self.assertEqual(sum(shard_budgets), 60.0)            # aggregate == global, not more
+            self.assertTrue(all(b <= 60.0 for b in shard_budgets))
+            self.assertEqual(res.budgets, [30.0])                 # one per-shard slice recorded per wave
+
+    def test_budget_exhausted_stops_the_pool(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])  # never clears
+            engine = _FakePoolEngine(
+                {"A": [_PoolLeg(cost=3.0, tool_calls=5)], "B": [_PoolLeg(cost=3.0, tool_calls=5)]},
+                default=_PoolLeg(cost=3.0, tool_calls=5),   # every wave past the script still spends 3/shard
+            )
+            # gate never clears; each wave spends 6; budget 10 -> exhausted before the 3rd wave
+            res = _drive_pool(engine, eng, gate=_gate([2]), models="A,B", max_budget_usd=10.0,
+                              executor_factory=_RecordingFactory())
+            self.assertEqual(res.reason, runloop.BUDGET_EXHAUSTED)
+            self.assertEqual(res.invocations, 2)                  # two waves, then the ceiling trips
+            self.assertAlmostEqual(res.cumulative_cost, 12.0)
+            # first wave split 10/2=5 each; second wave split (10-6)/2=2 each
+            self.assertEqual(res.budgets, [5.0, 2.0])
+
+    def test_one_shard_crashes_pool_continues_and_ends_honestly(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+
+            def complete(e):
+                _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+
+            engine = _FakePoolEngine({
+                "A": [_PoolLeg(cost=0.1, tool_calls=0, rc=1),      # wave1: A crashes
+                      _PoolLeg(cost=0.1, tool_calls=0, rc=1)],     # wave2: A crashes again
+                "B": [_PoolLeg(cost=0.1, tool_calls=5),            # wave1: B works, not done
+                      _PoolLeg(cost=0.1, tool_calls=5, side_effect=complete)],  # wave2: B completes
+            })
+            with _set_env("REDSTRIKE_CRASH_RETRIES", "0"):         # one attempt per shard per wave
+                res = _drive_pool(engine, eng, gate=_gate([2, 0]), models="A,B",
+                                  executor_factory=_RecordingFactory())
+            # a single crashed shard did NOT fail the run — B's progress carried it to DONE
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 2)
+            # both the crashed (A, rc=1) and the healthy (B, rc=0) attempts are captured, tagged by model
+            a_legs = [l for l in res.legs if l["model"] == "A"]
+            b_legs = [l for l in res.legs if l["model"] == "B"]
+            self.assertTrue(a_legs and all(l["rc"] == 1 for l in a_legs))
+            self.assertTrue(b_legs and all(l["rc"] == 0 for l in b_legs))
+
+    def test_all_shards_crash_is_engine_crash(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+            engine = _FakePoolEngine({
+                "A": [_PoolLeg(cost=0.1, tool_calls=0, rc=1)],
+                "B": [_PoolLeg(cost=0.1, tool_calls=0, rc=1)],
+            })
+            with _set_env("REDSTRIKE_CRASH_RETRIES", "0"):
+                res = _drive_pool(engine, eng, gate=_gate([2]), models="A,B",
+                                  executor_factory=_RecordingFactory())
+            self.assertEqual(res.reason, runloop.ENGINE_CRASH)
+            self.assertNotEqual(res.reason, runloop.NO_PROGRESS)
+            self.assertEqual(res.invocations, 1)
+            self.assertNotEqual(res.result.rc, 0)                 # combined rc propagates the crash
+            detail = (res.stop_detail or "").lower()
+            self.assertIn("crash", detail)
+            self.assertIn("engine", detail)
+
+    def test_worker_exception_is_isolated_not_fatal(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+
+            class _ExplodingThenFine:
+                """Shard 'A' raises from run() (a worker-level exception), 'B' completes the engagement."""
+
+                def __init__(self):
+                    self._lock = threading.Lock()
+                    self.models_seen = []
+
+                def build_invocation(self, prep, repo, prompt, *, mode="autonomous", allow=None,
+                                     max_turns=200, max_budget=20.0, resume=False, model=None,
+                                     shard_models=None):
+                    with self._lock:
+                        self.models_seen.append(model)
+                    return SimpleNamespace(argv=["fake"], allowed=[], model=model)
+
+                def run(self, prep, eng_dir, inv, *, mode="autonomous", audit=None):
+                    model = getattr(inv, "model", None)
+                    if model == "A":
+                        raise RuntimeError("shard A blew up inside run()")
+                    with self._lock:
+                        _write_ledger(pathlib.Path(eng_dir),
+                                      [{"id": "xss", "status": "attempted", "findings_count": 1}])
+                    s = autorun.RunSummary(cost_usd=0.1, tool_calls=5)
+                    return engines.RunResult(rc=0, summary=s, started="2026-01-01T00:00:00Z",
+                                             ended="2026-01-01T00:05:00Z")
+
+            engine = _ExplodingThenFine()
+            with _set_env("REDSTRIKE_CRASH_RETRIES", "0"):
+                res = _drive_pool(engine, eng, gate=_gate([0]), models="A,B",
+                                  executor_factory=_RecordingFactory())
+            # A raising did NOT crash the pool; B finished the engagement
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 1)
+
+    def test_real_threadpool_executor_end_to_end(self):
+        # exercise the DEFAULT concurrent.futures.ThreadPoolExecutor (real threads) with the lock-guarded
+        # fake engine — proves the scheduler is thread-safe end to end, not just under the sync executor.
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"},
+                                {"id": "sqli", "status": "pending"}])
+
+            def done(e):
+                _write_ledger(e, [{"id": "xss", "status": "attempted", "findings_count": 1},
+                                  {"id": "sqli", "status": "attempted", "findings_count": 1}])
+
+            engine = _FakePoolEngine({
+                "A": [_PoolLeg(cost=0.1, tool_calls=5, side_effect=done)],
+                "B": [_PoolLeg(cost=0.1, tool_calls=5)],
+                "C": [_PoolLeg(cost=0.1, tool_calls=5)],
+            })
+            res = _drive_pool(engine, eng, gate=_gate([0]), models="A,B,C",
+                              executor_factory=None)   # None -> real ThreadPoolExecutor
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 1)
+            self.assertEqual(set(engine.models_seen), {"A", "B", "C"})
+            self.assertEqual(len(res.legs), 3)
+
+    def test_later_waves_use_continue_prompt(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "sqli", "status": "pending"}])
+
+            def complete(e):
+                _write_ledger(e, [{"id": "sqli", "status": "attempted", "findings_count": 1}])
+
+            engine = _FakePoolEngine({
+                "A": [_PoolLeg(cost=0.1, tool_calls=5),            # wave1: progress, not done
+                      _PoolLeg(cost=0.1, tool_calls=5, side_effect=complete)],
+                "B": [_PoolLeg(cost=0.1, tool_calls=5),
+                      _PoolLeg(cost=0.1, tool_calls=5)],
+            })
+            res = _drive_pool(engine, eng, gate=_gate([2, 0]), models="A,B",
+                              executor_factory=_RecordingFactory())
+            self.assertEqual(res.reason, runloop.DONE)
+            self.assertEqual(res.invocations, 2)
+            # 4 build_invocations: wave1 (A,B) then wave2 (A,B), deterministic under the sync executor
+            self.assertEqual(len(engine.prompts), 4)
+            # wave 1 shards get the launch prompt ("GO"); wave 2 shards get the continue-prompt
+            self.assertEqual(engine.prompts[0], "GO")
+            self.assertEqual(engine.prompts[1], "GO")
+            self.assertIn("Continue Redstrike engagement", engine.prompts[2])
+            self.assertIn("Continue Redstrike engagement", engine.prompts[3])
+            self.assertIn("sqli", engine.prompts[2])  # the continue-prompt names the still-outstanding class
 
 
 if __name__ == "__main__":

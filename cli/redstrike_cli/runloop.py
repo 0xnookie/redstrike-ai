@@ -29,6 +29,8 @@ The pure pieces (`made_progress`, `pending_ids`, `continue_prompt`, `loop_degrad
 """
 from __future__ import annotations
 
+import concurrent.futures
+import copy
 import datetime as _dt
 import json
 import os
@@ -624,16 +626,18 @@ def _plural(n: int, word: str) -> str:
 
 
 # --- single-leg execution + crash recovery -----------------------------------
-# WAVE-2 SEAM — the DEFERRED 2b (multi-process worker pool). This wave shipped 2a: the parallel
-# multi-model hunter swarm now runs IN-PROCESS as concurrent `Agent`/Task subagents fanned out per rank
-# wave by the orchestrator SKILL (§2b), with the resume legs ordered by hunt_plan rank (continue_prompt).
-# 2b — promoting `drive` from a single-session resumer into an N-PROCESS scheduler that runs several
-# `claude -p` legs at once, each a shard with its own model (consuming a `--shard-models` argv) — is the
-# NEXT step and is NOT built here. The seam is already in place for it: `_execute_leg` is the ATOMIC unit
-# of engine work (the per-shard call a pool fans out) and `_run_leg` wraps it with the rc-branching /
-# bounded-retry / resume-fallback a pool can reuse per shard. Keep these two factored OUT of `drive` so a
-# future pool can call the single-leg path directly per shard; do not inline them back. `drive` composes
-# `_run_leg` across resumed legs of the single session — a 2b pool would compose it across shards.
+# WAVE-2 SEAM — the atomic engine-leg primitives shared by the single-session resumer (`drive`) and the
+# multi-process worker pool (`drive_pool`). Wave 2 shipped 2a (the in-process multi-model hunter swarm: the
+# orchestrator SKILL fans executors out as concurrent `Agent`/Task subagents per rank wave, §2b, with the
+# resume legs ordered by hunt_plan rank — see `continue_prompt`) AND 2b (this module's `drive_pool`: an
+# N-PROCESS scheduler that runs several `claude -p` legs at once — one SHARD per `--shard-models` entry,
+# each on its own model + its own session — for a cheap model-diversity pass that raises recall). Both are
+# built on these two primitives: `_execute_leg` is the ATOMIC unit of engine work (the per-shard call a pool
+# fans out) and `_run_leg` wraps it with the rc-branching / bounded-retry / resume-fallback that every shard
+# reuses for free. Keep them factored OUT of `drive`/`drive_pool` — do NOT inline them back: `drive` composes
+# `_run_leg` across resumed legs of ONE session; `drive_pool` composes it across concurrent shards. The
+# post-leg/post-wave completion contract is itself factored into `_decide_stop` so the two drivers can never
+# diverge on when the engagement is DONE / blocked / stuck.
 
 @dataclass
 class _LegOutcome:
@@ -647,13 +651,20 @@ class _LegOutcome:
 
 
 def _execute_leg(engine, prep, repo: Path, eng_dir: Path, *, prompt: str, resume: bool,
-                 extra_allow: list, max_turns: int, leg_budget: float, audit: Path):
+                 extra_allow: list, max_turns: int, leg_budget: float, audit: Path,
+                 model: str | None = None):
     """Build + run EXACTLY ONE engine leg; return its ``RunResult``. The atomic unit of engine work
-    (see the WAVE-2 SEAM note above — this is what a worker pool calls per shard)."""
-    inv = engine.build_invocation(
-        prep, repo, prompt, mode="autonomous", allow=extra_allow,
-        max_turns=max_turns, max_budget=leg_budget, resume=resume,
-    )
+    (see the WAVE-2 SEAM note above — this is what the worker pool calls per shard).
+
+    ``model`` routes THIS leg to a specific engine model (a pool shard's own model). It is forwarded to
+    ``build_invocation`` ONLY when set, so the single-session ``drive`` path (which never supplies one)
+    calls ``build_invocation`` with the EXACT same arguments as before — no behavior change, and an engine
+    double whose ``build_invocation`` has no ``model`` kwarg stays compatible."""
+    kwargs = dict(mode="autonomous", allow=extra_allow, max_turns=max_turns,
+                  max_budget=leg_budget, resume=resume)
+    if model is not None:
+        kwargs["model"] = model
+    inv = engine.build_invocation(prep, repo, prompt, **kwargs)
     return engine.run(prep, eng_dir, inv, mode="autonomous", audit=audit)
 
 
@@ -685,7 +696,7 @@ def _reseed_session(prep, eng_dir: Path) -> str | None:
 def _run_leg(engine, prep, repo: Path, eng_dir: Path, *, prompt: str, resume: bool,
              extra_allow: list, max_turns: int, audit: Path, engagement_id: str,
              cost_so_far: float, max_budget_usd: float, crash_retries: int,
-             sleep, backoff: float) -> _LegOutcome:
+             sleep, backoff: float, model: str | None = None) -> _LegOutcome:
     """Run ONE logical leg, BRANCHING ON ``rc`` so an engine CRASH is handled on its own path and can
     no longer masquerade as a no-progress stall:
 
@@ -708,7 +719,7 @@ def _run_leg(engine, prep, repo: Path, eng_dir: Path, *, prompt: str, resume: bo
         leg_budget = max(_remaining(), BUDGET_FLOOR)
         res = _execute_leg(engine, prep, repo, eng_dir, prompt=p, resume=r,
                            extra_allow=extra_allow, max_turns=max_turns,
-                           leg_budget=leg_budget, audit=audit)
+                           leg_budget=leg_budget, audit=audit, model=model)
         cost = _cost_of(res)
         out.cost += cost
         out.res = res
@@ -746,6 +757,33 @@ def _run_leg(engine, prep, repo: Path, eng_dir: Path, *, prompt: str, resume: bo
     if out.crashed:
         out.cause = diagnostics.leg_cause(out.attempts[-1] if out.attempts else None)
     return out
+
+
+def _decide_stop(repo: Path, eng_dir: Path, *, gate_verify, prev: "Snapshot | None",
+                 cur: "Snapshot", stalls: int) -> tuple[str | None, int]:
+    """The SHARED post-leg / post-wave completion+stop decision, factored out so the single-session
+    ``drive`` and the concurrent ``drive_pool`` evaluate the completion contract IDENTICALLY — one copy,
+    no divergence. Given the freshly-written engagement state (read via ``eng_dir``) plus this leg/wave's
+    ``cur`` snapshot and the previous ``prev``, return ``(reason, stalls)``:
+
+      * ``reason`` is a terminal stop reason (``DONE`` / ``BLOCKED_ON_APPROVAL`` / ``NO_PROGRESS``) or
+        ``None`` to keep looping;
+      * ``stalls`` is the updated consecutive-no-progress count the caller carries forward.
+
+    It deliberately does NOT handle an engine crash (the caller branches on rc / crash BEFORE calling this)
+    nor the hard ceilings (budget / max-invocations / wall-clock, checked before each new leg/wave). The
+    order matches the original inline logic exactly: DONE first (gate clear AND nothing re-drivable — a gate
+    that merely PASSES while categories are still `blocked` is NOT finished), then blocked-on-approval
+    (deferrals exist and this leg/wave made no OTHER progress), then the two-strike no-progress breaker."""
+    if _gate_done(gate_verify, repo, eng_dir) and not redrivable_ids(read_ledger(eng_dir)):
+        return DONE, stalls
+    progressed = made_progress(prev, cur)
+    if pending_approvals_count(eng_dir) and not progressed:
+        return BLOCKED_ON_APPROVAL, stalls
+    stalls = stalls + 1 if not progressed else 0
+    if stalls >= STALL_LIMIT:
+        return NO_PROGRESS, stalls
+    return None, stalls
 
 
 def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_allow: list,
@@ -833,25 +871,15 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
             crash_cause = outcome.cause
             break
 
-        # --- completion / stop decisions ---
-        # DONE only when the gate is clear AND no re-drivable work (pending OR blocked) remains. A
-        # gate that PASSES while categories are still `blocked` (e.g. non-destructive detection an
-        # over-cautious engine mislabeled "approval-gated") is NOT a finished engagement — keep
-        # resuming so the continue-prompt drives those categories to actually run.
-        gate_clear = _gate_done(gate_verify, repo, eng_dir)
-        if gate_clear and not redrivable_ids(read_ledger(eng_dir)):
-            reason = DONE
-            break
-
+        # --- completion / stop decisions (the shared completion contract — see _decide_stop) ---
+        # DONE only when the gate is clear AND no re-drivable work (pending OR blocked) remains. A gate
+        # that PASSES while categories are still `blocked` (e.g. non-destructive detection an over-cautious
+        # engine mislabeled "approval-gated") is NOT a finished engagement — keep resuming so the
+        # continue-prompt drives those categories to actually run.
         cur = snapshot(eng_dir, res)
-        progressed = made_progress(prev, cur)
-        n_approvals = pending_approvals_count(eng_dir)
-        if n_approvals and not progressed:
-            reason = BLOCKED_ON_APPROVAL
-            break
-        stalls = stalls + 1 if not progressed else 0
-        if stalls >= STALL_LIMIT:
-            reason = NO_PROGRESS
+        stop, stalls = _decide_stop(repo, eng_dir, gate_verify=gate_verify, prev=prev, cur=cur, stalls=stalls)
+        if stop is not None:
+            reason = stop
             break
 
         prev = cur
@@ -901,6 +929,309 @@ def drive(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_a
     return LoopResult(
         result=combined,
         invocations=invocations,
+        cumulative_cost=cumulative_cost,
+        reason=reason,
+        stop_detail=detail,
+        budgets=budgets,
+        pending_count=pending_count,
+        legs=legs,
+    )
+
+
+# --- Wave-2 (2b) multi-process worker-pool scheduler --------------------------
+# `drive` resumes ONE session leg-after-leg; `drive_pool` fans several `claude -p` legs out AT ONCE — one
+# shard per `--shard-models` entry, each on its own model — and joins them into a WAVE, then runs the SAME
+# completion contract (`_decide_stop`) on the joined on-disk state, wave after wave, until it (or a ceiling)
+# trips. See the WAVE-2 SEAM note above the single-leg primitives it composes.
+
+def shard_model_list(shard_models) -> list[str]:
+    """Normalize a ``--shard-models`` spec (a list/tuple, or a comma string) into a clean list of model ids,
+    trimming whitespace and dropping blanks. The CLI dispatches on the LENGTH: ``> 1`` entries ⇒ the
+    concurrent pool (``drive_pool``), otherwise the single-session ``drive`` — so no / one shard-model is
+    byte-for-byte the legacy path."""
+    if isinstance(shard_models, (list, tuple)):
+        parts = [str(x).strip() for x in shard_models]
+    else:
+        parts = [p.strip() for p in str(shard_models or "").split(",")]
+    return [p for p in parts if p]
+
+
+def _tool_calls_of(res) -> int:
+    """Per-leg tool-call count from a RunResult's RunSummary (0 when absent/garbage) — summed across a
+    wave's shards to feed the no-progress breaker the same signal ``snapshot`` gives the single path."""
+    s = getattr(res, "summary", None)
+    try:
+        return int(getattr(s, "tool_calls", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+@dataclass
+class _ShardResult:
+    """One shard's outcome within a wave: its index, the model it ran on, the ``_LegOutcome`` it produced
+    (or None if the worker itself raised before producing one), and any worker-level exception captured so a
+    crashing shard can never take down the pool."""
+    idx: int
+    model: str | None
+    outcome: object = None            # _LegOutcome, or None when the worker raised before producing one
+    error: BaseException | None = None
+
+    @property
+    def crashed(self) -> bool:
+        """A shard crashed when its worker raised, or its leg could not be made to run (rc!=0 after retries +
+        fallback). A shard that produced a clean final attempt did NOT crash."""
+        if self.error is not None or self.outcome is None:
+            return True
+        return bool(getattr(self.outcome, "crashed", False))
+
+    @property
+    def cost(self) -> float:
+        return float(getattr(self.outcome, "cost", 0.0) or 0.0) if self.outcome is not None else 0.0
+
+
+def drive_pool(engine, prep, repo: Path, eng_dir: Path, *, first_prompt: str, extra_allow: list,
+               max_turns: int, max_budget_usd: float, first_resume: bool, audit: Path,
+               engagement_id: str, shard_models, gate_verify=None, emit=None, now=None, sleep=None,
+               executor_factory=None) -> LoopResult:
+    """Run the autonomous engagement to completion as CONCURRENT per-model SHARDS — the Wave-2 (2b)
+    multi-process worker pool. Where ``drive`` resumes ONE session leg after leg, ``drive_pool`` fans several
+    ``claude -p`` legs out at once (one per ``shard_models`` entry, each on its own model), joins them into a
+    WAVE, then runs the SAME post-wave completion contract as ``drive`` (``_decide_stop``) on the joined
+    on-disk state — wave after wave until that contract or a ceiling trips. Returns a ``LoopResult`` of the
+    exact shape ``drive`` returns, for the one post-run gate + diagnostics pass.
+
+    CONCURRENCY MODEL
+      Each shard is an independent engine leg run on a thread (``concurrent.futures.ThreadPoolExecutor`` by
+      default; injectable via ``executor_factory`` for tests). Threads are the right fit — NOT processes —
+      because every leg BLOCKS on a ``claude -p`` SUBPROCESS: the GIL is released during that wait, so N
+      threads give true process-level parallelism with none of ``ProcessPoolExecutor``'s pickling/spawn
+      overhead. Each shard reuses ``_run_leg``, so it inherits the same rc-branching + bounded crash-retry +
+      resume-fallback a single leg gets.
+
+    CRASH ISOLATION
+      Every shard runs inside a try/except in its worker, so a shard that raises or whose leg can't be made
+      to run is recorded as a crashed shard while the OTHERS are unaffected. A WAVE is an ``engine-crash``
+      only when EVERY shard crashed (genuinely no progress) — a single crashed shard whose work the others
+      covered is NOT a whole-run failure (the module's honest-reason discipline).
+
+    PER-SHARD SESSION
+      Concurrent shards CANNOT share one ``--resume`` session or one ``prep.session_id`` (and
+      ``_reseed_session`` MUTATES ``prep.session_id``), so each shard gets a SHALLOW-CLONED ``prep`` with its
+      OWN fresh session id and runs as a FRESH (``resume=False``) leg seeded by the wave prompt. The
+      engagement STATE lives on disk (coverage/surface ledgers + findings), so a fresh session rebuilds
+      context from the continue-prompt and shards never stomp each other's in-session state. (Because shards
+      are fresh, ``_run_leg``'s resume-fallback never fires for them; bounded crash retries still do.)
+
+    GLOBAL BUDGET SAFETY (the correctness-critical choice)
+      The budget is GLOBAL. Rather than share a mutable budget counter across threads (which would need a
+      lock and still risk double-counting), before each wave the REMAINING global budget is PARTITIONED
+      evenly across the N shards — each shard's slice becomes its OWN ``max_budget_usd`` — so the shards
+      cannot, in aggregate, exceed what is left. Actual costs are summed only AFTER the wave joins, with no
+      cross-thread mutation. (Edge: a slice is floored at ``BUDGET_FLOOR`` so every shard has a usable
+      budget; at the very tail this can overshoot the global cap by at most ``N * BUDGET_FLOOR`` — the same
+      floor overshoot ``drive`` already allows on its last leg — after which the pre-wave ceiling check
+      stops the run.)
+
+    LEDGER CONCURRENCY
+      Shards mutate the SHARED ledgers ONLY through the scripts (``coverage.py`` / ``surface.py`` /
+      ``dedup.py``), each of which serializes its read-modify-write with a cross-process advisory file lock +
+      atomic rename, so concurrent marks/closes/merges survive. The deterministic plan pre-steps
+      (``run_plan_steps``) run ONCE per wave BEFORE fan-out, never concurrently per shard. Each shard streams
+      to its OWN audit file so the per-process JSONL streams never interleave.
+
+    DIAGNOSTICS
+      Every shard's every attempt is aggregated into ``LoopResult.legs`` (each tagged with its shard index +
+      model), so a crashed non-final shard's cause survives for the per-leg diagnostics overlay.
+
+    ``sleep`` / ``now`` / ``executor_factory`` are injectable for tests."""
+    gate_verify = gate_verify or gatemod.verify
+    emit = emit or (lambda line: print(line))
+    monotonic = now or time.monotonic
+    sleep = sleep or time.sleep
+    executor_factory = executor_factory or concurrent.futures.ThreadPoolExecutor
+
+    models = shard_model_list(shard_models) or [None]
+    n = len(models)
+
+    max_invocations = max(1, _env_int("REDSTRIKE_MAX_INVOCATIONS", DEFAULT_MAX_INVOCATIONS))
+    max_wall = _env_float("REDSTRIKE_MAX_WALL_SECONDS", DEFAULT_MAX_WALL_SECONDS)
+    crash_retries = max(0, _env_int("REDSTRIKE_CRASH_RETRIES", DEFAULT_CRASH_RETRIES))
+    backoff = max(0.0, _env_float("REDSTRIKE_RETRY_BACKOFF_SECONDS", RETRY_BACKOFF_SECONDS))
+    deadline = monotonic() + max_wall
+
+    cumulative_cost = 0.0
+    waves = 0
+    stalls = 0
+    budgets: list[float] = []     # the per-shard slice handed to each shard, one entry per wave
+    legs: list[dict] = []
+    prev: Snapshot | None = None
+    last_res = None
+    started_first = ""
+    reason = DONE
+    crash_cause: str | None = None
+
+    def _shard_audit(idx: int) -> Path:
+        """A per-shard audit path so N concurrent `claude -p` streams never interleave into one JSONL."""
+        try:
+            a = Path(audit)
+            return a.with_name(f"{a.stem}.shard-{idx}{a.suffix}")
+        except Exception:
+            return Path(audit)
+
+    while True:
+        # --- hard ceilings, checked before each NEW wave (the first wave always runs) ---
+        if waves > 0:
+            remaining = max_budget_usd - cumulative_cost
+            if remaining <= BUDGET_FLOOR:
+                reason = BUDGET_EXHAUSTED
+                break
+            if waves >= max_invocations:
+                reason = MAX_INVOCATIONS
+                break
+            if monotonic() >= deadline:
+                reason = WALL_CLOCK
+                break
+
+        # --- wave prompt: the launch prompt only for a FRESH first wave; otherwise the continue-prompt,
+        #     with the deterministic plan pre-steps run ONCE here (before fan-out), never per shard. ---
+        if waves > 0 or first_resume:
+            try:
+                run_plan_steps(repo, eng_dir, emit=emit)
+            except Exception:
+                pass
+            wave_prompt = continue_prompt(engagement_id, eng_dir)
+        else:
+            wave_prompt = first_prompt
+
+        # --- partition the REMAINING global budget evenly across the shards (per-shard slice) ---
+        remaining = max_budget_usd - cumulative_cost
+        shard_budget = max(remaining / n, BUDGET_FLOOR)
+        budgets.append(shard_budget)
+
+        # --- one worker per shard: its OWN cloned prep + fresh session id, run as a fresh leg, fully
+        #     isolated so one shard raising/crashing can never kill the others or the pool. ---
+        def _run_shard(idx: int, model, _prompt=wave_prompt, _budget=shard_budget) -> _ShardResult:
+            shard_prep = copy.copy(prep)
+            try:
+                shard_prep.session_id = str(uuid.uuid4())
+            except Exception:
+                pass
+            try:
+                outcome = _run_leg(
+                    engine, shard_prep, repo, eng_dir, prompt=_prompt, resume=False,
+                    extra_allow=extra_allow, max_turns=max_turns, audit=_shard_audit(idx),
+                    engagement_id=engagement_id, cost_so_far=0.0, max_budget_usd=_budget,
+                    crash_retries=crash_retries, sleep=sleep, backoff=backoff, model=model,
+                )
+                return _ShardResult(idx=idx, model=model, outcome=outcome)
+            except BaseException as e:   # crash isolation: a shard can NEVER take down the pool
+                return _ShardResult(idx=idx, model=model, error=e)
+
+        shard_results: list[_ShardResult] = []
+        with executor_factory(max_workers=n) as ex:
+            futs = [ex.submit(_run_shard, i, m) for i, m in enumerate(models)]
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    shard_results.append(fut.result())
+                except BaseException as e:   # belt-and-suspenders — _run_shard already traps its own
+                    shard_results.append(_ShardResult(idx=-1, model=None, error=e))
+        shard_results.sort(key=lambda s: s.idx)
+        waves += 1
+
+        # --- join: aggregate cost + every attempt (tagged by shard/model) + a representative final res ---
+        wave_cost = 0.0
+        wave_tool_calls = 0
+        wave_last_res = None       # last res from ANY shard (crashed or not)
+        wave_last_ok_res = None    # last res from a NON-crashed shard — preferred for combined.rc
+        for s in shard_results:
+            wave_cost += s.cost
+            oc = s.outcome
+            if oc is None:
+                continue
+            for a in getattr(oc, "attempts", None) or []:
+                rec = dict(a)
+                rec["shard"], rec["model"] = s.idx, s.model
+                legs.append(rec)
+            res = getattr(oc, "res", None)
+            if res is not None:
+                wave_last_res = res
+                if not s.crashed:
+                    wave_last_ok_res = res
+                if not started_first:
+                    started_first = getattr(res, "started", "") or ""
+                wave_tool_calls += _tool_calls_of(res)
+        cumulative_cost += wave_cost
+        rep = wave_last_ok_res or wave_last_res
+        if rep is not None:
+            last_res = rep
+
+        # --- rc branch: a wave is an ENGINE crash ONLY when EVERY shard crashed (honest-reason discipline:
+        #     a single crashed shard whose work others covered is not a whole-run failure) ---
+        if shard_results and all(s.crashed for s in shard_results):
+            reason = ENGINE_CRASH
+            with_cause = next((s for s in shard_results
+                               if s.outcome is not None and getattr(s.outcome, "cause", None)), None)
+            if with_cause is not None:
+                crash_cause = with_cause.outcome.cause
+            else:
+                err = next((s.error for s in shard_results if s.error is not None), None)
+                crash_cause = f"{type(err).__name__}: {err}" if err is not None else "all shards crashed"
+            break
+
+        # --- completion / stop decisions (the SAME shared contract as drive — see _decide_stop) ---
+        cur = Snapshot(pending=pending_ids(read_ledger(eng_dir)),
+                       findings=_findings_total(eng_dir), tool_calls=wave_tool_calls)
+        stop, stalls = _decide_stop(repo, eng_dir, gate_verify=gate_verify, prev=prev, cur=cur, stalls=stalls)
+        if stop is not None:
+            reason = stop
+            break
+
+        prev = cur
+        outstanding_now = len(redrivable_ids(read_ledger(eng_dir)))
+        emit(ui.info(f"wave {waves} complete ({_plural(n, 'shard')}) · "
+                     f"{_plural(outstanding_now, 'category')} still outstanding · "
+                     f"{_plural(cur.findings, 'finding')} so far · ${cumulative_cost:.4f} of "
+                     f"${max_budget_usd:.2f} used · resuming…"))
+
+    # --- audit close: reconcile ledgers + materialize the report so the completeness gates can SEE the
+    #     engagement before the single post-run gate runs. Best-effort; never alters the outcome. ---
+    try:
+        close_artifacts(repo, eng_dir, emit=emit)
+    except Exception:
+        pass
+
+    # --- combine the waves into one whole-run result for the single gate + diagnostics pass ---
+    pending_count = len(redrivable_ids(read_ledger(eng_dir)))
+    n_approvals = pending_approvals_count(eng_dir)
+    detail = loop_degraded_reason(
+        reason, invocations=waves, cumulative_cost=cumulative_cost, max_budget=max_budget_usd,
+        pending_count=pending_count, pending_approvals=n_approvals, crash_cause=crash_cause,
+    )
+
+    final_summary = getattr(last_res, "summary", None)
+    if final_summary is not None and not isinstance(final_summary, str):
+        try:
+            final_summary.cost_usd = cumulative_cost   # the whole-run cost, not just the last shard
+        except Exception:
+            pass
+    combined = RunResult(
+        rc=getattr(last_res, "rc", 0),
+        summary=(final_summary if final_summary is not None else ""),
+        started=started_first or getattr(last_res, "started", "") or "",
+        ended=getattr(last_res, "ended", "") or _dt.datetime.now(_dt.timezone.utc).isoformat(),
+    )
+
+    # --- final whole-run summary line ---
+    emit(ui.rule("autonomous pool complete"))
+    line = (f"{_plural(waves, 'wave')} × {_plural(n, 'shard')} · ${cumulative_cost:.4f} total · "
+            f"{_plural(pending_count, 'category')} still outstanding · {reason}")
+    emit((ui.ok if reason == DONE else ui.warn)(line))
+    if detail:
+        emit(ui.warn(detail))
+
+    return LoopResult(
+        result=combined,
+        invocations=waves,
         cumulative_cost=cumulative_cost,
         reason=reason,
         stop_detail=detail,

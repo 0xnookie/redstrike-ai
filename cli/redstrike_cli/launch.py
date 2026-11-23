@@ -317,10 +317,11 @@ def build_autonomous_argv(
         per-class ``*-verify`` reviewers) can run a cheaper model. When ``model`` is None the flag is
         omitted and ``claude`` keeps its single global default (its config / the ANTHROPIC_MODEL env
         var) — no behavior change for existing callers.
-      * ``shard_models`` → ``--shard-models a,b,...`` is plumbed through for the FUTURE concurrent
-        multi-process hunt pool (a different model per shard = a cheap diversity pass that raises recall).
-        It is carried verbatim today; the engine-core worker pool consumes it later. Accepts a list or a
-        pre-joined comma string; when empty/None the flag is omitted (no behavior change).
+      * ``shard_models`` → ``--shard-models a,b,...`` feeds the concurrent multi-process hunt pool
+        (``runloop.drive_pool``): with >1 entry the CLI runs one SHARD per model at once — a different model
+        per shard = a cheap diversity pass that raises recall. This builder emits the flag verbatim onto the
+        per-leg argv; the pool scheduler is what fans the shards out. Accepts a list or a pre-joined comma
+        string; when empty/None the flag is omitted (no behavior change).
     """
     argv = [
         claude_bin,

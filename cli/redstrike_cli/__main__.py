@@ -667,16 +667,34 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
     # pid-liveness + autorun.jsonl boundary-marker contract intact. The post-run gate + diagnostics
     # run ONCE, after the loop, over the whole-run result.
     audit = eng_dir / "runtime" / "autorun.jsonl"
-    loop = runloop.drive(
-        engine, prep, repo, eng_dir,
-        first_prompt=prompt,
-        extra_allow=extra_allow,
-        max_turns=args.max_turns,
-        max_budget_usd=args.max_budget_usd,
-        first_resume=bool(args.resume),
-        audit=audit,
-        engagement_id=prep.engagement_id,
-    )
+    # Wave-2 (2b) dispatch: >1 shard-model ⇒ the concurrent multi-process worker pool (one shard per model,
+    # fanned out per wave); otherwise the single-session resumer, UNCHANGED (no / one shard-model is
+    # byte-for-byte the legacy path). See runloop.shard_model_list / drive_pool.
+    shards = runloop.shard_model_list(getattr(args, "shard_models", None))
+    if len(shards) > 1:
+        print(ui.ok(f"concurrent hunt pool · {len(shards)} shards: {', '.join(shards)}"))
+        loop = runloop.drive_pool(
+            engine, prep, repo, eng_dir,
+            first_prompt=prompt,
+            extra_allow=extra_allow,
+            max_turns=args.max_turns,
+            max_budget_usd=args.max_budget_usd,
+            first_resume=bool(args.resume),
+            audit=audit,
+            engagement_id=prep.engagement_id,
+            shard_models=shards,
+        )
+    else:
+        loop = runloop.drive(
+            engine, prep, repo, eng_dir,
+            first_prompt=prompt,
+            extra_allow=extra_allow,
+            max_turns=args.max_turns,
+            max_budget_usd=args.max_budget_usd,
+            first_resume=bool(args.resume),
+            audit=audit,
+            engagement_id=prep.engagement_id,
+        )
     rc = _post_run_gate(repo, eng_dir, loop.result, prep=prep, mode="autonomous", loop=loop)
     maybe_launch_console(args, repo)
     return rc
@@ -896,8 +914,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="engine model for this run (default: the global ANTHROPIC_MODEL). "
                          "Route reasoning-heavy work to opus; mechanical/reviewer/recon can run cheaper.")
     au.add_argument("--shard-models", dest="shard_models", metavar="A,B,...",
-                    help="comma-separated per-shard models for the future concurrent hunt pool "
-                         "(a different model per shard = a cheap diversity pass); carried through today")
+                    help="comma-separated per-shard models; >1 runs the CONCURRENT multi-process hunt pool "
+                         "(one shard per model at once = a cheap diversity pass that raises recall)")
     au.add_argument("--console", action="store_true",
                     help="when the run finishes, bring up the web console over engagements/")
     au.add_argument("--console-port", type=int, default=8787, help="port for --console (default 8787)")
@@ -918,8 +936,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="engine model for this run (default: the global ANTHROPIC_MODEL). "
                         "Route reasoning-heavy work to opus; mechanical/reviewer/recon can run cheaper.")
     r.add_argument("--shard-models", dest="shard_models", metavar="A,B,...",
-                   help="comma-separated per-shard models for the future concurrent hunt pool "
-                        "(a different model per shard = a cheap diversity pass); carried through today")
+                   help="comma-separated per-shard models; >1 runs the CONCURRENT multi-process hunt pool "
+                        "(one shard per model at once = a cheap diversity pass that raises recall)")
     r.add_argument("--console", action="store_true",
                    help="when the run finishes, bring up the web console over engagements/ (or set REDSTRIKE_CONSOLE=1)")
     r.add_argument("--console-port", type=int, default=8787, help="port for --console (default 8787)")
