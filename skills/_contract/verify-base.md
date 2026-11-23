@@ -19,6 +19,47 @@ its own blind spots — independence is the whole point). It consumes `findings.
 6. **Scope & safety compliance** — `asset` ∈ engagement scope: read `scope.yaml` (typically `OUT/../scope.yaml`); the action that produced it was within RoE; no destructive action occurred without approval. Out-of-scope ⇒ hard fail + flag. If `scope.yaml` is absent, mark scope `n/a` and flag it — never silently assume in-scope.
 7. **Verdict + rework** — write a structured decision per finding.
 
+### Evidence-sufficiency score — the measured accept/downgrade FLOOR (compute it, write it, apply it)
+
+Checks #1–#2 decide evidence sufficiency by judgment; this turns that judgment into a NUMBER so the
+engagement emits measured evidence. **Every reviewer MUST compute the quantified evidence-sufficiency score
+with `scripts/evidence_score.py`, write it into the finding's `evidence_score` block (see
+`finding.schema.json`), and apply it as a HARD FLOOR on the verdict.** It is a 0–100 score from INDEPENDENT
+components (named, documented weights): a real HTTP `request_response` pair (for a white-box finding a
+`code_citation` substitutes), in-band read-back / confirmation, a browser-driven confirmation, a distinct
+harm/impact artifact (not a mere trigger/reflection), a RELIABILITY contribution from
+`reliability_runs`/`reliability_hits` (a hit-rate < 0.8 is flagged **"race/timing — needs chaining"**), and a
+CHAIN-DEPTH bonus (depth ≥ 2).
+
+Compute it from the facts you observed — e.g. a finding with a captured request/response, a confirmed
+read-back, and a distinct impact artifact:
+
+```
+python scripts/evidence_score.py --file <skill>/findings.json --id RS-YYYY-NNN --readback --impact
+# -> {"score": 75, "decision": "pass", "components": {...}, "reliability_runs": 0, "reliability_hits": 0}
+```
+
+The mechanical components (`request_response`, browser `dom_capture`, the independent-artifact axis) are
+derived from the finding's evidence types; you assert the SEMANTIC ones (`--readback`, `--impact`) and the
+measured reliability (`--reliability-runs N --reliability-hits M`) / chain depth (`--chain-depth D`). Copy the
+tool's JSON verbatim into the finding's `evidence_score` block.
+
+**Decision bands are a FLOOR, not a replacement for your judgment** (you remain the authority — a PASS score
+does NOT force an accept; a KILL score FORBIDS one):
+- **score < 55 → KILL** — the evidence is too thin; the finding **cannot be `accepted`**. Bounce it
+  (`needs-evidence` for a producible artifact) or, if it is real but undemonstrable here, `blocked` /
+  `rejection_class: open-proof-gap`. Never `accepted`.
+- **55 ≤ score < 75 → DOWNGRADE** — real but under-proven; **drop the severity** to what the evidence proves
+  (adjust `severity`/`cvss_vector`, keep the best case in `potential_severity`) before accepting.
+- **score ≥ 75 → PASS** — sufficiently proven; you may accept at face severity (subject to the other checks).
+
+**Composition with the probable-cap (check #2) — two distinct axes, both apply.** The score is a floor on the
+accept/downgrade VERDICT; the probable-cap is a ceiling on CONFIDENCE. A finding whose only evidence is the
+skill's own `log`/`tool_output` has no independent artifact, so the scorer sets `probable_cap: true` and
+`confidence` **cannot read `confirmed`** — independently of the numeric score. They do not contradict (a
+circular-only finding also scores low → KILL), but enforce BOTH: the score never overrides the probable-cap,
+and the probable-cap never rescues a KILL score.
+
 ### Reversion is structured, not prose (post-ex/persistence)
 A finding from a class that PLANTS or MODIFIES state — **persistence and the AD/credential post-exploitation
 classes** (`persistence`, `credential-access`, `ad-initial-access`, `ad-kerberos`, `ad-acl-abuse`, `ad-adcs`,

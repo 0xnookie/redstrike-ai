@@ -47,6 +47,14 @@ def valid_finding(**over) -> dict:
         "reproduction": ["Send `GET /search?q=<svg/onload=alert(1)>`", "Observe script execution"],
         "review": {"verdict": "accepted", "reviewer": "xss-reflected-verify",
                    "scope_ok": True, "rubric": {"reflection_vs_execution": "pass"}},
+        # Cross-model SECOND verdict (R3): the model-pinned adversarial-verify reviewer re-ran the base
+        # checks on a DIFFERENT model than the executor/primary reviewer and confirmed the finding. Required
+        # (gated) for an accepted High/Critical finding or any chain once a report exists.
+        "secondary_review": {"verdict": "accepted", "reviewer": "adversarial-verify",
+                             "scope_ok": True,
+                             "method": "cross-model re-run on a different model than the executor/primary "
+                                       "reviewer (shared-model hallucination guard)",
+                             "rubric": {"reflection_vs_execution": "pass"}},
     }
     f.update(over)
     return f
@@ -60,6 +68,28 @@ def write_evidence(eng: pathlib.Path, finding: dict) -> None:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("GET /search?q=<svg/onload=alert(1)>\n\nHTTP/1.1 200 OK\n<svg/onload=alert(1)>\n",
                          encoding="utf-8")
+
+
+def substantiate_attempted(led: dict) -> dict:
+    """Give every zero-finding `attempted` category in a coverage ledger the depth evidence the coverage
+    gate's depth-substance bar requires, i.e. model a legitimately deeply-probed-but-empty clear (not a
+    rubber-stamped `--mark attempted --count 0`). Each such category gets enough distinct probe ATTEMPTS and
+    technique VARIANTS for the strictest per-class threshold (sqli/xss: 5 attempts / 2 variants) PLUS a
+    differential note of real length. A category with findings, or already `blocked`/`skipped`/`pending`, is
+    left untouched. Idempotent; mutates + returns ``led``. Mirrors how an executor records its own depth
+    (variants_tried / depth_note), so the fixtures represent a real complete engagement, not a gate dodge."""
+    for c in led.get("categories", []):
+        if not isinstance(c, dict):
+            continue
+        if str(c.get("status")) == "attempted" and not (c.get("findings_count") or 0):
+            c["attempts"] = max(int(c.get("attempts") or 0), 6)
+            c["variants_tried"] = sorted(
+                set(c.get("variants_tried") or [])
+                | {"baseline-probe", "encoding-evasion", "nested-context", "filter-bypass"})
+            if not (str(c.get("depth_note") or "").strip() or str(c.get("differential") or "").strip()):
+                c["depth_note"] = ("probed with baseline, encoded, nested and filter-evasion payloads; "
+                                   "every response matched the benign control (no differential)")
+    return led
 
 
 SCOPE_YAML = """engagement: "acme-2026"
@@ -455,7 +485,8 @@ class TestCoverageHardGate(unittest.TestCase):
             if all_terminal and c["status"] == "pending":
                 c["status"] = "attempted"
                 c["findings_count"] = 0
-        return led
+        # a 'complete' ledger's zero-finding clears must be depth-substantiated (a no-op when nothing flipped)
+        return substantiate_attempted(led)
 
     def _surface_ledger(self):
         """A non-empty surface ledger with every routed surface marked `tested`, so the
@@ -796,6 +827,7 @@ class TestIndependentReviewGate(unittest.TestCase):
         for c in led["categories"]:
             if c["status"] == "pending":
                 c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)  # a complete ledger's clears are depth-substantiated, not rubber-stamped
         (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
         sf = vc._try_import_surface()
         sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
@@ -916,6 +948,7 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
         for c in led["categories"]:
             if c["status"] == "pending":
                 c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)  # a complete ledger's clears are depth-substantiated, not rubber-stamped
         (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
         sf = vc._try_import_surface()
         sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
@@ -1050,6 +1083,9 @@ class TestRecallAuditGate(unittest.TestCase):
                 sys.path.insert(0, str(REPO / "scripts"))
                 import escalation  # noqa: E402
                 sqli["escalations"] = escalation.ladder_for("sqli")
+        # every zero-finding clear is depth-substantiated; sqli stays a *recall* shallow-clear only when its
+        # escalation ladder is unexhausted (the recall gate reads `escalations`, independent of depth fields).
+        substantiate_attempted(led)
         (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
         sf = vc._try_import_surface()
         sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
@@ -1236,6 +1272,7 @@ class TestAttackChainGate(unittest.TestCase):
         for c in led["categories"]:
             if c["status"] == "pending":
                 c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)  # a complete ledger's clears are depth-substantiated, not rubber-stamped
         (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
         sf = vc._try_import_surface()
         sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
@@ -1418,6 +1455,7 @@ class TestDiagnosticsZeroFindingGate(unittest.TestCase):
         for c in led["categories"]:
             if c["status"] == "pending":
                 c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)  # a complete ledger's clears are depth-substantiated, not rubber-stamped
         (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
         sf = vc._try_import_surface()
         sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
@@ -1509,6 +1547,7 @@ class TestDiagnosticsZeroFindingGate(unittest.TestCase):
             for c in led["categories"]:
                 if c["status"] == "pending":
                     c["status"], c["findings_count"] = "attempted", 0
+            substantiate_attempted(led)  # clears are depth-substantiated, not rubber-stamped
             (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
             sf = vc._try_import_surface()
             sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
@@ -1624,6 +1663,7 @@ class TestDiagnosticsStaleFindingsGate(unittest.TestCase):
         for c in led["categories"]:
             if c["status"] == "pending":
                 c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)  # a complete ledger's clears are depth-substantiated, not rubber-stamped
         (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
         sf = vc._try_import_surface()
         sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
