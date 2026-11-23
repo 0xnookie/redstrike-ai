@@ -29,6 +29,13 @@ Run the 7 base checks + the chain gauntlet on each chain in `findings.json`.
 - [ ] **Feasibility rated honestly.** `demonstrated` requires end-to-end PoC evidence (`poc/<id>/`);
       otherwise `plausible` (each link realistic) or `theoretical`. Don't label a chain `demonstrated`
       without the evidence.
+- [ ] **A leg that rests on a mitigation/CSP/filter bypass was RE-VERIFIED on the CURRENT channel
+      (bypasses decay).** If any step's feasibility depends on a CSP bypass, WAF/filter evasion,
+      browser-quirk primitive, or sanitizer (mXSS/markdown/HTML-cleaner) bypass, that leg must have been
+      re-demonstrated THIS engagement against the deployed library version + a current browser build — not
+      carried over from an earlier run or a general recollection (`cve-intelligence/refs/vendor_status.md`
+      §Part-3, ~6-month decay). A stale or un-re-verified bypass leg caps the chain at `plausible` and never
+      `demonstrated` → reject any `demonstrated` chain that rests on one.
 - [ ] **Impact exceeds the parts.** The chain's combined impact is materially higher than any single
       step (that's the point) — rate the chain, not the sum.
 - [ ] **Any probe or demonstration was benign + approved + in scope** (if a leg was probed, or if `demonstrated`).
