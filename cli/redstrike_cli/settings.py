@@ -23,6 +23,9 @@ _ALLOW = ["Read", "Grep", "Glob", "Skill", "Agent", "TodoWrite", "WebSearch"]
 _AUTONOMOUS_EXTRA = ["WebFetch", "Bash", "PowerShell"]
 
 _HOOK_MATCHER = "Bash|PowerShell|WebFetch|Edit|Write|MultiEdit|NotebookEdit|mcp__.*"
+# The write-tool-only matcher for the Tier-3 report-integrity guards (dangling-evidence + bug-bounty
+# never-submit). They run in a SEPARATE PreToolUse entry so the scope/rate gates stay first and untouched.
+_WRITE_HOOK_MATCHER = "Write|Edit|MultiEdit"
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -212,6 +215,14 @@ def build_rate_hook_command(
     return " ".join(shlex.quote(str(x)) for x in parts)
 
 
+def build_guard_command(python_exe: str, hook_dir: Path, script_name: str, scope_json: Path) -> str:
+    """Command for a Tier-3 report-integrity / chain guard that lives next to the scope gate and takes the
+    engagement scope (from which it derives the engagement dir). Fail-OPEN guards (quality nets), never the
+    scope boundary — see each hooks/<script>.py docstring."""
+    parts = [python_exe, str(hook_dir / script_name), "--scope", str(scope_json)]
+    return " ".join(shlex.quote(str(x)) for x in parts)
+
+
 def render_settings(
     *,
     python_exe: str,
@@ -233,6 +244,7 @@ def render_settings(
         rate_script = hook_script.parent / "rate_gate.py"
     if state_json is None:
         state_json = scope_json.parent / "rate_state.json"
+    hook_dir = hook_script.parent
     hook_extra: list[str] = []
     if mode == "autonomous":
         hook_extra = ["--defer"]
@@ -275,7 +287,29 @@ def render_settings(
                             ),
                         },
                     ],
-                }
+                },
+                # Tier-3 report-integrity guards on the write tools ONLY, in a SEPARATE entry so the
+                # scope/rate gates above stay first and untouched. Both FAIL OPEN (quality nets, not the
+                # boundary): the dangling-evidence-reference gate (deny a report/findings write that cites a
+                # non-existent artifact) and the bug-bounty never-submit gate (deny a submission draft that
+                # reports a never-submit signal with no chain language — NO-OPs outside a bug-bounty engagement).
+                {
+                    "matcher": _WRITE_HOOK_MATCHER,
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": build_guard_command(
+                                python_exe, hook_dir, "evidence_ref_gate.py", scope_json
+                            ),
+                        },
+                        {
+                            "type": "command",
+                            "command": build_guard_command(
+                                python_exe, hook_dir, "never_submit_gate.py", scope_json
+                            ),
+                        },
+                    ],
+                },
             ],
             "PostToolUse": [
                 {
@@ -285,6 +319,22 @@ def render_settings(
                             "type": "command",
                             "command": build_rate_hook_command(
                                 python_exe, rate_script, scope_json, state_json, observe=True
+                            ),
+                        }
+                    ],
+                }
+            ],
+            # Chain-pressure guard: on every subagent stop, rescan for ACCEPTED feeder findings that lack a
+            # chain reference and write runtime/chain-pending.json (the resume loop keeps the engagement out
+            # of report-ready while it is non-empty). Fail-open; never blocks a subagent from stopping.
+            "SubagentStop": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": build_guard_command(
+                                python_exe, hook_dir, "chain_pressure.py", scope_json
                             ),
                         }
                     ],

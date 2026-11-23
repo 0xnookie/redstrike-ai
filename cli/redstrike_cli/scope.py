@@ -72,6 +72,13 @@ def build_projection(scope_yaml: dict) -> dict:
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "source": "scope.yaml",
     }
+    # Mission marker (optional): a bug-bounty engagement sets `mission: bug-bounty` in scope.yaml so the
+    # runtime projection carries it. The never-submit gate reads this (or a program_scope.json) to scope
+    # itself to BUG-BOUNTY ONLY — a pentest has no mission marker and the gate NO-OPs there. Emitted only
+    # when present, so a pentest's projection is byte-identical to before.
+    mission = scope_yaml.get("mission")
+    if mission:
+        proj["mission"] = str(mission)
     # White-box source audit: carry the `source:` block into the runtime projection so the engine
     # (and the console's served scope.json) sees the source grant. Keyed `source_repo` so it never
     # collides with the existing `source: "scope.yaml"` provenance string above.
