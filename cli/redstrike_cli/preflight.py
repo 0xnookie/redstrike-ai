@@ -243,10 +243,15 @@ TOOLING_CAPABILITIES: list[tuple[str, str, list[str]]] = [
 
 def tooling_probe_prefix() -> list[str]:
     """How to ask the REAL execution environment whether a command exists. On Windows the pentest
-    toolkit lives in WSL, so route `command -v` through `wsl.exe bash -lc` rather than the launcher's
-    own (Windows) PATH; on Linux/WSL probe the local login shell."""
+    toolkit lives in WSL, so route `command -v` through `wsl.exe -e bash -lc` rather than the launcher's
+    own (Windows) PATH; on Linux/WSL probe the local login shell.
+
+    The `-e` (exec) separator is REQUIRED: `wsl.exe bash -lc '<script>'` without it lets wsl.exe
+    re-parse the trailing tokens, mangling any script containing spaces / `;` / `(` / quotes — the
+    probe then returns rc 1 with no output, so EVERY capability reads as degraded-with-no-fallback
+    even when the tools are present. `wsl.exe -e …` passes the command vector through intact."""
     if is_windows():
-        return ["wsl.exe", "bash", "-lc"]
+        return ["wsl.exe", "-e", "bash", "-lc"]
     return ["bash", "-lc"]
 
 
