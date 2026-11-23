@@ -363,3 +363,37 @@ Content-Type: application/json
 - `filter`/`q`/`sort`/`order` into SQL/NoSQL/search sinks → injection markers only → hand off to the injection skills.
 - `sort=<hidden_field>` / `fields=<hidden_field>` can confirm a hidden field's existence (pairs with excessive-data).
 - GraphQL `first/last/after`: assess large-page feasibility (see the DoS catalogue) — report, don't pull.
+
+---
+
+## Extended arsenal — gRPC-Web method enumeration via proxy errors
+# A gRPC backend fronted by an Envoy / gRPC-Web proxy often leaks the exact service + method NAME in its error
+# body. That turns a 401/403 into a free map of the RPC surface — enumerate by probing REST-ish resource paths,
+# then look for `/v1/`-less variants that may skip an RBAC layer the versioned route enforces.
+
+- **The leak:** a denied request returns the fully-qualified gRPC method in the error message, e.g.
+  `{"code":7,"message":"Unauthorized Request: [...] method = /service.v1.Service/AccountList"}`. The
+  `/package.v1.Service/Method` path is the real RPC the REST-ish URL maps to — inventory it.
+```bash
+# Map REST-ish resource paths -> the gRPC method each one proxies to (inventory only; benign, a HANDFUL)
+for resource in accounts users orders holdings portfolios wallets transactions currencies; do
+  printf '%s: ' "$resource"
+  curl -s "https://TARGET/v1/${resource}/" -H 'Authorization: Bearer invalid' \
+    | grep -oP 'method = /[^"[:space:]]+' || echo "no method leak"
+done
+```
+- **Non-`/v1/` (shadow) variants may skip RBAC:** the versioned route is gated but a bare resource path routes
+  to the same gRPC method WITHOUT the version layer's authz. Retest the same resource across path shapes:
+```bash
+for resource in accounts users orders holdings; do
+  printf 'non-v1 %s: ' "$resource"
+  curl -s -o /dev/null -w '%{http_code}\n' "https://TARGET/${resource}/"      # compare vs /v1/<resource>/
+done
+```
+- **Verb routing tell:** a gRPC-Web proxy frequently routes only GET + POST to the backend — `PUT`/`PATCH`/`DELETE`
+  returning `"Could not resolve"` (rather than a clean 405) confirms an Envoy/gRPC-Web front and narrows the method set.
+- **Method-name shapes to expect:** CRUD-ish RPCs mirror resources — `*List`, `*Get`, `*Create`, `*Update`,
+  `*Delete`, `*Search` (`AccountList`, `UserGet`, `OrderCreate`). A leaked method is a BOLA/BFLA candidate:
+  record `service.v1.Service/Method` + the mapping REST path and route it to `bola-bfla` (object/function authz).
+- Evidence = the leaked method inventory + the per-path authz differential (v1 vs non-v1), not a data pull.
+  Keep probes benign and few; do NOT iterate the whole resource space or harvest records.

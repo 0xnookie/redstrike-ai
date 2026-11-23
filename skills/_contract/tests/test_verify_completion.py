@@ -92,6 +92,21 @@ def substantiate_attempted(led: dict) -> dict:
     return led
 
 
+def write_exhaustion_review(eng: pathlib.Path, *, verdict="no_gaps_found", gaps=None) -> None:
+    """Write a passing cross-model exhaustion-adversary verdict to runtime/exhaustion_review.json so a
+    report-present fixture satisfies the exhaustion-adversary HARD gate WITHOUT weakening it. A complete,
+    report-ready engagement must carry this artifact exactly as it must carry a per-finding secondary_review
+    — the cross-model adversary ran and could not disprove 'engagement complete'. Mirrors how the executor
+    records its own depth (substantiate_attempted): the fixtures model a real complete engagement, not a
+    gate dodge. Pass verdict='found_gaps' / explicit gaps to build the NEGATIVE cases."""
+    (eng / "runtime").mkdir(parents=True, exist_ok=True)
+    doc = {"version": 1, "verdict": verdict, "model": "sonnet", "reviewer": "exhaustion-adversary",
+           "reviewed_at": "2026-01-01T02:00:00Z",
+           "checked": ["coverage_ledger", "surface_ledger", "findings", "recall_audit", "audit_trail"],
+           "gaps": gaps if gaps is not None else []}
+    (eng / "runtime" / "exhaustion_review.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
 SCOPE_YAML = """engagement: "acme-2026"
 authorized_by: sec@acme / auth-1
 in_scope:
@@ -515,6 +530,7 @@ class TestCoverageHardGate(unittest.TestCase):
         (eng / "report" / "findings_consolidated.json").write_text(
             json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
         (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
 
     def test_report_with_pending_category_fails(self):
         cov = self._cov()
@@ -835,6 +851,7 @@ class TestIndependentReviewGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
         if accept_reason is not None:
             (eng / "reviews").mkdir(parents=True, exist_ok=True)
             (eng / "reviews" / "self_verified_accepts.json").write_text(
@@ -956,6 +973,7 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
         return eng, led, sled
 
     def _run(self, eng):
@@ -1093,6 +1111,7 @@ class TestRecallAuditGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
         if accept is not None:
             (eng / "reviews").mkdir(parents=True, exist_ok=True)
             (eng / "reviews" / "recall_audit_accepts.json").write_text(json.dumps(accept), encoding="utf-8")
@@ -1280,6 +1299,7 @@ class TestAttackChainGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
         return eng
 
     def _run(self, eng):
@@ -1463,6 +1483,7 @@ class TestDiagnosticsZeroFindingGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
         return eng
 
     def _run(self, eng):
@@ -1555,6 +1576,7 @@ class TestDiagnosticsZeroFindingGate(unittest.TestCase):
                 if s["status"] == "discovered":
                     s["status"] = "tested"
             (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+            write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete'
             payload = self._run(eng)
             self.assertTrue(payload["pass"], payload)
             self.assertEqual(payload["diagnostics_errors"], [])
@@ -1598,6 +1620,7 @@ class TestDiagnosticsAutoPopulateIntegration(unittest.TestCase):
             _write_diag(eng, _diag_doc(outcome="degraded-empty",
                                        degraded_reason="WAF blocked the engagement",
                                        blocked_hosts=[("app.acme.com", 0.95, "cloudflare")]))
+            write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete'
             payload = self._run(eng)
             # the ledger was auto-rewritten: no web category left pending (would have been a coverage gap)
             after = {c["id"]: c for c in json.loads(
@@ -1630,6 +1653,7 @@ class TestDiagnosticsAutoPopulateIntegration(unittest.TestCase):
             (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
             _write_diag(eng, _diag_doc(outcome=None,
                                        blocked_hosts=[("app.acme.com", 0.95, "cloudflare")]))
+            write_exhaustion_review(eng)  # isolate the diagnostics gate (exhaustion gate satisfied)
             payload = self._run(eng)
             self.assertFalse(payload["pass"], payload)
             self.assertTrue(payload["diagnostics_errors"])
@@ -1671,6 +1695,7 @@ class TestDiagnosticsStaleFindingsGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
         return eng
 
     def _run(self, eng):
@@ -1716,6 +1741,159 @@ class TestDiagnosticsStaleFindingsGate(unittest.TestCase):
             payload = self._run(eng)
             self.assertTrue(payload["pass"], payload)
             self.assertEqual(payload["diagnostics_errors"], [])
+
+
+# --------------------------------------------------------------------------- #
+# Tier-1 #3: the cross-model EXHAUSTION-ADVERSARY gate — no report unless the
+# model-pinned adversary was UNABLE to disprove "engagement complete / class
+# exhausted" (runtime/exhaustion_review.json → verdict=no_gaps_found, every gap
+# closed). Un-routable, like the secondary-review gate: no operator-accept hatch.
+# --------------------------------------------------------------------------- #
+class TestExhaustionAdversaryGate(unittest.TestCase):
+    """The mechanical + per-class + recall gates prove only "no failure the gate knows how to detect".
+    None of them disproves the top-level "complete / exhausted" claim, and a same-model self-check is
+    worthless. Once a report exists, the cross-model exhaustion-adversary's no_gaps_found verdict is
+    REQUIRED (with every gap it raised closed); a missing artifact, a found_gaps verdict, or an open gap
+    HARD-fails — the engagement is not report-ready."""
+
+    def _report_eng(self, d):
+        """A report-present engagement that satisfies every OTHER hard gate (independent-reviewed accepted
+        finding + complete coverage + tested surface), so ONLY the exhaustion-adversary gate is under test.
+        Deliberately writes NO runtime/exhaustion_review.json — each test supplies (or omits) its own."""
+        eng = pathlib.Path(d)
+        f = valid_finding()  # accepted by an independent reviewer + secondary_review present
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    # -- unit: the pure helpers --
+    def test_open_gaps_helper(self):
+        # a bare gap (no status) and an explicitly-open gap are OPEN; closed/resolved/redriven are not.
+        review = {"gaps": [
+            {"category": "sqli", "gap": "ladder unexhausted", "remediation": "run time-based"},
+            {"category": "xss", "gap": "no depth", "remediation": "encode", "status": "open"},
+            {"category": "idor", "gap": "fixed", "remediation": "n/a", "status": "redriven"},
+            {"host": "api.acme.com", "gap": "untested", "remediation": "test it", "status": "closed",
+             "blocker": "single-identity"},
+        ]}
+        open_ = vc._exhaustion_open_gaps(review)
+        self.assertEqual(len(open_), 2)
+        self.assertTrue(any("sqli" in g for g in open_))
+        self.assertTrue(any("xss" in g for g in open_))
+        self.assertFalse(any("idor" in g or "api.acme.com" in g for g in open_))
+
+    def test_load_missing_is_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(vc._load_exhaustion_review(pathlib.Path(d)))
+
+    # -- should-FAIL: report present, no exhaustion review at all --
+    def test_report_without_exhaustion_review_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d)  # no runtime/exhaustion_review.json
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["exhaustion_review_errors"])
+            self.assertIn("exhaustion", " ".join(payload["exhaustion_review_errors"]).lower())
+
+    # -- should-FAIL: a found_gaps verdict (the adversary DID disprove 'complete') --
+    def test_found_gaps_verdict_fails_and_names_the_gap(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d)
+            write_exhaustion_review(eng, verdict="found_gaps", gaps=[
+                {"category": "ssrf", "type": "blocked-never-redriven", "status": "open",
+                 "gap": "ssrf left blocked; non-destructive detection never ran",
+                 "remediation": "re-drive ssrf non-destructive detection against api.acme.com"}])
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            joined = " ".join(payload["exhaustion_review_errors"])
+            self.assertIn("ssrf", joined)              # the gap→re-drivable signal: names the class
+            self.assertIn("re-drive", joined.lower())  # ...and the concrete remediation
+
+    # -- should-FAIL: verdict claims no_gaps_found but a gap is still OPEN (inconsistent) --
+    def test_no_gaps_found_but_open_gap_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d)
+            write_exhaustion_review(eng, verdict="no_gaps_found", gaps=[
+                {"category": "idor", "gap": "second identity never tried", "status": "open",
+                 "remediation": "re-run idor with the second test identity"}])
+            payload = self._run(eng)
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("OPEN" in e for e in payload["exhaustion_review_errors"]))
+
+    # -- should-PASS: a clean no_gaps_found verdict --
+    def test_no_gaps_found_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d)
+            write_exhaustion_review(eng, verdict="no_gaps_found")
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["exhaustion_review_errors"], [])
+
+    # -- should-PASS: no_gaps_found WITH a genuinely-unclosable gap carried as closed + a named blocker --
+    def test_no_gaps_found_with_blocker_closed_gap_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._report_eng(d)
+            write_exhaustion_review(eng, verdict="no_gaps_found", gaps=[
+                {"category": "xss-blind", "gap": "no OOB collaborator to confirm blind execution",
+                 "remediation": "re-run with an OOB collaborator when one is in scope",
+                 "status": "closed", "blocker": "no-oob-collaborator"}])
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["exhaustion_review_errors"], [])
+
+    # -- schema: the verdict artifact validates against the house schema --
+    def test_artifact_validates_against_schema(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            write_exhaustion_review(eng, verdict="found_gaps", gaps=[
+                {"host": "api.acme.com", "gap": "untested surface", "remediation": "test it",
+                 "severity": "high", "status": "open", "type": "no-evidence-artifact"}])
+            doc = json.loads((eng / "runtime" / "exhaustion_review.json").read_text(encoding="utf-8"))
+            ok, note = vc._validate_against_schema(doc, "skills/_contract/exhaustion_review.schema.json")
+            self.assertTrue(ok, note)
+            # a gap with NEITHER category NOR host violates the anyOf
+            bad = dict(doc)
+            bad["gaps"] = [{"gap": "x", "remediation": "y"}]
+            ok2, _ = vc._validate_against_schema(bad, "skills/_contract/exhaustion_review.schema.json")
+            self.assertFalse(ok2)
+
+    # -- mid-hunt: no report → the gate is a WARNING, never a hard fail (behavior unchanged pre-close) --
+    def test_no_report_is_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            payload = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["exhaustion_review_errors"], [])
+            self.assertTrue(any("exhaustion" in w.lower() for w in payload["warnings"]))
 
 
 if __name__ == "__main__":

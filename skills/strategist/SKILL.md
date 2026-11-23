@@ -118,6 +118,13 @@ On a later call: read the current `hunt_plan.json` + the engagement findings, ma
 accepted findings), and re-emit. It never resurrects a `done` class's coverage obligation or changes
 the ledger — it only re-orders what is still queued.
 
+**Re-ranking after the exhaustion adversary.** When the cross-model `exhaustion-adversary` (redstrike SKILL
+§3.5) returns `found_gaps` at pre-report, `coverage.py` re-opens the categories those gaps name and the
+orchestrator re-drives them. If you are re-invoked at that point, treat each adversary `found_gap`'s
+category as a high-priority re-opened class and rank it to the FRONT of the remaining queue (with a
+depth-budget at least as deep as the gap's remediation implies) — so the re-drive hits the named gap first.
+You still never skip a class or lower the floor; you only re-order the re-opened work.
+
 ## Tools
 - File I/O + JSON only (no network, no target traffic).
 - `scripts/escalation.py` — READ-ONLY, to read each class's ladder floor so a depth budget can't fall below it.

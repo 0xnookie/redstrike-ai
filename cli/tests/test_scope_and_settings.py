@@ -93,6 +93,44 @@ class TestSettings(unittest.TestCase):
         )
         self.assertIn("--max-rps", s["hooks"]["PreToolUse"][0]["hooks"][1]["command"])
 
+    def test_tier3_guards_registered(self):
+        s = settings.render_settings(
+            python_exe="/usr/bin/python3",
+            hook_script=pathlib.Path("/repo/cli/redstrike_cli/hooks/scope_gate.py"),
+            scope_json=pathlib.Path("/eng/runtime/scope.json"),
+        )
+        json.dumps(s)  # serializable
+        pre = s["hooks"]["PreToolUse"]
+        # the scope/rate gates stay FIRST and untouched (first entry, scope then rate)
+        self.assertIn("scope_gate.py", pre[0]["hooks"][0]["command"])
+        self.assertIn("rate_gate.py", pre[0]["hooks"][1]["command"])
+        # a SECOND PreToolUse entry carries the write-tool report-integrity guards (A + C)
+        self.assertGreaterEqual(len(pre), 2)
+        guard_entry = pre[1]
+        self.assertIn("Write", guard_entry["matcher"])
+        self.assertIn("Edit", guard_entry["matcher"])
+        guard_cmds = " ".join(h["command"] for h in guard_entry["hooks"])
+        self.assertIn("evidence_ref_gate.py", guard_cmds)
+        self.assertIn("never_submit_gate.py", guard_cmds)
+        self.assertIn("--scope", guard_cmds)
+        # the new SubagentStop array carries the chain-pressure guard (B)
+        self.assertIn("SubagentStop", s["hooks"])
+        stop_cmd = s["hooks"]["SubagentStop"][0]["hooks"][0]["command"]
+        self.assertIn("chain_pressure.py", stop_cmd)
+        self.assertIn("--scope", stop_cmd)
+
+    def test_guards_present_in_autonomous_mode_too(self):
+        s = settings.render_settings(
+            python_exe="/usr/bin/python3",
+            hook_script=pathlib.Path("/repo/cli/redstrike_cli/hooks/scope_gate.py"),
+            scope_json=pathlib.Path("/eng/runtime/scope.json"),
+            mode="autonomous",
+        )
+        pre = s["hooks"]["PreToolUse"]
+        self.assertTrue(any("evidence_ref_gate.py" in h["command"]
+                            for e in pre for h in e["hooks"]))
+        self.assertIn("SubagentStop", s["hooks"])
+
     def test_no_sandbox_block_without_scope(self):
         # the existing callers pass no scope → no sandbox key (nothing to derive it from)
         s = settings.render_settings(

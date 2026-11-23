@@ -10,7 +10,7 @@
 - **TOOLS:** `subfinder`/`amass` (subs), `dnsx` (resolve CNAME/A/NS), `httpx` (fingerprint), `nuclei -t http/takeovers`, `subjack`/`nuclei`; `jq`.
 - **GOAL:** Confirm a subdomain takeover — a dangling CNAME/A/NS to an unclaimed third-party service that could be registered by an attacker — with benign proof, not a hostile claim (unless explicitly authorized). Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `dns_records.json`, `takeover_candidates.jsonl`, `findings.json`, `poc/`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = host-discovery / `js-analysis` subdomains, `scope.yaml`. `refs/` = `takeover_fingerprints.md`. Chains TO `reporting`.
+- **DATA / RAG:** inputs = host-discovery / `js-analysis` subdomains, `scope.yaml`. `refs/` = `takeover_fingerprints.md`; also consult `cve-intelligence/refs/vendor_status.md` (§Part-1 patched-class kill-list — platforms that closed the claimable window by default; §Part-3 claim-cooldown/reserved-name windows) before rating a takeover claimable. Chains TO `reporting`.
 - **DECOMPOSITION:** n/a (atomic).
 
 ## Goal
@@ -27,7 +27,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS · every finding accepted.
 1. Enumerate subdomains + resolve records · `subfinder`+`dnsx` · `dns_records.json`
 2. Identify dangling pointers (CNAME/A/NS to third-party with no live resource) · `dnsx`+`httpx` · `takeover_candidates.jsonl`
 3. Fingerprint the service + match an unclaimed-state signature · `refs/takeover_fingerprints.md` + `nuclei -t http/takeovers` · `takeover_candidates.jsonl`
-4. Confirm claimability benignly (service shows claim page / API allows registration) — do NOT hostilely claim unless authorized · synth · `poc/<id>/`
+4. Confirm claimability benignly (service shows claim page / API allows registration) — first screen the match against `cve-intelligence/refs/vendor_status.md` §Part-1 (is this a patched class whose claimable window the platform closed by default?) + §Part-3 (is the released name in a provider reserve/cooldown window, i.e. not registrable yet?); a kill-list/cooldown match you can't rule out → `open-proof-gap`, not a claimable HIGH. Do NOT hostilely claim unless authorized · synth · `poc/<id>/`
 5. Rate (CVSS) + write finding · synth · `findings.json`
 6. Emit report · synth · `report.md`
 7. /REVIEW · `review.md` · 8. /VERIFY · `verify.md`

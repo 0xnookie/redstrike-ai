@@ -10,6 +10,16 @@ pid-liveness check and the `autorun.jsonl` boundary markers keep working unchang
 
 COMPLETION CONTRACT (why a leg ends the loop)
     done                 gate.verify(repo, eng_dir) == 0 — complete + coverage-accounted + report-ready.
+                         gate.verify now also carries the cross-model EXHAUSTION-ADVERSARY gate (a report
+                         is report-ready only once the model-pinned adversary wrote a `no_gaps_found`
+                         verdict to runtime/exhaustion_review.json). So an engagement whose adversary
+                         returned `found_gaps` (or was never run) is NOT `done`: _gate_done stays False,
+                         the continue-prompt tells the next leg to spawn the adversary and re-drive the
+                         gaps it named, and the loop resumes. This stays BOUNDED — the adversary can
+                         always return `no_gaps_found` (it may close a genuinely-unclosable gap with a
+                         named blocker), and a gap that never closes makes no progress and is stopped by
+                         the no-progress breaker / the invocation + budget + wall-clock ceilings with an
+                         honest "partial" (annotate_record downgrades a non-done run), never spinning.
     budget-exhausted     the cumulative cost reached the TOTAL budget (remaining <= floor).
     max-invocations      the resume cap (default 10, env REDSTRIKE_MAX_INVOCATIONS) was hit.
     wall-clock           the wall-clock backstop (env REDSTRIKE_MAX_WALL_SECONDS) was hit.
@@ -179,6 +189,39 @@ def pending_approvals_count(eng_dir: Path) -> int:
     return 0
 
 
+# --- chain-pressure (the SubagentStop chain_pressure hook writes runtime/chain-pending.json) ----------
+# A quality net, not a coverage gate: accepted findings in FEEDER classes (open-redirect/cors/info-
+# disclosure/csrf/…) that carry no chain reference are LOW alone and only earn their rating once chained.
+# The hook flags them; the loop keeps the engagement OUT of report-ready (blocks DONE) and tells the next
+# leg to run attack-chain-discovery on exactly those feeders. BOUNDED: the hook drops a feeder once chaining
+# has been ATTEMPTED (it became a chain step, or was recorded in probes.json), so one chainer pass drains it;
+# if the engine never runs the chainer, the loop makes no progress and the no-progress breaker (+ the hard
+# ceilings) stops it. Fail-safe reads: an unreadable/absent file is simply empty.
+
+def read_chain_pending(eng_dir: Path) -> dict | None:
+    return _read_json(Path(eng_dir) / "runtime" / "chain-pending.json")
+
+
+def chain_pending_feeders(eng_dir: Path) -> list[dict]:
+    """The flagged feeder entries from runtime/chain-pending.json (each {id, class, title, asset, anchors}),
+    or [] when the file is absent/empty/unreadable."""
+    doc = read_chain_pending(eng_dir)
+    if not isinstance(doc, dict):
+        return []
+    out = [p for p in (doc.get("pending") or []) if isinstance(p, dict)]
+    return out
+
+
+def chain_pending_ids(eng_dir: Path) -> frozenset:
+    """Finding ids of the still-pending feeders — the set that must empty before report-ready."""
+    out = set()
+    for p in chain_pending_feeders(eng_dir):
+        fid = p.get("id") or p.get("class")
+        if fid:
+            out.add(str(fid))
+    return frozenset(out)
+
+
 # --- progress snapshot (pure) ------------------------------------------------
 @dataclass(frozen=True)
 class Snapshot:
@@ -300,6 +343,34 @@ def _depth_annotation(c: dict) -> str:
 
 
 # --- continue-prompt (pure) --------------------------------------------------
+def _chain_pending_clause(eng_dir: Path, *, max_list: int = 12) -> str:
+    """A resume-prompt directive naming the ACCEPTED feeder findings that still lack a chain (from
+    runtime/chain-pending.json), so the next leg dispatches attack-chain-discovery on them BEFORE
+    report-ready. Empty string when nothing is pending."""
+    feeders = chain_pending_feeders(eng_dir)
+    if not feeders:
+        return ""
+    bullets = []
+    for f in feeders[:max_list]:
+        fid = f.get("id") or "?"
+        cls = f.get("class") or "?"
+        anchors = f.get("anchors") or []
+        anchor = f"; first anchor: {anchors[0]}" if anchors else ""
+        bullets.append(f"  - {fid} ({cls}){anchor}")
+    more = len(feeders) - min(len(feeders), max_list)
+    if more > 0:
+        bullets.append(f"  - …and {more} more in runtime/chain-pending.json")
+    return (
+        " CHAIN-PRESSURE: these ACCEPTED findings are in FEEDER classes and still lack a chain reference — "
+        "they are LOW/informational alone and must be chained before the engagement is report-ready. Run "
+        "`attack-chain-discovery` on EXACTLY these feeders (consult skills/attack-chain-discovery/refs/"
+        "chain_anchors.md for each anchor; gate + run the ONE Tier-2 probe per missing leg under its "
+        "*-verify reviewer); promote a chain only on an accepted leg, else record the dropped hypothesis in "
+        "probes.json. Do not reach report-ready while runtime/chain-pending.json is non-empty:\n"
+        + "\n".join(bullets)
+    )
+
+
 def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) -> str:
     """The resume prompt for leg 2+: name exactly what's left from the coverage ledger, ORDERED by the
     hunt_plan ranking (§2.5), and tell the engine to continue the orchestrator pipeline on those as ranked
@@ -315,15 +386,21 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
         f"repeat completed work: consult coverage_ledger.json and skip every category already done "
         f"('attempted' with findings, 'skipped', or 'n/a')."
     )
+    chain_clause = _chain_pending_clause(eng_dir)
     if not outstanding:
         return (
             head + " No specific categories were parseable as outstanding — finish any remaining "
             "coverage per coverage_ledger.json (run non-destructive detection for any category still "
             "'pending' or 'blocked' — detection and benign PoCs are NOT gated), then re-converge, run "
-            "the recall-audit, compose attack chains over accepted findings, and write the report. "
+            "the recall-audit, compose attack chains over accepted findings, THEN spawn the model-pinned "
+            "cross-model `exhaustion-adversary` subagent to DISPROVE 'engagement complete' (it writes "
+            "runtime/exhaustion_review.json): on a `found_gaps` verdict, re-drive EXACTLY the "
+            "categories/surfaces it names and re-run it; only a `no_gaps_found` verdict is report-ready — "
+            "then write the report. "
             "Only a genuine exploitation / destructive / RCE command defers for operator approval; "
             "when one does, record it, skip that one step, and CONTINUE the rest — never halt the "
             "whole run at a gate."
+            + chain_clause
         )
     shown = outstanding[:max_list]
     bullets = []
@@ -357,8 +434,12 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
         "Only a genuine exploitation / destructive / RCE command defers at the scope gate: when one does, "
         "it is queued in runtime/approvals_pending.json for the operator — record it, skip that one step, "
         "and CONTINUE the rest; never halt the whole run at a gate. When no categories remain outstanding, "
-        "re-converge, run the recall-audit, compose attack chains over accepted findings, and write the "
-        "report."
+        "re-converge, run the recall-audit, compose attack chains over accepted findings, THEN spawn the "
+        "model-pinned cross-model `exhaustion-adversary` subagent to DISPROVE 'engagement complete' (it "
+        "writes runtime/exhaustion_review.json): on a `found_gaps` verdict, re-drive EXACTLY the "
+        "categories/surfaces it names and re-run it; only a `no_gaps_found` verdict reaches report-ready — "
+        "then write the report."
+        + chain_clause
     )
 
 
@@ -773,9 +854,14 @@ def _decide_stop(repo: Path, eng_dir: Path, *, gate_verify, prev: "Snapshot | No
     It deliberately does NOT handle an engine crash (the caller branches on rc / crash BEFORE calling this)
     nor the hard ceilings (budget / max-invocations / wall-clock, checked before each new leg/wave). The
     order matches the original inline logic exactly: DONE first (gate clear AND nothing re-drivable — a gate
-    that merely PASSES while categories are still `blocked` is NOT finished), then blocked-on-approval
-    (deferrals exist and this leg/wave made no OTHER progress), then the two-strike no-progress breaker."""
-    if _gate_done(gate_verify, repo, eng_dir) and not redrivable_ids(read_ledger(eng_dir)):
+    that merely PASSES while categories are still `blocked` is NOT finished — AND no accepted FEEDER finding
+    is still unchained, so the engagement can't reach report-ready with kill chains left uncomposed), then
+    blocked-on-approval (deferrals exist and this leg/wave made no OTHER progress), then the two-strike
+    no-progress breaker. The chain-pending set is BOUNDED (a feeder drops once chaining is attempted), and an
+    engine that never runs the chainer simply makes no progress and is caught by the breaker below."""
+    if (_gate_done(gate_verify, repo, eng_dir)
+            and not redrivable_ids(read_ledger(eng_dir))
+            and not chain_pending_ids(eng_dir)):
         return DONE, stalls
     progressed = made_progress(prev, cur)
     if pending_approvals_count(eng_dir) and not progressed:

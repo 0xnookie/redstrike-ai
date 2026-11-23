@@ -584,6 +584,68 @@ class TestAnnotateRecordEngineCrash(unittest.TestCase):
         self.assertEqual(out["legs"], legs)                   # but legs still surfaced
 
 
+def _write_chain_pending(eng_dir, pending):
+    (pathlib.Path(eng_dir) / "runtime" / "chain-pending.json").write_text(
+        json.dumps({"generated_at": "t", "count": len(pending), "pending": pending}), encoding="utf-8")
+
+
+class TestChainPending(unittest.TestCase):
+    """Guard B wiring: the SubagentStop chain_pressure hook writes runtime/chain-pending.json; the loop keeps
+    the engagement out of report-ready while it is non-empty, and the continue-prompt names the feeders."""
+
+    def test_chain_pending_readers(self):
+        with _Eng() as eng:
+            self.assertEqual(runloop.chain_pending_ids(eng), frozenset())
+            _write_chain_pending(eng, [{"id": "RS-2026-010", "class": "cors",
+                                        "anchors": ["credentialed read"]}])
+            self.assertEqual(runloop.chain_pending_ids(eng), frozenset({"RS-2026-010"}))
+            self.assertEqual(runloop.chain_pending_feeders(eng)[0]["class"], "cors")
+
+    def test_continue_prompt_names_pending_feeders(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+            _write_chain_pending(eng, [{"id": "RS-2026-010", "class": "cors",
+                                        "anchors": ["credentialed endpoint ACAC:true"]}])
+            p = runloop.continue_prompt("acme-eng", eng)
+            self.assertIn("CHAIN-PRESSURE", p)
+            self.assertIn("RS-2026-010", p)
+            self.assertIn("attack-chain-discovery", p)
+
+    def test_continue_prompt_no_clause_when_empty(self):
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"}])
+            p = runloop.continue_prompt("acme-eng", eng)
+            self.assertNotIn("CHAIN-PRESSURE", p)
+
+    def test_pending_feeder_blocks_done_then_drains(self):
+        with _Eng() as eng:
+            # ledger fully covered (nothing redrivable) and the gate is CLEAR — only chain-pending remains
+            _write_ledger(eng, [{"id": "xss", "status": "attempted", "findings_count": 1}])
+            _write_chain_pending(eng, [{"id": "RS-2026-010", "class": "cors", "anchors": ["x"]}])
+
+            def drain(e):  # leg 2: the chainer attempted it -> chain-pending clears
+                _write_chain_pending(e, [])
+
+            legs = [_Leg(cost=0.1, tool_calls=5),                         # leg1: gate==0 but feeder pending
+                    _Leg(cost=0.1, tool_calls=5, side_effect=drain)]      # leg2: drains -> done
+            engine = _FakeEngine(legs)
+            res = _drive(engine, eng, gate=_gate([0]), max_budget_usd=100.0)
+            self.assertEqual(res.invocations, 2)        # did NOT stop at leg 1 (feeder blocked DONE)
+            self.assertEqual(res.reason, runloop.DONE)  # done only once chain-pending is empty
+            self.assertIn("RS-2026-010", engine.prompts[1])  # continue-prompt named the feeder
+
+    def test_unchained_feeder_loop_is_bounded_by_no_progress(self):
+        with _Eng() as eng:
+            # gate clear, nothing redrivable, no findings signal — only a never-draining chain-pending remains
+            _write_ledger(eng, [{"id": "xss", "status": "attempted", "findings_count": 0}])
+            _write_chain_pending(eng, [{"id": "RS-2026-010", "class": "cors", "anchors": ["x"]}])
+            # the engine never chains it and does no tool work -> the no-progress breaker must stop the loop
+            engine = _FakeEngine([_Leg(cost=0.1, tool_calls=0)])
+            res = _drive(engine, eng, gate=_gate([0]), max_budget_usd=1000.0)
+            self.assertEqual(res.reason, runloop.NO_PROGRESS)   # bounded, not an infinite chain-pressure loop
+            self.assertEqual(res.invocations, 2)                # two consecutive stalls
+
+
 def _write_hunt_plan(eng_dir, queue):
     (pathlib.Path(eng_dir) / "hunt_plan.json").write_text(
         json.dumps({"version": 1, "engagement": "acme-eng", "generated_at": "x",

@@ -1553,6 +1553,99 @@ def _secondary_review_check(eng: Path, findings: list) -> tuple:
     return hard, warns
 
 
+# --- Cross-model EXHAUSTION-ADVERSARY HARD gate (disprove "engagement complete") ----------------- #
+# The mechanical gate proves only "no failure the gate knows how to detect"; the per-class `*-verify`
+# reviewers and the recall audit face PRECISION + the recall rules they HAVE. NONE of them disproves the
+# top-level claim that the engagement is COMPLETE / the class is EXHAUSTED — and a same-model "are we done?"
+# check is worthless (the model that decided it was done will agree with itself). The model-pinned,
+# cross-model `exhaustion-adversary` agent (a DIFFERENT model than the executor + its same-model `*-verify`
+# reviewer, fresh context, default stance "there IS a gap") hunts the gaps the deterministic gates can't
+# see — a category attempted/done with no depth substance, a surface marked tested with no evidence
+# artifact, a `blocked` mark never re-driven, a signalled surface shallow-cleared, a feeder finding never
+# chained — and writes runtime/exhaustion_review.json with a no_gaps_found / found_gaps verdict. Once the
+# gates arm this REQUIRES that artifact, a no_gaps_found verdict, AND every gap it ever raised closed — else
+# the engagement is NOT report-ready. Un-routable, exactly like the secondary-review gate: there is NO
+# operator-accept hatch — only the cross-model adversary's OWN no_gaps_found concession passes it.
+_EXHAUSTION_GAP_CLOSED = {"closed", "resolved", "redriven", "re-driven"}
+
+
+def _load_exhaustion_review(eng: Path):
+    """Parse runtime/exhaustion_review.json (the cross-model adversary's verdict), or None when
+    absent/invalid. Fail-safe: a half-written verdict returns None (→ the gate treats it as missing, which
+    HARD-fails once armed — a report must never ship over an unreadable exhaustion review)."""
+    p = eng / "runtime" / "exhaustion_review.json"
+    if not p.is_file():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — a half-written verdict must never crash the gate
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _exhaustion_open_gaps(review: dict) -> list:
+    """Human-readable descriptions of the exhaustion gaps still OPEN — status not in the closed set (a bare
+    gap with no status is OPEN; only a named-blocker close/resolve/redrive accounts for one). [] when every
+    raised gap is accounted for."""
+    out = []
+    for g in (review.get("gaps") or []):
+        if not isinstance(g, dict):
+            continue
+        status = str(g.get("status") or "open").strip().lower()
+        if status in _EXHAUSTION_GAP_CLOSED:
+            continue
+        where = g.get("category") or g.get("host") or "?"
+        what = str(g.get("gap") or g.get("type") or "unspecified gap").strip()
+        rem = str(g.get("remediation") or "").strip()
+        out.append(f"{where}: {what}" + (f" -> {rem}" if rem else ""))
+    return out
+
+
+def _exhaustion_review_check(eng: Path, findings: list) -> tuple:
+    """(hard_errors, warnings) for the cross-model exhaustion-adversary gate. HARD once the gates arm: a
+    report must not ship unless runtime/exhaustion_review.json is present with verdict=no_gaps_found AND no
+    still-open gap (the cross-model adversary could not disprove 'engagement complete'). A missing/unreadable
+    artifact, a found_gaps verdict, or any open gap FAILS; before the gates arm it is a warning only.
+    Un-routable — there is NO operator-accept hatch (mirrors _secondary_review_check): only the adversary's
+    own no_gaps_found verdict passes it."""
+    armed = _gates_armed(eng, findings)
+    review = _load_exhaustion_review(eng)
+    hint = ("run the model-pinned cross-model `exhaustion-adversary` agent (it writes "
+            "runtime/exhaustion_review.json); only a no_gaps_found verdict with every gap closed is "
+            "report-ready")
+
+    def _wrap(msg):
+        if armed:
+            return (["exhaustion-adversary gate (report present → the cross-model adversary must be unable "
+                     f"to disprove 'engagement complete'): {msg}"], [])
+        return ([], [msg + " [becomes a hard gate once a report exists]"])
+
+    if review is None:
+        return _wrap("no cross-model exhaustion review — the 'engagement complete / class exhausted' claim "
+                     f"was never independently disproved on a different model. {hint}")
+    verdict = str(review.get("verdict") or "").strip().lower()
+    open_gaps = _exhaustion_open_gaps(review)
+    if verdict == "no_gaps_found" and not open_gaps:
+        return ([], [])
+    if verdict != "no_gaps_found":
+        shown = ("; ".join(open_gaps[:6]) + (" …" if len(open_gaps) > 6 else "")) if open_gaps \
+            else "no open gaps listed"
+        return _wrap(f"exhaustion review verdict is {verdict or 'missing'!r} (not 'no_gaps_found') — the "
+                     f"adversary found the engagement NOT exhausted ({shown}). Re-drive those gaps, then "
+                     "re-run the adversary until it returns no_gaps_found.")
+    # verdict says no_gaps_found but gaps remain open — an inconsistent verdict (a prior found_gap not closed)
+    shown = "; ".join(open_gaps[:6]) + (" …" if len(open_gaps) > 6 else "")
+    return _wrap(f"exhaustion review claims 'no_gaps_found' but {len(open_gaps)} gap(s) are still OPEN "
+                 f"({shown}) — re-drive each gap (or record a named blocker) before report.")
+
+
+def _exhaustion_review_hard_errors(eng: Path, findings: list) -> list:
+    """HARD exhaustion-adversary gate (named entry point; mirrors _secondary_review_check's hard half):
+    the open-exhaustion-gap / missing-verdict conditions a report must not ship over. [] until the gates
+    arm."""
+    return _exhaustion_review_check(eng, findings)[0]
+
+
 # --- Deliverable-consistency HARD gate (R4): attestation bound to measured recall ---------------- #
 # A report/attestation must not NARRATE a clean/hardened posture while the measured signals contradict it:
 # the recall reviewer flagged unadjudicated gaps (reviews/recall_audit.verdict.json), or the run itself was
@@ -1746,6 +1839,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # second, model-pinned (adversarial-verify) verdict. Warn while hunting, HARD once a report exists.
     secondary_errors, secondary_warns = _secondary_review_check(eng, findings)
     top_warnings.extend(secondary_warns)
+    # Cross-model exhaustion-adversary gate (disprove "done"): once a report exists, the model-pinned
+    # cross-model adversary must have been UNABLE to disprove "engagement complete" — a no_gaps_found verdict
+    # (runtime/exhaustion_review.json) with every gap it raised closed. Warn while hunting, HARD at close.
+    exhaustion_errors, exhaustion_warns = _exhaustion_review_check(eng, findings)
+    top_warnings.extend(exhaustion_warns)
     # Deliverable-consistency gate (R4): a report/attestation must not assert a clean/hardened posture
     # while recall gaps are unadjudicated or the run was degraded/failed. HARD once a report exists.
     deliverable_errors = _deliverable_consistency_errors(eng, findings)
@@ -1797,7 +1895,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                and (not chain_errors) and (not diagnostics_errors)
                and (not whitebox_errors) and (not candidate_errors)
                and (not cvss_errors) and (not evidence_errors)
-               and (not secondary_errors) and (not deliverable_errors))
+               and (not secondary_errors) and (not exhaustion_errors)
+               and (not deliverable_errors))
 
     if as_json:
         print(json.dumps({"engagement": str(eng), "pass": gate_ok,
@@ -1814,6 +1913,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "cvss_drift_errors": cvss_errors,
                           "independent_evidence_errors": evidence_errors,
                           "secondary_review_errors": secondary_errors,
+                          "exhaustion_review_errors": exhaustion_errors,
                           "deliverable_consistency_errors": deliverable_errors,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
@@ -1878,6 +1978,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "cross-model second verdict):")
             for sre in secondary_errors:
                 print(f"  - {sre}")
+        if exhaustion_errors:
+            print("\n✗ exhaustion-adversary gate FAILED (the cross-model adversary was not run, or it could "
+                  "not confirm the engagement is complete / the class exhausted):")
+            for exe in exhaustion_errors:
+                print(f"  - {exe}")
         if deliverable_errors:
             print("\n✗ deliverable-consistency gate FAILED (a deliverable asserts a clean/hardened posture "
                   "the measured recall / run health contradicts):")
@@ -1901,7 +2006,8 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
               f"error(s), {len(whitebox_errors)} white-box-shape error(s), {len(candidate_errors)} "
               f"candidate-reconciliation error(s), {len(cvss_errors)} cvss-drift error(s), "
               f"{len(evidence_errors)} independent-evidence error(s), {len(secondary_errors)} "
-              f"secondary-review error(s), {len(deliverable_errors)} deliverable-consistency error(s), "
+              f"secondary-review error(s), {len(exhaustion_errors)} exhaustion-adversary error(s), "
+              f"{len(deliverable_errors)} deliverable-consistency error(s), "
               f"{len(all_warnings)} warning(s).")
         if failed:
             print("A failed finding is missing a required field or cites missing/empty evidence => fix before reporting.")
@@ -1947,6 +2053,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
         if secondary_errors:
             print("A High/Critical accepted finding or a chain has only one model's verdict => run the "
                   "model-pinned adversarial-verify reviewer and record its secondary_review before reporting.")
+        if exhaustion_errors:
+            print("The 'engagement complete / class exhausted' claim was never independently disproved on a "
+                  "different model => run the model-pinned cross-model exhaustion-adversary (it writes "
+                  "runtime/exhaustion_review.json); re-drive every found_gap until it returns no_gaps_found.")
         if deliverable_errors:
             print("A deliverable narrates a clean/hardened posture the measured recall/run health "
                   "contradicts => correct the 'Assurance & Coverage' clause, or adjudicate the recall gaps / "

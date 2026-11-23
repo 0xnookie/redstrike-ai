@@ -6,10 +6,10 @@
 
 ## Interview
 - **STEPS:** ingest endpoints + identities → BOLA (swap object id across identities) → BFLA (low-priv calls privileged op) → excessive-data (compare returned vs needed fields) → mass-assignment (extra privileged fields) → rate → emit → review → verify.
-- **TOOLS:** multi-session interceptor, `api-context/refs/api_techniques.md`, request-diff.
+- **TOOLS:** multi-session interceptor, `api-context/refs/api_techniques.md`, `refs/auth_detection_oracles.md`, request-diff.
 - **GOAL:** Confirm API authorization/exposure flaws (BOLA/BFLA/excessive data/mass assignment) with two test identities. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `api_tests.jsonl`, `findings.json`, `poc/`, `report.md`, `curl_commands.sh`, `logs/`.
-- **DATA / RAG:** inputs = `api_context.json` (endpoints, object params, roles, fields) + `auth.env` (≥2 identities) + `scope.yaml`. `refs/` = `api-context/refs/`. Chains FROM `api-context`; cross-refs `idor`/`privesc`. Chains TO `reporting`.
+- **DATA / RAG:** inputs = `api_context.json` (endpoints, object params, roles, fields) + `auth.env` (≥2 identities) + `scope.yaml`. `refs/` = `api-context/refs/` + `refs/auth_detection_oracles.md` (framework auth-enforced-vs-absent by error-type divergence: Apollo / DRF / ASP.NET / Envoy-gRPC). Chains FROM `api-context`; cross-refs `idor`/`privesc`. Chains TO `reporting`.
 - **DECOMPOSITION:** this IS the REST object/function-authz variant (GraphQL → `graphql`).
 
 ## Goal
@@ -17,7 +17,7 @@ Prove API authz/exposure flaws. Emit `findings.json` (`_contract/finding.schema.
 DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 
 ## Steps  (action · tool · output)
-1. Ingest endpoints + identities · `jq api_context.json` · (into tests)
+1. Ingest endpoints + identities, then run the framework auth-detection oracles (no-auth vs fake-auth error-type divergence: `401`/`403` = enforced, backend/queryset/null-deref error = auth never checked) to tabulate which operations are un-gated · `jq api_context.json` + `refs/auth_detection_oracles.md` · (into tests)
 2. BOLA: as identity A, access B's object id (path/body) · multi-session interceptor · `api_tests.jsonl` — if the write is a **non-replayable server action** (see note), source + replay from `proxy-context/http_history.json` with the object id swapped
 3. BFLA: as low-priv A, call a privileged operation (method+path/override) · interceptor · `api_tests.jsonl`
 4. Excessive data: compare returned fields vs what's needed (PII/internal flags) · request-diff · `api_tests.jsonl`
@@ -41,7 +41,7 @@ identity; it hands back the proven finding (under this class) + a replay-faithfu
 this candidate. Degrade to a human capture only if no browser driver is available.
 
 ## Tools
-- multi-session interceptor, request-diff, `api-context/refs/api_techniques.md`
+- multi-session interceptor, request-diff, `api-context/refs/api_techniques.md`, `refs/auth_detection_oracles.md` (framework auth-enforced-vs-absent oracles → where to spend a two-identity test)
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
