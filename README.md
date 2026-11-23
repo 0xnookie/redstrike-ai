@@ -37,7 +37,8 @@ Redstrike AI turns an offensive web-security engagement into a set of **modular 
 The problem with LLM-driven offensive tooling is two failure modes: it **hallucinates vulnerabilities** (false positives that destroy client trust) and **silently skips coverage** (false negatives you never see). Redstrike's answer is a strict, uniform contract: every skill is an **executor** that follows a methodology **checklist**, a deterministic **completion gate**, and an **independent reviewer agent** that re-judges every finding against its evidence in a fresh context.
 
 - **Methodology-grounded** — PTES engagement lifecycle · OWASP WSTG / Top 10 · MITRE ATT&CK tags.
-- **Evidence-first** — no finding ships without a reproducible artifact; the reviewer rejects anything it can't verify.
+- **Evidence-first, measured** — no finding ships without a reproducible artifact; the reviewer rejects anything it can't verify, and a quantified **evidence-sufficiency score** (reliability + chain-depth) is the hard floor on whether a finding may be accepted or must be down-rated.
+- **Coverage you can't rubber-stamp** — a **depth-substance bar** means a category counts as tested only when the mark proves depth, and a **cross-model exhaustion adversary** must fail to find a gap before an engagement is report-ready.
 - **Authorization-gated** — scope allowlist, approval gates for exploitation, audit logging, benign-PoC + cleanup rules baked in.
 - **Substrate-agnostic** — runs as native **Claude Code** skills + subagents, on the Claude Agent SDK, or under its own orchestrator.
 
@@ -94,6 +95,8 @@ This is the core idea. **Review happens twice, at two different altitudes — do
 
 > The reviewer is an **agent, not more instructions** — on purpose. Independence is the whole point: an executor cannot trustworthily grade its own work, because it shares its own blind spots. The reviewer runs fresh, sees only the findings + evidence, and is adversarial.
 
+**A cross-model third check — on the highest-stakes calls.** The per-class reviewer runs on the executor's model, so for the calls most costly to get wrong a **pinned, different-model** reviewer runs a second pass: `adversarial-verify` re-judges every **accepted High/Critical finding and every kill-chain**, and the **exhaustion adversary** — whose sole job is to *disprove* "the engagement is complete / this class is exhausted" — runs last, before reporting. A disagreement between models is the signal; a shared single-model hallucination can't pass both. The exhaustion verdict is a **hard gate**: an engagement isn't report-ready until the adversary finds no gap, and any gap it names is fed back as more work.
+
 ---
 
 ## 🧩 The Skill Contract
@@ -116,6 +119,8 @@ Build order and the full spec live in [`skills/_contract/README.md`](skills/_con
 ## 🤖 Agents & Skills
 
 **111 skills** — **83 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (83 `*-verify` agents), plus **28 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
+
+Above the per-class reviewers sit two **cross-cutting review agents** — `adversarial-verify` (cross-model second opinion on accepted High/Critical findings + chains) and `exhaustion-adversary` (cross-model challenge to the completion claim) — plus three deterministic **guard hooks** that catch report-integrity slips before they ship: a dangling-evidence-reference guard (never cite an artifact that doesn't exist), a chain-pressure hook (a feeder-class finding isn't done until chained or ruled out), and a bug-bounty-scoped never-submit guard.
 
 **Recon** (Tier 1) — `osint` (passive intel + wordlist terms) · `host-discovery` (subdomains / live hosts / ports) · `content-discovery` (crawl + brute-force + **custom wordlists**) · `js-analysis` *(gold standard)* · `source-audit` *(white-box: cross-language dangerous-sink grep → routes candidates to the vuln executors)*
 
@@ -241,7 +246,9 @@ down instead of drilling payloads through a WAF (`--max-rps` clamps below scope 
 The scope gate fails **closed** (it is the boundary); the rate gate fails **open** (pacing must never
 wedge a legitimate request). Autonomous mode
 runs `dontAsk` + an allowlist (deny-by-default), budget/turn-capped, MCP-isolated; shell the operator
-didn't pre-allow is **deferred for approval** (`redstrike approve` → `--resume`) rather than run. The hook
+didn't pre-allow is **deferred for approval** (`redstrike approve` → `--resume`) rather than run. A
+concurrent, model-diverse **worker-pool** (`--shard-models a,b,…`) can fan the autonomous hunt across
+several engine processes at once — a cheap recall boost. The hook
 is a safety net over the OS sandbox (WSL2/Linux), not a replacement. Full docs: [`cli/README.md`](cli/README.md).
 
 ### 🖥️ Console
@@ -340,6 +347,7 @@ The roster (168 tools across 19 categories) is defined once in
 - ✅ **Tier-3 red team** — Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization + the `<class>-hunter` pattern (`hunter-base` + `xss-hunter`)
 - ✅ **Recon + tooling** — `osint` / `host-discovery` / `content-discovery` (custom wordlists) / `js-analysis` / `source-audit`; `scripts/doctor.sh` + `scripts/install.sh` (168 tools / 19 categories) — see [`INSTALL.md`](INSTALL.md)
 - ✅ **Web console** + the **`redstrike` CLI** (Claude Code as the engine)
+- ✅ **Trust & engine hardening** — measured **evidence-sufficiency scoring** + a **depth-substance coverage bar**, a **cross-model exhaustion adversary** gating report-readiness, report-integrity **guard hooks**, a concurrent multi-model **worker-pool** (`--shard-models`), and an offline **bug-bounty program-intel** feeder (scope / policy / duplicate-check)
 
 ---
 
