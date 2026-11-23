@@ -11,10 +11,10 @@
 
 ## Interview
 - **STEPS:** ingest accepted findings → model each as a primitive (capability) → compose chains from accepted primitives (match outputs→preconditions) → hypothesize high-impact chains that are one missing leg short → (approval) dispatch a scoped probe for that leg (the specific Tier-2 executor + its `*-verify` reviewer) → feedback: promote the chain if the leg is reviewer-accepted, else DROP it → assess feasibility + impact → (approval) demonstrate a chain benignly → emit chains + composite findings → review → verify.
-- **TOOLS:** `jq` over the engagement findings, reasoning; (probe + demonstration) the relevant Tier-2 agents via their `redstrike-<class>` skill + `<class>-verify` reviewer.
+- **TOOLS:** `jq` over the engagement findings, reasoning, `refs/chain_anchors.md`; (probe + demonstration) the relevant Tier-2 agents via their `redstrike-<class>` skill + `<class>-verify` reviewer.
 - **GOAL:** Discover kill chains that combine individually-accepted findings into materially higher impact (e.g. open-redirect → OAuth token leak → account takeover), rated honestly by feasibility — and, when exactly one intermediate leg is missing, probe to confirm it rather than leaving the chain unprovable. Done = checklist `- [x]`, review passes, findings accepted.
 - **OUTPUT:** `primitives.json`, `chains.json`, `probes.json`, `findings.json`, `report.md`, `logs/`.
-- **DATA / RAG:** inputs = all `<engagement>/*/findings.json` (accepted) + `scope.yaml` + (for the probe loop) `runtime/approvals.json` and any probe executor's fresh `findings.json`. Chains FROM every Tier-2 agent; DISPATCHES a scoped probe TO one Tier-2 executor when a leg is missing; chains TO `reporting` + `exploit-generator`.
+- **DATA / RAG:** inputs = all `<engagement>/*/findings.json` (accepted) + `scope.yaml` + (for the probe loop) `runtime/approvals.json` and any probe executor's fresh `findings.json`. `refs/` = `chain_anchors.md` (per-class feeder anchors — the specific next-probe for each accepted finding class). Chains FROM every Tier-2 agent; DISPATCHES a scoped probe TO one Tier-2 executor when a leg is missing; chains TO `reporting` + `exploit-generator`.
 - **DECOMPOSITION:** n/a (capability service).
 
 ## Goal
@@ -31,7 +31,7 @@ Compose accepted findings into kill chains. Emit `chains.json` (schema `_contrac
 1. Ingest all ACCEPTED findings (`review.verdict == accepted`) · `jq` · (in memory)
 2. Model each as a primitive (capability + preconditions + outputs) · synth · `primitives.json`
 3. Compose chains from accepted primitives (match output→precondition; ≥2 steps) · synth · `chains.json`
-4. Hypothesize high-impact chains that are complete EXCEPT for one missing intermediate leg — the single precondition no accepted finding satisfies yet (e.g. open-redirect + an OAuth flow → ATO, missing only proof the redirect carries the `code`) · synth · `probes.json` (one record per hypothesis: `{id, chain_hypothesis, missing_leg, probe_skill, status:"hypothesized"}`)
+4. Hypothesize high-impact chains that are complete EXCEPT for one missing intermediate leg — the single precondition no accepted finding satisfies yet (e.g. open-redirect + an OAuth flow → ATO, missing only proof the redirect carries the `code`); for each accepted finding whose class is a FEEDER, consult `refs/chain_anchors.md` for the specific anchors to probe next · synth · `refs/chain_anchors.md` · `probes.json` (one record per hypothesis: `{id, chain_hypothesis, missing_leg, probe_skill, status:"hypothesized"}`)
 5. **Approval gate** — a probe is an ACTIVE test → `_contract/roe-gate.md`: resolve the target vs `scope.yaml`, pause for explicit sign-off, record the grant in `runtime/approvals.json` (covering the probe) BEFORE dispatch · `roe-gate` · `runtime/approvals.json`
 6. Dispatch the SCOPED probe for the missing leg — invoke the ONE specific Tier-2 executor that can confirm it (`redstrike-<class>`), gated mechanical → its own `<class>-verify` reviewer subagent (the same way the orchestrator runs any executor); do NOT self-assert the leg · Tier-2 executor + `*-verify` · `<engagement>/<class>/findings.json`
 7. Feedback — the leg counts as confirmed ONLY if that reviewer returned `review.verdict == accepted`; then its finding id becomes a `steps[].finding_id` and the chain is promoted into `chains.json` (`probes.json` status → `confirmed`, with `result_finding_id` + `approval_ref`). Otherwise DROP the chain (`probes.json` status → `dropped`) — never emit it with an unconfirmed/assumed leg · synth · `chains.json` + `probes.json`
@@ -42,11 +42,11 @@ Compose accepted findings into kill chains. Emit `chains.json` (schema `_contrac
 12. /REVIEW · `review.md` · 13. /VERIFY · `verify.md`
 
 ## Tools
-- `jq` over engagement findings, reasoning; the relevant Tier-2 agents (via `redstrike-<class>` + `<class>-verify`) for the missing-leg probe and for demonstration
+- `jq` over engagement findings, reasoning, `refs/chain_anchors.md`; the relevant Tier-2 agents (via `redstrike-<class>` + `<class>-verify`) for the missing-leg probe and for demonstration
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- every `<engagement>/<skill>/findings.json` (accepted), `scope.yaml`
+- every `<engagement>/<skill>/findings.json` (accepted), `scope.yaml`, `refs/chain_anchors.md`
 - for the probe loop: `runtime/approvals.json` (the pre-recorded grant) + the probe executor's `<engagement>/<class>/findings.json` (reviewer-accepted leg)
 
 ## Outputs

