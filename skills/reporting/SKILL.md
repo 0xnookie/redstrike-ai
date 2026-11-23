@@ -29,6 +29,14 @@ missing ledger is a hard fail under `--strict` — plan it first (`coverage.py -
 deterministically: once `report/findings_consolidated.json` exists, `verify_completion.py --engagement`
 HARD-FAILS on any unaccounted category, so a report over silent gaps cannot pass the gate.
 
+**Also required before aggregation: the cross-model exhaustion review.** The orchestrator must have run the
+model-pinned `exhaustion-adversary` (redstrike SKILL §3.5) and it must have returned `no_gaps_found` —
+`<engagement>/runtime/exhaustion_review.json` with `verdict=no_gaps_found` and every gap it raised closed.
+A `found_gaps` verdict, an open gap, or a missing artifact means the "engagement complete / class exhausted"
+claim was never independently disproved on a different model: **STOP, re-drive the named gaps, re-run the
+adversary.** This is enforced deterministically too — once a report exists `verify_completion.py --engagement`
+HARD-FAILS without a `no_gaps_found` exhaustion review (un-routable, no operator-accept hatch).
+
 ## 0.5 Coverage & reliability — MANDATORY, drives the risk posture (empty ≠ clean)
 > Engagement-level reliability (did the testing actually reach the target?) — DISTINCT from the
 > finding-level "confirmed — demonstration limited" subsection in **Safety** (which is about one proven

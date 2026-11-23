@@ -10,6 +10,16 @@ pid-liveness check and the `autorun.jsonl` boundary markers keep working unchang
 
 COMPLETION CONTRACT (why a leg ends the loop)
     done                 gate.verify(repo, eng_dir) == 0 — complete + coverage-accounted + report-ready.
+                         gate.verify now also carries the cross-model EXHAUSTION-ADVERSARY gate (a report
+                         is report-ready only once the model-pinned adversary wrote a `no_gaps_found`
+                         verdict to runtime/exhaustion_review.json). So an engagement whose adversary
+                         returned `found_gaps` (or was never run) is NOT `done`: _gate_done stays False,
+                         the continue-prompt tells the next leg to spawn the adversary and re-drive the
+                         gaps it named, and the loop resumes. This stays BOUNDED — the adversary can
+                         always return `no_gaps_found` (it may close a genuinely-unclosable gap with a
+                         named blocker), and a gap that never closes makes no progress and is stopped by
+                         the no-progress breaker / the invocation + budget + wall-clock ceilings with an
+                         honest "partial" (annotate_record downgrades a non-done run), never spinning.
     budget-exhausted     the cumulative cost reached the TOTAL budget (remaining <= floor).
     max-invocations      the resume cap (default 10, env REDSTRIKE_MAX_INVOCATIONS) was hit.
     wall-clock           the wall-clock backstop (env REDSTRIKE_MAX_WALL_SECONDS) was hit.
@@ -320,7 +330,11 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
             head + " No specific categories were parseable as outstanding — finish any remaining "
             "coverage per coverage_ledger.json (run non-destructive detection for any category still "
             "'pending' or 'blocked' — detection and benign PoCs are NOT gated), then re-converge, run "
-            "the recall-audit, compose attack chains over accepted findings, and write the report. "
+            "the recall-audit, compose attack chains over accepted findings, THEN spawn the model-pinned "
+            "cross-model `exhaustion-adversary` subagent to DISPROVE 'engagement complete' (it writes "
+            "runtime/exhaustion_review.json): on a `found_gaps` verdict, re-drive EXACTLY the "
+            "categories/surfaces it names and re-run it; only a `no_gaps_found` verdict is report-ready — "
+            "then write the report. "
             "Only a genuine exploitation / destructive / RCE command defers for operator approval; "
             "when one does, record it, skip that one step, and CONTINUE the rest — never halt the "
             "whole run at a gate."
@@ -357,8 +371,11 @@ def continue_prompt(engagement_id: str, eng_dir: Path, *, max_list: int = 25) ->
         "Only a genuine exploitation / destructive / RCE command defers at the scope gate: when one does, "
         "it is queued in runtime/approvals_pending.json for the operator — record it, skip that one step, "
         "and CONTINUE the rest; never halt the whole run at a gate. When no categories remain outstanding, "
-        "re-converge, run the recall-audit, compose attack chains over accepted findings, and write the "
-        "report."
+        "re-converge, run the recall-audit, compose attack chains over accepted findings, THEN spawn the "
+        "model-pinned cross-model `exhaustion-adversary` subagent to DISPROVE 'engagement complete' (it "
+        "writes runtime/exhaustion_review.json): on a `found_gaps` verdict, re-drive EXACTLY the "
+        "categories/surfaces it names and re-run it; only a `no_gaps_found` verdict reaches report-ready — "
+        "then write the report."
     )
 
 

@@ -775,6 +775,54 @@ def check_evidence_score():
 
 check_evidence_score()
 
+
+# 22 — cross-model exhaustion-adversary wiring: the model-pinned agent, its verdict schema, and the hard
+# gate that consumes it must all stay in agreement. The adversary disproves "engagement complete" on a
+# DIFFERENT model (a same-model self-check is worthless), so a dropped model pin, a drifted verdict enum, or
+# a gate that stops reading the artifact silently defeats "a gate you can route around isn't real".
+def check_exhaustion_adversary():
+    checked["exhaustion_adversary"] = 1
+    # (a) the cross-model agent exists and carries a model pin (the whole point — not a same-model check).
+    agent = ROOT / ".claude" / "agents" / "exhaustion-adversary.md"
+    if not agent.is_file():
+        err(".claude/agents/exhaustion-adversary.md missing (the cross-model exhaustion adversary)")
+    else:
+        keys = frontmatter_keys(agent)
+        if keys is None:
+            err(".claude/agents/exhaustion-adversary.md: missing frontmatter")
+        elif "model" not in keys:
+            err(".claude/agents/exhaustion-adversary.md: frontmatter must pin a 'model' (the cross-model "
+                "discipline — a same-model 'are we done?' check is worthless)")
+    # (b) the verdict schema is a closed, versioned artifact with exactly the two-verdict enum.
+    scm = skills_dir / "_contract" / "exhaustion_review.schema.json"
+    if not scm.is_file():
+        err("skills/_contract/exhaustion_review.schema.json missing (the exhaustion-review verdict schema)")
+    else:
+        try:
+            ex = json.loads(scm.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            ex = None
+            err(f"exhaustion_review.schema.json: invalid JSON: {e}")
+        if ex is not None:
+            if "version" not in (ex.get("properties") or {}):
+                err("exhaustion_review.schema.json: must declare a root 'version' property (schema-versioning drift)")
+            if ex.get("additionalProperties") is not False:
+                err("exhaustion_review.schema.json: root must be additionalProperties:false (closed verdict artifact)")
+            verdict_enum = set(((ex.get("properties") or {}).get("verdict") or {}).get("enum") or [])
+            if verdict_enum != {"no_gaps_found", "found_gaps"}:
+                err("exhaustion_review.schema.json: verdict enum must be exactly "
+                    f"['no_gaps_found','found_gaps'] (got {sorted(verdict_enum)})")
+    # (c) the hard gate actually consumes the artifact (wiring present, not dead code).
+    vcp = skills_dir / "_contract" / "verify_completion.py"
+    if vcp.is_file():
+        vct = vcp.read_text(encoding="utf-8", errors="replace")
+        if "exhaustion_review.json" not in vct or "_exhaustion_review_check" not in vct:
+            err("verify_completion.py: the exhaustion-adversary gate is not wired "
+                "(expected runtime/exhaustion_review.json + _exhaustion_review_check)")
+
+
+check_exhaustion_adversary()
+
 # report
 print("Redstrike validate.py")
 print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))

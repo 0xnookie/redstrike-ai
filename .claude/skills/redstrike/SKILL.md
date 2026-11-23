@@ -266,6 +266,29 @@ findings, `redstrike-exploit-generator` produces a benign working PoC (**approva
 For internal / assumed-breach / **Active Directory** engagements → `redstrike-ad-context` →
 `ad-kerberos` / `ad-acl-abuse` / `ad-adcs` / `ad-lateral-movement` (requires an authorized foothold).
 
+## 3.5 Cross-model exhaustion adversary — disprove "engagement complete" (HARD, LAST before reporting)
+Every gate up to here faces PRECISION ("is each reported finding real?") or the recall RULES it has; none
+independently disproves the top-level claim that **the engagement is complete / every class is exhausted**,
+and a same-model "are we done?" check is worthless (the model that called it done agrees with itself). So
+after the coverage gate (§2c), the recall audit (§2d), re-convergence (§2e) and chaining (§3) all pass,
+spawn the **model-pinned `exhaustion-adversary`** subagent (`.claude/agents/exhaustion-adversary.md`) — it
+runs on a **DIFFERENT model** than the executors + their `*-verify` reviewers, in a fresh context, with the
+default stance "there IS a gap". It reads the coverage + surface ledgers, `findings.json`, the deterministic
+recall-audit output (`scripts/recall_audit.py <dir>`) and the audit trail, and hunts the gaps the
+deterministic gates can't see — a category `attempted`/`done` with no depth substance, a surface marked
+`tested` with no evidence artifact, a `blocked` mark never re-driven, a signalled surface shallow-cleared, a
+feeder finding never chained — then writes **`<engagement>/runtime/exhaustion_review.json`** (schema
+`skills/_contract/exhaustion_review.schema.json`) with a `no_gaps_found` / `found_gaps` verdict.
+
+- **On `found_gaps`:** re-drive EXACTLY the categories/surfaces each gap names (escalate / un-block / chain /
+  test the host), then **re-run the adversary** — repeat until it returns `no_gaps_found`.
+- **On `no_gaps_found`:** the adversary could not disprove "complete" (every gap it raised is closed, or is
+  genuinely-unclosable with a named blocker) → report-ready.
+- **Enforced, not advisory + UN-ROUTABLE:** once a report exists `verify_completion.py --engagement`
+  HARD-FAILS unless `runtime/exhaustion_review.json` carries `verdict=no_gaps_found` with every gap closed.
+  There is **no operator-accept hatch** (mirrors the cross-model secondary-review gate) — only the
+  adversary's OWN `no_gaps_found` concession passes it, so the "done" claim can never be self-attested.
+
 ## 4. Report
 `redstrike-reporting` consolidates accepted findings → `<engagement>/report/findings_consolidated.json`.
 Then `redstrike-engagement-docs` writes the full deliverable suite — the formal **report** + **attestation**
