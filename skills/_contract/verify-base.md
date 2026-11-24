@@ -94,6 +94,18 @@ classes** (`persistence`, `credential-access`, `ad-initial-access`, `ad-kerberos
 gate HARD-FAILS such a finding when `cleanup` is absent, `removed` is not `true`, or the `ref` proof is
 missing — so "we reverted it" is verifiable, not asserted. Ordinary web findings change nothing and omit it.
 
+### A reconstructed lab / replica is NEVER an oracle (replica evidence is development-only)
+A finding whose ONLY proof is an observation on a locally reconstructed lab or replica (e.g. the
+`lab-reconstruct` white-box bench) is **NOT acceptable**. A replica can diverge from production — different data,
+config, patch level, WAF, build flags — so a replica result is **development-only**: it must be **RE-CONFIRMED
+BENIGNLY on the live authorized target** before it can be a finding, cited by an independent artifact captured
+against the TARGET (not the replica). Treat replica-only evidence like circular evidence (check #2): it cannot
+satisfy the independent-evidence rule and cannot carry a finding to `accepted`/`blocked` on its own — bounce it
+`needs-evidence` (re-confirm on the target) or hold it as an `open-proof-gap`. Equally, a replica **NEGATIVE
+never marks a vuln class exhausted**: a class that looked clean on the lab may still be live on the target, so a
+"nothing on the replica" result is not a clean clear and cannot close coverage for that surface. This is an
+additive guardrail on top of the checks above; it does not relax any of them.
+
 ## Verdict
 
 A review emits a `review{}` object per finding, conforming to `finding.schema.json` → `review{}`.

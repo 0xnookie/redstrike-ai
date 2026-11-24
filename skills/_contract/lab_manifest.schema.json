@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/lab_manifest.schema.json",
+  "title": "Redstrike Lab Manifest",
+  "description": "The HONESTY LAYER for a reconstructed LOCAL lab (emitted by the lab-reconstruct capability into engagements/<id>/lab/lab_manifest.json). Each reconstructed service/image/version records the RECON FIELD + CONFIDENCE that justified it, the reconstruction MODE (this MVP emits white-box-exact only), and a FIDELITY TIER — so a consumer always knows what is a white-box-exact rebuild of the real code vs an inferred backing stub, and never mistakes the replica for the live target. IRON GUARDRAIL: the lab is NEVER an oracle. Anything developed or observed on the lab is replica-only and must be RE-CONFIRMED benignly on the live authorized target before it can become a finding; a replica NEGATIVE never marks a class exhausted. The manifest holds no secret values — only redacted fingerprints.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "engagement", "generated_at", "mode", "never_an_oracle", "services"],
+  "properties": {
+    "version": { "type": "integer", "description": "schema version of this artifact (current = 1)." },
+    "engagement": { "type": "string", "description": "engagement id this lab was reconstructed for." },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "scope_ref": { "type": "string", "description": "path to the engagement scope.yaml the rebuild was authorized under." },
+    "mode": {
+      "enum": ["white-box-exact", "black-box-facade"],
+      "description": "the reconstruction mode. white-box-exact = the app is built from the engagement's cloned source/ and pinned to the real dependency lockfile (this MVP emits ONLY this). black-box-facade (HTTP-replay / stub-route lab from http_history) is RESERVED for a future capability and MUST NOT be emitted here."
+    },
+    "never_an_oracle": {
+      "const": true,
+      "description": "a baked-in assertion that the producer and consumer both accept the IRON GUARDRAIL: the lab is replica-only, a lab observation is development-only until re-confirmed benignly on the live authorized target, and a replica negative never closes a vuln class. Always true; its presence makes the guardrail part of the artifact, not just prose."
+    },
+    "source_ref": { "type": "string", "description": "the cloned source tree the app image is built from, e.g. engagements/<id>/source — white-box-exact mode only." },
+    "lockfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "the dependency lockfile the app image is pinned to (ground truth for exact versions, over any banner/Server header).",
+      "properties": {
+        "name": { "type": "string", "description": "e.g. composer.lock / package-lock.json / yarn.lock / poetry.lock / Gemfile.lock" },
+        "path": { "type": "string", "description": "path within the cloned source tree." }
+      }
+    },
+    "services": {
+      "type": "array",
+      "description": "one entry per reconstructed container: the app (built from source/) plus one backing service per detected open port (db/cache/mail/search).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "role", "image", "justification"],
+        "properties": {
+          "name": { "type": "string", "description": "compose service name, e.g. app / db / cache / mail / search." },
+          "role": {
+            "enum": ["app", "database", "cache", "mail", "search", "queue", "other"],
+            "description": "what the service stands in for in the rebuilt topology."
+          },
+          "image": { "type": "string", "description": "the base image at the evidenced framework+version, e.g. php:8.1-apache / mysql:8.0 / redis:7 — a TARGET-DESCRIPTIVE FACT derived from recon, not a credited external source." },
+          "version": { "type": "string", "description": "the pinned framework/service version this image reconstructs." },
+          "stub": { "type": "boolean", "description": "true = a stand-in backing service (not the target's real code); false = the app image built from the cloned source. A stub reproduces the PROTOCOL/role, not the target's data or config." },
+          "build": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "present ONLY when the service is BUILT from the cloned source (the app); OMIT this key for a pulled backing-service image.",
+            "properties": {
+              "context": { "type": "string", "description": "build context, relative to lab/ (e.g. ../source)." },
+              "dockerfile": { "type": "string", "description": "the Dockerfile emitted for this service, relative to lab/ (e.g. Dockerfile)." }
+            }
+          },
+          "justification": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "WHY this service/image/version was chosen — the recon field + confidence + mode + fidelity tier that justify it. This is the honesty record: an inferred stub is labelled as such, never dressed up as the real thing.",
+            "required": ["recon_field", "recon_source", "confidence", "mode", "fidelity_tier"],
+            "properties": {
+              "recon_field": { "type": "string", "description": "the EXACT recon field that justified this choice, e.g. 'host_discovery.live_hosts[].ports[].service=mysql@3306', 'source_context.dependencies[php].version=8.1', 'cve_intel.components[].name=redis version=7.0'." },
+              "recon_source": {
+                "enum": ["source_context", "host_discovery", "cve_intel", "content", "lockfile", "manual"],
+                "description": "which consumed artifact the recon_field came from."
+              },
+              "confidence": {
+                "enum": ["high", "medium", "low"],
+                "description": "how firmly recon pins this service/image/version. high = evidenced by a lockfile pin or a service+version banner; medium = evidenced by presence + a strong version signal; low = inferred from an open port with no version evidence."
+              },
+              "mode": {
+                "enum": ["white-box-exact", "black-box-facade"],
+                "description": "must equal the root mode; white-box-exact for every service in this MVP."
+              },
+              "fidelity_tier": {
+                "enum": ["exact-pin", "version-matched", "inferred-stub", "placeholder"],
+                "description": "how faithful this reconstruction is. exact-pin = the app built from the real cloned source pinned to the real lockfile. version-matched = a backing image at a version evidenced from recon. inferred-stub = a backing service inferred from an open port whose exact product/version was NOT evidenced. placeholder = recon gave only the role's presence, not its identity — a minimal stand-in."
+              }
+            }
+          },
+          "ports": {
+            "type": "array",
+            "description": "the open target port(s) that triggered this backing service (from host_discovery live_hosts[].ports[]).",
+            "items": { "type": "integer" }
+          },
+          "redacted_secret_fingerprints": {
+            "type": "array",
+            "description": "fingerprints ONLY (never values) of any real secret recon surfaced for this service — recorded so the lab uses a fresh benign test secret in its place, never the client's real credential.",
+            "items": { "type": "string" }
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "description": "honest gaps: roles/ports/versions recon surfaced that could NOT be justified into a faithful service (so the lab is known-incomplete here, not silently clean).",
+      "items": { "type": "string" }
+    },
+    "guardrail": {
+      "type": "string",
+      "description": "the human-readable IRON GUARDRAIL restated for anyone reading the manifest directly (mirrors lab/README.md + the SKILL.md ## Safety section + verify-base.md): replica-only, re-confirm benignly on the live target, a replica negative never closes a class."
+    }
+  }
+}
