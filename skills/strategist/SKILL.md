@@ -97,7 +97,10 @@ Combine, per `pending` class (none of these may ever *remove* a class or lower i
 3. **CVE intel** — a version-matched, reachable CVE on a component the class covers (`cve_intel.json`)
    is a strong boost and typically warrants `deep`. The cached CVE knowledge base `cve_kb.jsonl`
    (cve-intelligence's cache-once, retrieve-many corpus) is the same intel's durable, offline-capable
-   form — a read-only retrieval input you may consult when `cve_intel.json` is thin or stale.
+   form — a read-only retrieval input you may consult when `cve_intel.json` is thin or stale. When such
+   a CVE also carries a `technique_seed` (a technique-class first-probe hint), that is a further signal
+   the class has a concrete, evidenced first benign probe ready — rank it sooner so the executor reaches
+   the seeded probe early.
 4. **Feeder richness** — how much the class's `<class>_context.json` found (confirmed reflections,
    injectable params, object refs, URL-fetch sinks, auth flows).
 5. **Notebook leads** — open/promoted leads in `notebook.json` pointing at the class.
