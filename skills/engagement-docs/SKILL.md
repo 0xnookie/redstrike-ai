@@ -27,7 +27,9 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (all docs exist, non-zero;
   - **Open-proof-gap count** — findings carried as `rejection_class: open-proof-gap` + any recall gaps the recall-audit verdict left `BLOCKED`/open — real-looking but undemonstrated here, reported as caveats, never silently dropped.
   - **Run outcome** — `runtime/diagnostics.json` latest run `outcome` (`produced-findings` / `clean-tested` / `degraded-empty` / `failed`) + its `degraded_reason` when degraded.
   - **Hard rule (enforced by `verify_completion.py --engagement`, R4):** a deliverable must NOT assert a clean/hardened/secure posture ("hardened", "held the line", "no vulnerabilities/findings", "secure posture", …) while the recall-audit verdict has UNADJUDICATED gaps OR the run outcome is `degraded-empty`/`failed`. An incomplete or degraded run is reported AS SUCH in this clause — it is not a clean bill of health. The deliverable-consistency gate HARD-fails that contradiction once a report exists.
-- **Retest** — a template to record remediation verification per finding
+- **Retest** — a template to record remediation verification per finding, plus a **"changes since last
+  assessment"** section machine-filled from `report/scan_diff.json` (`scripts/scan_diff.py` — new / fixed /
+  unchanged / severity-changed vs a prior baseline, net delta); omit that section on a first assessment
 
 ## Steps  (action · tool · output)
 1. Determine mode (pre-engagement = RoE; post = full suite) + gather metadata from `scope.yaml` · read · (context)
@@ -36,7 +38,7 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (all docs exist, non-zero;
 4. Write the executive summary (non-technical + severity counts + headline findings) · synth · `report.md`
 4b. **Fill the Assurance & Coverage clause** (surfaces tested/total · categories run/accepted/blocked/skipped · open-proof-gap count · run outcome) — read `coverage_ledger.json` + `surface_ledger.json` + `reviews/recall_audit.verdict.json` + `runtime/diagnostics.json`; NEVER assert a clean/hardened posture over an unadjudicated recall gap or a degraded/failed run · `jq` · `report.md`
 5. Write detailed findings (per-finding template, risk-ordered) + risk summary + remediation roadmap + appendices · `refs` · `report.md`
-6. Write the attestation letter (posture line grounded in the Assurance & Coverage clause) + the retest template · `refs` · `attestation.md`, `retest.md`
+6. Write the attestation letter (posture line grounded in the Assurance & Coverage clause) + the retest template; when a prior baseline exists, fill the retest's **"changes since last assessment"** section from `report/scan_diff.json` (`scripts/scan_diff.py`) · `refs` · `attestation.md`, `retest.md`
 7. Emit a short index/summary of produced docs · synth · `summary.md`
 8. /REVIEW SKILL · `review.md`
 

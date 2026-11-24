@@ -176,6 +176,25 @@ of security.
 | <RS-YYYY-NNN> <title> | <sev> | ☐ Fixed ☐ Partially ☐ Not fixed | <retest evidence> | <...> |
 
 **Summary:** <N> of <M> findings remediated; <k> Critical/High outstanding.
+
+## Changes since last assessment  (machine-filled from the scan-diff)
+<FILLED from `report/scan_diff.json` — `python scripts/scan_diff.py --baseline <prior/findings_consolidated.json>
+--engagement <dir> --out <dir>/report/scan_diff.json --md <dir>/report/scan_diff.md`. Identity is the dedup
+canonical key (asset-host + normalized endpoint/param + vuln-class), so a re-worded title / re-ordered query
+string is NOT counted as a new bug. Paste the `scan_diff.md` table or restate its summary below.>
+
+| Change | Count |
+|---|---|
+| New (since baseline) | <summary.new> |
+| Fixed | <summary.fixed> |
+| Unchanged (still open) | <summary.unchanged> |
+| Severity changed | <summary.severity_changed> |
+| **Net delta (new − fixed)** | **<summary.net_delta>** |
+
+**Baseline:** <baseline.source> (<baseline.count> findings) → **Current:** <current.count> findings.
+<One line: whether the posture improved (negative net delta) or regressed; list any newly-introduced
+Critical/High and any severity-raised findings. If no baseline was supplied, state "first assessment — no
+prior baseline to diff against" and omit this section.>
 ```
 
 ================================================================================

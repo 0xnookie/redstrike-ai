@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/scan_diff.schema.json",
+  "title": "Redstrike Scan-Diff Report",
+  "description": "The scripts/scan_diff.py artifact: a finding-level diff of this engagement's findings_consolidated.json against a prior baseline, classifying each distinct finding (identity = dedup.py canonical_key) as new / fixed / unchanged / severity-changed, with a net-delta summary. Feeds the retest deliverable + the reporting exec-summary 'changes since last assessment' line.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "summary", "new", "fixed", "unchanged", "severity_changed"],
+  "properties": {
+    "version": { "type": "integer", "description": "schema version of this artifact (current = 1)." },
+    "generated": { "type": "string", "description": "ISO-8601 UTC timestamp the diff was produced." },
+    "baseline": { "$ref": "#/$defs/scan_ref" },
+    "current": { "$ref": "#/$defs/scan_ref" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["new", "fixed", "unchanged", "severity_changed", "net_delta"],
+      "properties": {
+        "new": { "type": "integer", "minimum": 0 },
+        "fixed": { "type": "integer", "minimum": 0 },
+        "unchanged": { "type": "integer", "minimum": 0 },
+        "severity_changed": { "type": "integer", "minimum": 0 },
+        "net_delta": { "type": "integer", "description": "new - fixed: the headline movement since the baseline (positive = worse)." },
+        "total_baseline": { "type": "integer", "minimum": 0 },
+        "total_current": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "new": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+    "fixed": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+    "unchanged": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+    "severity_changed": { "type": "array", "items": { "$ref": "#/$defs/sev_row" } }
+  },
+  "$defs": {
+    "scan_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "description": "path/label of this scan's findings_consolidated.json." },
+        "count": { "type": "integer", "minimum": 0, "description": "distinct reported findings in this scan." }
+      }
+    },
+    "key": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The dedup canonical key components (the cross-engagement finding identity).",
+      "properties": {
+        "host": { "type": "string" },
+        "path": { "type": "string" },
+        "params": { "type": "array", "items": { "type": "string" } },
+        "class": { "type": "string" }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "asset", "severity", "key"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "asset": { "type": "string" },
+        "severity": { "type": "string" },
+        "key": { "$ref": "#/$defs/key" }
+      }
+    },
+    "sev_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "asset", "severity", "key", "baseline_severity", "current_severity", "direction"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "asset": { "type": "string" },
+        "severity": { "type": "string" },
+        "key": { "$ref": "#/$defs/key" },
+        "baseline_severity": { "type": "string" },
+        "current_severity": { "type": "string" },
+        "direction": { "enum": ["raised", "lowered", "changed"] }
+      }
+    }
+  }
+}
