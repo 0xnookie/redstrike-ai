@@ -9,7 +9,7 @@ import {
 import { cx } from "@/lib/format";
 import { useConsole } from "@/lib/store";
 import { isSourceEngagement } from "@/lib/sourceSurface";
-import { useControl } from "@/components/control/ControlProvider";
+import { useControl, useRunStream } from "@/components/control/ControlProvider";
 import { reportable } from "@/lib/stats";
 import { EngagementSwitcher } from "./EngagementSwitcher";
 
@@ -71,6 +71,11 @@ interface NavBadge { n: number; tone?: BadgeTone }
 function useNavBadges(): Record<string, NavBadge> {
   const { engagements, findings, chains, assets, content, notebook, cveIntel, jsRecon, activeEngagement, sourceContext, surfaceLedger } = useConsole();
   const { auth, conn, running } = useControl();
+  const { orch } = useRunStream();
+  // agents the orchestrator currently has in flight — folded live from the SAME autorun.jsonl
+  // run stream the orchestration view reads. An agent is "running" between its spawn and its
+  // return (RunAgent.status === "running"); this drives the live count on the Orchestration nav.
+  const agentsRunning = orch.agents.filter((a) => a.status === "running").length;
   const activeLeads = (notebook?.leads ?? []).filter((l) => l.status === "open" || l.status === "testing").length;
   const cves = (cveIntel?.cves ?? cveIntel?.entries ?? []).length;
   const connected = conn === "ready" ? Object.values(auth?.providers ?? {}).filter((p) => p.connected).length : 0;
@@ -87,7 +92,9 @@ function useNavBadges(): Record<string, NavBadge> {
     "/js-recon": { n: sourceMode ? 0 : (jsRecon?.totals?.endpoints ?? 0) },
     "/notebook": { n: activeLeads },
     "/cve-intel": { n: cves },
-    "/orchestration": { n: 0, tone: running ? "live" : undefined }, // a run is streaming right now
+    // live count of working agents; falls back to a bare pulse while a run streams but hasn't
+    // folded an agent yet (booting). No badge at all once nothing is running (zero-state).
+    "/orchestration": { n: agentsRunning, tone: agentsRunning > 0 || running ? "live" : undefined },
     "/connections": { n: connected },
   };
 }
@@ -142,10 +149,12 @@ export function Sidebar({ className, onNavigate }: { className?: string; onNavig
                       {count > 0 ? (
                         <span
                           className={cx(
-                            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-mono leading-none tabular-nums",
+                            "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-mono leading-none tabular-nums",
                             tone ? TONE_CLASS[tone] : active ? "bg-brand/15 text-brand" : "bg-card2 text-faint"
                           )}
                         >
+                          {/* a live count carries a small pulsing dot so an active run reads at a glance */}
+                          {tone === "live" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current pulse-dot" aria-hidden />}
                           {count}
                         </span>
                       ) : tone === "live" ? (
