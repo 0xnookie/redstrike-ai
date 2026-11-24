@@ -21,11 +21,11 @@ The contract, the two review altitudes, and how to build a new skill live in
 
 **Beyond web** (✅ built — same quint each): **AI/LLM** (`llm-context` · `agent-recon` → `prompt-injection` / `sensitive-disclosure` / `ai-supply-chain` / `data-poisoning` / `llm-output-handling` / `excessive-agency`) · **Web3** (`web3-context` → six `sc-*`, Foundry-fork-proven) · **Active Directory** (`ad-context` → `ad-initial-access` / `ad-kerberos` / `ad-acl-abuse` / `ad-adcs` / `ad-lateral-movement`) · **post-ex** (`linux-privesc` / `windows-privesc` / `credential-access` / `persistence` / `container-escape` / `k8s-attacks` / `sccm-exploitation` / `cloud`) · **mobile/IoT/wireless** (`mobile` / `iot` / `wireless`) · **binary** (`fuzzing` / `exploit-dev`) · **social-engineering**.
 
-**Tier-3 red team** (✅ built): missions `bug-bounty` · `ctf-solver` · `xss-hunter`; capabilities `cve-intelligence` · `exploit-generator` · `attack-chain-discovery` · `parameter-optimization`. See [`_contract/agent-tiers.md`](_contract/agent-tiers.md).
+**Tier-3 red team** (✅ built): missions `bug-bounty` · `ctf-solver` · `xss-hunter`; capabilities `cve-intelligence` · `exploit-generator` · `attack-chain-discovery` · `parameter-optimization` · `lab-reconstruct` *(white-box: local offline Docker replica bench from the cloned `source/` + lockfile; feeds exploit-dev / fuzz / code-audit — **never an oracle**)*. See [`_contract/agent-tiers.md`](_contract/agent-tiers.md).
 
 **Reporting & docs** (✅ built): `reporting` aggregates every skill's *accepted* findings into the client report; `engagement-docs` writes the RoE + the formal report / attestation / retest suite.
 
-> **118 skills total** — **90 findings-producing** (one `*-verify` reviewer each) + **28 review-only** (recon feeders, services, missions). The authoritative catalog is [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md).
+> **119 skills total** — **90 findings-producing** (one `*-verify` reviewer each) + **29 review-only** (recon feeders, services, missions). The authoritative catalog is [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md).
 
 ## Roadmap (same quad for each)
 - **Recon feeders:** ✅ `osint` · `host-discovery` · `content-discovery` (custom wordlists) · `js-analysis` — all built
