@@ -107,7 +107,10 @@ class TestBuildArgv(unittest.TestCase):
 class TestConsole(unittest.TestCase):
     def test_console_dry_run_prints_argv(self):
         with tempfile.TemporaryDirectory() as d:
-            repo = pathlib.Path(d)
+            # Resolve the tempdir so the expected path matches the canonical argv the CLI builds
+            # (_repo_root resolves --repo); on the Windows CI runner the raw tempdir is an 8.3 short
+            # name (RUNNER~1) while the resolved argv is the long name (runneradmin), else they differ.
+            repo = pathlib.Path(d).resolve()
             (repo / "engagements").mkdir()
             buf = io.StringIO()
             with redirect_stdout(buf):
