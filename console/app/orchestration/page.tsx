@@ -358,9 +358,13 @@ function OrchestrationInner() {
         live={live}
         sub={offline ? "Control plane not connected" : live ? `Live task routing · ${activeId}` : `${activeId || "no engagement"} · idle`}
         actions={
-          <Link href="/engagements" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium text-fg transition hover:border-fg/30">
-            <Rocket size={15} /> Launch a run
-          </Link>
+          <>
+            {/* live header badge: pulsing dot + count of agents working right now; gone at zero */}
+            {agentsRunning > 0 && <LivePill label={`${agentsRunning} agent${agentsRunning === 1 ? "" : "s"} running`} />}
+            <Link href="/engagements" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium text-fg transition hover:border-fg/30">
+              <Rocket size={15} /> Launch a run
+            </Link>
+          </>
         }
       />
 

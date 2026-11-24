@@ -99,10 +99,29 @@ a parallel multi-model swarm batched by rank, not a single serial pass. This is 
 - **Batch by rank into waves.** Take the `pending` categories in ascending `hunt_plan.json` `rank` (§2.5;
   fall back to routing-map order when no plan) and split them into WAVES of a handful of classes each —
   the highest-value, best-evidenced classes in the first wave.
-- **Fan out each wave as CONCURRENT subagents.** Spawn the wave's executors as parallel `Agent`/Task
-  subagents that run at the SAME time (the same mechanism the per-class `*-verify` reviewers already use) —
-  do NOT run them one after another. Each executor runs its `<class>-context` feeder (if any) → the
-  variant/category agents for its class.
+- **Fan out each wave as CONCURRENT, PER-CLASS-LABELLED units — one trackable unit per class.** The
+  console Task-flow view folds the live `autorun.jsonl` tool-call stream (`console/lib/control.ts`
+  `foldRunObject`), and it renders a DISTINCT per-class node only when the class is NAMED in the stream, so
+  dispatch each class as its own labelled unit, NOT as one umbrella "hunt everything" task:
+  - **Emit one `TaskCreate` per class FIRST, with the class slug in the subject.** Lead the subject with
+    that class's executor skill slug as a literal hyphenated token — a real slug from the category's
+    routing-map `agents[]` (e.g. `xss-reflected: hunt the search param`, `sqli-inband: probe the id param`,
+    `idor: cross-identity object access`, `ssrf-inband: fetch-param test`). `control.ts` `startTask` names
+    the node `skillForSubject(subject)`, which resolves that slug to a `redstrike-<slug>` node — so every
+    class becomes its own visible node. Without the slug in a subject the whole hunt collapses to ONE
+    umbrella node and the per-class xss/sqli/ssrf/… nodes never appear.
+  - **Then run that class concurrently with the others in the wave.** Each class runs its `<class>-context`
+    feeder (if any) → the variant/category agents for its class, spawned as parallel `Agent`/Task subagents
+    that run at the SAME time (the same mechanism the `*-verify` reviewers use) — do NOT run them one after
+    another. When you spawn an executor subagent, carry the class in its label (description) so a spawned
+    `Agent` node is also class-attributable, since the fold names a spawned subagent by its `subagent_type`.
+- **NEVER collapse classes into anonymous `general-purpose` batches.** Do NOT run N classes as a handful of
+  generic `subagent_type: general-purpose` family batches under one top-level task: the fold names a spawned
+  subagent by its `subagent_type`, so family batches all render as identical, class-less "general-purpose"
+  nodes — the stream can no longer tell which classes ran, and that anonymity is exactly where the
+  `*-verify` gate got silently skipped in a live headless run. A handful-at-a-time wave is fine; the
+  requirement is that EACH class is its own slug-named, independently-reviewed unit in the stream (a
+  per-class `TaskCreate` and/or a class-labelled subagent), never folded into a nameless batch.
 - **Model diversity across a wave.** Spawn the executors on a MIX of models (set each subagent's model on
   the `Agent` tool) — the higher-value / `deep` / high-`severity_ceiling` classes on the stronger model
   (`opus`), the rest on `sonnet` — because a differently-modelled pass catches bugs one model misses
@@ -113,8 +132,14 @@ a parallel multi-model swarm batched by rank, not a single serial pass. This is 
 - **Each executor writes ITS OWN `<skill>/findings.json`** — never a shared file — so concurrent executors
   in a wave never collide on a write.
 - **MERGE / DEDUP CHECKPOINT after each wave (before the next one).** When the wave's executors return:
-  launch each class's independent `<class>-verify` reviewer, then reconcile the ledgers by CALLING the
-  scripts (never hand-editing the JSON): `scripts/coverage.py --mark <class> --status attempted|blocked
+  **hand every executor's findings to its matching independent `<skill>-verify` reviewer FIRST — spawn each
+  as its own `Agent` subagent (`subagent_type: <skill>-verify`, e.g. `xss-reflected-verify`,
+  `sqli-inband-verify`, `idor-verify`). The fold renders each as a DISTINCT per-class reviewer node, and the
+  spawn is what enforces the executor→reviewer trust contract. This gate is NON-SKIPPABLE: only reviewer-
+  `accepted` findings advance, and the verdict MUST come from that independent `*-verify` agent — never your
+  own self-attestation (§2 "After EACH findings-producing skill"). A wave is not complete until every
+  executor that produced findings has had its `<skill>-verify` reviewer run.** Then reconcile the ledgers by
+  CALLING the scripts (never hand-editing the JSON): `scripts/coverage.py --mark <class> --status attempted|blocked
   --count N [--escalations …]` for each class, `scripts/surface.py --mark` for the surface each executor
   consumed, and `scripts/dedup.py --engagement <dir>` to collapse the same bug found by two executors.
   These writers are concurrency-safe; `coverage.py` stays the SOLE ledger owner. Then re-invoke

@@ -718,6 +718,20 @@ class TestHuntPlanOrdering(unittest.TestCase):
             self.assertIn("- sqli", p)
             self.assertNotIn("[rank", p)  # no plan -> no per-bullet rank/depth annotation
 
+    def test_continue_prompt_requires_per_class_labeling_and_verify(self):
+        # the resume prompt must drive per-class VISIBILITY (a slug-named TaskCreate per class so the
+        # console folds a distinct per-class node) and VERIFY gating (each class's own *-verify reviewer),
+        # and must forbid the anonymous general-purpose family batches that hid the live headless run.
+        with _Eng() as eng:
+            _write_ledger(eng, [{"id": "xss", "status": "pending"},
+                                {"id": "sqli", "status": "pending"}])
+            p = runloop.continue_prompt("acme-eng", eng)
+            self.assertIn("TaskCreate", p)          # per-class emission unit
+            self.assertIn("per-class node", p)      # … that the console folds into a distinct node
+            self.assertIn("<skill>-verify", p)      # each class handed to its own reviewer
+            self.assertIn("NON-SKIPPABLE", p)       # the verify gate cannot be skipped
+            self.assertIn("general-purpose", p)     # the anonymous-batch anti-pattern is named + forbidden
+
 
 class TestPlanPreSteps(unittest.TestCase):
     """#4: the loop runs the plan scripts ITSELF as deterministic pre-steps instead of relying on the model.
