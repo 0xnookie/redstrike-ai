@@ -95,7 +95,9 @@ Combine, per `pending` class (none of these may ever *remove* a class or lower i
 2. **Surface breadth** — how many `surface_ledger.json` elements route to the class (more surface ⇒
    more to test ⇒ usually higher).
 3. **CVE intel** — a version-matched, reachable CVE on a component the class covers (`cve_intel.json`)
-   is a strong boost and typically warrants `deep`.
+   is a strong boost and typically warrants `deep`. The cached CVE knowledge base `cve_kb.jsonl`
+   (cve-intelligence's cache-once, retrieve-many corpus) is the same intel's durable, offline-capable
+   form — a read-only retrieval input you may consult when `cve_intel.json` is thin or stale.
 4. **Feeder richness** — how much the class's `<class>_context.json` found (confirmed reflections,
    injectable params, object refs, URL-fetch sinks, auth flows).
 5. **Notebook leads** — open/promoted leads in `notebook.json` pointing at the class.
@@ -131,7 +133,8 @@ You still never skip a class or lower the floor; you only re-order the re-opened
 
 ## Inputs
 - `coverage_ledger.json` (routed classes), `surface_ledger.json` (surface breadth), the `*_context.json`
-  feeders (sink richness), `notebook.json` (leads), `cve_intel.json` (CVE matches), `scope.yaml`, and —
+  feeders (sink richness), `notebook.json` (leads), `cve_intel.json` (CVE matches) + optionally
+  `cve_kb.jsonl` (the cached CVE corpus, as a read-only retrieval input), `scope.yaml`, and —
   on re-rank — the engagement findings (`<eng>/*/findings.json` or `findings.json`).
 
 ## Outputs
