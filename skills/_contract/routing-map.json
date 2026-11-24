@@ -91,6 +91,7 @@
     "endpoint:upload": "a file-upload endpoint exists",
     "endpoint:api": "REST/JSON API endpoints exist",
     "endpoint:graphql": "a GraphQL endpoint exists",
+    "endpoint:websocket": "a WebSocket endpoint (ws:// / wss:// / new WebSocket(...)) is reachable",
     "endpoint:https": "the target serves TLS/HTTPS",
     "flow:auth": "a login / session / token flow exists",
     "flow:login-form": "a login form is present",
@@ -147,6 +148,7 @@
     "endpoint:upload": ["content-discovery", "js-analysis"],
     "endpoint:api": ["content-discovery", "js-analysis", "host-discovery"],
     "endpoint:graphql": ["content-discovery", "js-analysis"],
+    "endpoint:websocket": ["js-analysis", "content-discovery", "host-discovery"],
     "endpoint:https": ["host-discovery"],
     "flow:auth": ["content-discovery", "js-analysis"],
     "flow:login-form": ["content-discovery"],
@@ -670,6 +672,23 @@
       ],
       "skip_reason": "no user value reaching an HTTP response-header sink (Location / Set-Cookie / custom header) surfaced",
       "notes": "CWE-113 HTTP-response variant: CR/LF into a user value reaching a response-header sink -> add/override a header or split into a second HTTP response; proven by the injected header in the RESPONSE HEADER block (or a parsed split) + a causal CR/LF-removal differential; de-dup vs xss-* (body landing), open-redirect/host-header (redirect-host), cache-poisoning (cross-user cache), email-injection (the email-header variant)"
+    },
+    {
+      "id": "websocket",
+      "name": "WebSocket security (CSWSH / message-layer / socket authz)",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "websocket"
+      ],
+      "baseline": false,
+      "triggers": [
+        "endpoint:websocket"
+      ],
+      "skip_reason": "no WebSocket (ws:// / wss:// / new WebSocket(...)) endpoint surfaced",
+      "notes": "consumes js-analysis (ws(s):// + new WebSocket endpoints) + auth-context (cookie-vs-token on the handshake); CSWSH (de-dup vs csrf) / message-layer injection / authz-IDOR over frames / missing socket auth / ws:// cleartext; a downstream-detonating payload (XSS/SQLi/cmd) routes to its owning class"
     },
     {
       "id": "parameter-pollution",

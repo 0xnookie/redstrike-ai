@@ -36,6 +36,7 @@
         "endpoint:upload",
         "endpoint:api",
         "endpoint:graphql",
+        "endpoint:websocket",
         "endpoint:https",
         "flow:auth",
         "flow:login-form",
