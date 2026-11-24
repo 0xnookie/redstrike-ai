@@ -41,8 +41,34 @@ python scripts/evidence_score.py --file <skill>/findings.json --id RS-YYYY-NNN -
 
 The mechanical components (`request_response`, browser `dom_capture`, the independent-artifact axis) are
 derived from the finding's evidence types; you assert the SEMANTIC ones (`--readback`, `--impact`) and the
-measured reliability (`--reliability-runs N --reliability-hits M`) / chain depth (`--chain-depth D`). Copy the
-tool's JSON verbatim into the finding's `evidence_score` block.
+chain depth (`--chain-depth D`) from the chain. **The reliability counts are MEASURED, not asserted — see
+below.** Copy the tool's JSON verbatim into the finding's `evidence_score` block.
+
+**Reliability is PRODUCED by re-running the finding's own benign probe — do not hand-assert the counts.**
+For a finding whose confirmation probe is **safely repeatable — READ-ONLY or IDEMPOTENT** — do not type a
+`reliability_runs`/`reliability_hits` number you estimated. RUN the reproducibility harness
+(`scripts/reproduce.py`): it re-executes the SAME benign probe the finding already passed, K times (small +
+bounded, rate-limited, honouring engagement scope + rate limits), and counts hits by the finding's OWN
+success criterion — an attributable OOB callback token, the confirmation status/effect, a controlled timing
+differential, or the finding's own checker predicate — **never a payload reflected in the response body
+(reflection is not execution)**. Pipe its measured `{runs, hits}` straight into the score:
+
+```
+python scripts/reproduce.py --spec <probe>.json -k 5 --rate-rps 2 \
+  | python scripts/evidence_score.py --file <skill>/findings.json --id RS-YYYY-NNN --readback --impact --reliability-json -
+```
+
+A measured hit-rate < 0.8 is the scorer's **"race/timing — needs chaining"** flag — now a MEASURED fact, not
+an impression. This only MEASURES an already-accepted probe's reproducibility: it never re-probes a rejected /
+false-positive finding to rescue it, never raises `confidence`, and never lowers an evidence standard.
+
+**Safety carve-out — do NOT auto-repeat a state-changing probe.** The harness REFUSES any probe that is not
+read-only/idempotent: **state-changing, destructive, and single-use** confirmations are never auto-fired K
+times (re-firing them could double-spend, burn a one-shot token, or destroy state). Those keep the existing
+manual / bounded handling — e.g. the `race-condition` skill fires its own benign, bounded burst under its
+reviewer and records the counts that way, which you then pass as `--reliability-runs N --reliability-hits M`.
+For a DETERMINISTIC finding (no probabilistic element) leave `reliability_runs` at 0 — it earns full
+reliability credit by nature.
 
 **Decision bands are a FLOOR, not a replacement for your judgment** (you remain the authority — a PASS score
 does NOT force an accept; a KILL score FORBIDS one):

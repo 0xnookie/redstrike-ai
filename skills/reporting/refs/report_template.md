@@ -36,3 +36,10 @@ Every finding carries a CVSS vector (the reviewer recomputed it). Do not invent 
 - Order Critical → Info.
 - Keep redacted secrets redacted; reference evidence, don't paste raw secrets.
 - Remediation is specific and testable (not "sanitize input").
+
+## Compliance mapping (OPTIONAL — config-gated, default OFF)
+When enabled, each finding is stamped with a `compliance` block via a DETERMINISTIC lookup of its
+`category.cwe` in `compliance_crosswalk.json` (see SKILL.md §Compliance mapping). Render it as a
+**"Compliance Mapping"** appendix: a Finding → CWE → PCI-DSS v4.0 / SOC 2 CC / ISO 27001:2022 table
+(engagement-docs `refs/doc_templates.md` Appendix E). Always carry the scope caveat: the mappings are
+advisory CWE→control crosswalks, not a certified audit. Off ⇒ no `compliance` block and no appendix.

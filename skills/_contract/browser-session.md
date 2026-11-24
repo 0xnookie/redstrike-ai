@@ -121,3 +121,24 @@ No browser driver is available, or the operator declines one → degrade to the 
 the proxy, and the executors replay that single genuine capture.
 This capability's whole purpose is to make that one drive **autonomous**; its floor is the human capture —
 it is **never** a hand-rolled, fingerprint-spoofed HTTP client.
+
+## Deterministic session refresh (login recipe)
+
+A long engagement's **test-account session expires mid-run**. Re-driving a real browser to
+re-authenticate on *every* run is the slow, noisy, lockout-risky anti-pattern this contract exists to
+avoid. The launcher therefore ships a **deterministic login-recipe refresher** that sits one rung
+**below** this capability on the `anti-automation-ladder.md`:
+
+- A per-identity declarative **login recipe** (ordered `get` / `post` / `extract_csrf` HTTP rungs with
+  `${var}` substitution from the engagement's materialized `auth.env`, and an `auth_check`
+  **liveness** assertion) is replayed **only when the current session is stale** — the refresher runs
+  the liveness probe *first* and skips the replay when the session is still live. A refreshed session
+  is written back into `auth.env` + the saved **cookie-jar** (the same jar §1 reuses), so the
+  executors pick it up with no browser drive at all.
+- A recipe's **`browser` step** is the hand-off point to **this** capability: the deterministic
+  refresher handles the HTTP rungs itself and, for a step that genuinely needs a real session
+  (client-built body, DOM-derived CSRF, RSC/`Next-Action`), **degrades to the `browser-drive`
+  capability above** — it never hard-codes a browser engine of its own. Drive that one rung through
+  whichever backend is connected (the table above), then let the refresher persist the resulting
+  cookie-jar. This is the same "**browser only when the prior rung is blocked**" ladder discipline:
+  the HTTP recipe is the cheap deterministic path; the browser drive is the escalation, not the default.

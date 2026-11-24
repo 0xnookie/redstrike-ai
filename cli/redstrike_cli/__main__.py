@@ -15,6 +15,9 @@ from pathlib import Path
 from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, reasoning_trace, runloop, source_audit, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
+from . import login_replay as loginmod
+from . import nl_scope as nlscopemod
+from . import notifier as notifiermod
 from . import scope as scopemod
 from . import settings as settingsmod
 
@@ -398,7 +401,7 @@ def _prelaunch_artifacts(eng_dir: Path, repo: Path) -> None:
 
 
 def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "interactive",
-                   loop=None) -> int:
+                   loop=None, run_log=None) -> int:
     """Run the mechanical completion + coverage gate after an engine run, then write the per-run
     diagnostics record and surface the OUTCOME. The engine itself can't self-gate between phases,
     so this is where the gates become mechanical rather than model-discretion. If the engine exited
@@ -421,10 +424,21 @@ def _post_run_gate(repo: Path, eng_dir: Path, res, *, prep=None, mode: str = "in
         print(ui.warn("engine exited clean, but the completion/coverage gate flagged gaps (above) — not report-ready"))
     # Diagnostics (reliability/observability): classify WHY this run produced what it did and record
     # it — for INTERACTIVE runs too (they captured nothing before). Must never alter the exit code.
+    record = None
     try:
-        _emit_diagnostics(eng_dir, res, prep=prep, mode=mode, gate_rc=grc, loop=loop)
+        record = _emit_diagnostics(eng_dir, res, prep=prep, mode=mode, gate_rc=grc, loop=loop)
     except Exception:
         pass
+    # Run notification (long autonomous runs): POST a REDACTED run summary to a configured generic
+    # outbound webhook. Default OFF (no webhook → no-op). Hooked to the diagnostics OUTCOME record, the
+    # loop result, the accepted Critical/High findings, and the loop's emit lines (``run_log``). Never
+    # alters the exit code; a send failure is one warning.
+    if record is not None:
+        try:
+            notifiermod.notify_run(eng_dir, record, loop=loop, run_log=run_log,
+                                   emit=lambda line: print(line))
+        except Exception:
+            pass
     # Reasoning-provenance trace (runtime/reasoning_trace.json): a persisted, entity-keyed lineage of
     # HOW findings came to be (goal -> intent/hypothesis -> fact/evidence -> finding), for the console's
     # exploration graph. Strictly additive + crash-safe; a failure degrades (one warning) but never
@@ -469,6 +483,7 @@ def _emit_diagnostics(eng_dir: Path, res, *, prep, mode: str, gate_rc: int, loop
         record = runloop.annotate_record(record, loop)
     diagnostics.write(eng_dir, record)
     _print_outcome(eng_dir, record)
+    return record
 
 
 def _print_outcome(eng_dir: Path, record: dict) -> None:
@@ -670,6 +685,11 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
     # Wave-2 (2b) dispatch: >1 shard-model ⇒ the concurrent multi-process worker pool (one shard per model,
     # fanned out per wave); otherwise the single-session resumer, UNCHANGED (no / one shard-model is
     # byte-for-byte the legacy path). See runloop.shard_model_list / drive_pool.
+    # Tee the loop's emit callback so the run-notifier can include the final status lines in its
+    # summary while the console still sees them live (Collector forwards to print). Off-by-default
+    # notifier reads collector.lines; nothing else changes if no webhook is configured.
+    collector = notifiermod.Collector()
+    loop_emit = collector.tee(lambda line: print(line))
     shards = runloop.shard_model_list(getattr(args, "shard_models", None))
     if len(shards) > 1:
         print(ui.ok(f"concurrent hunt pool · {len(shards)} shards: {', '.join(shards)}"))
@@ -683,6 +703,7 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
             audit=audit,
             engagement_id=prep.engagement_id,
             shard_models=shards,
+            emit=loop_emit,
         )
     else:
         loop = runloop.drive(
@@ -694,8 +715,10 @@ def _run_autonomous(args, repo: Path, eng_dir: Path, engine) -> int:
             first_resume=bool(args.resume),
             audit=audit,
             engagement_id=prep.engagement_id,
+            emit=loop_emit,
         )
-    rc = _post_run_gate(repo, eng_dir, loop.result, prep=prep, mode="autonomous", loop=loop)
+    rc = _post_run_gate(repo, eng_dir, loop.result, prep=prep, mode="autonomous", loop=loop,
+                        run_log=collector.lines)
     maybe_launch_console(args, repo)
     return rc
 
@@ -789,6 +812,29 @@ def cmd_accounts(args, repo: Path) -> int:
         print(ui.kv("auth.env", str(eng_dir / accounts.AUTH_ENV_REL) + "  (gitignored · never served)"))
         return 0
 
+    if args.action == "refresh":
+        # Deterministic login-recipe replay with a liveness gate: refresh ONLY the identities whose
+        # stored session has gone stale (per each recipe's auth_check probe) into runtime/auth.env +
+        # the cookie-jar, without re-driving a browser. Recipes live in <engagement>/login_recipes.json.
+        results = loginmod.refresh_all(eng_dir)
+        if not results:
+            print(ui.info("no test accounts / login recipes to refresh "
+                          f"(author {eng_dir.name}/{loginmod.RECIPES_NAME})"))
+            return 0
+        print(ui.rule(f"session refresh · {eng_dir.name}"))
+        rc = 0
+        render = {
+            loginmod.FRESH: ui.ok, loginmod.REFRESHED: ui.ok,
+            loginmod.SKIPPED: ui.info, loginmod.NEEDS_BROWSER: ui.warn, loginmod.FAILED: ui.err,
+        }
+        for r in results:
+            print(render.get(r.status, ui.warn)(f"{r.id}: {r.status} — {r.reason}"))
+            if r.status == loginmod.FAILED:
+                rc = 1
+        if any(r.status == loginmod.REFRESHED for r in results):
+            print(ui.info(f"auth.env + cookie-jar updated · {eng_dir / accounts.AUTH_ENV_REL}"))
+        return rc
+
     if args.action == "list":
         rows = accounts.summaries(eng_dir)
         if not rows:
@@ -837,6 +883,50 @@ def cmd_accounts(args, repo: Path) -> int:
     print(ui.kv("role", acct.get("role") or "—"))
     print(ui.kv("auth", acct.get("auth_method") or "—"))
     print(ui.kv("secret", accounts.mask_secret(acct)))
+    return 0
+
+
+def cmd_scope(args, repo) -> int:
+    """Seed a DRAFT scope.yaml from a natural-language description. The NL text is a convenience seed
+    ONLY — it is NEVER the authorization-of-record. The draft's authorized_by is left as an UNSIGNED
+    placeholder (so a launch is refused until a human fills + signs it); only the reviewed + signed
+    scope.yaml feeds the PreToolUse scope gate."""
+    if not args.from_nl:
+        print(ui.err("scope needs --from-nl \"<text>\" — the natural language to seed a DRAFT scope.yaml"))
+        return 2
+    if not args.no_banner:
+        ui.print_banner("scope draft (from natural language)")
+    parsed = nlscopemod.parse_nl_scope(args.from_nl)
+    draft = nlscopemod.render_draft(parsed, client=args.client, nl_text=args.from_nl)
+
+    print(ui.warn("DRAFT ONLY — the natural-language text is NOT an authorization record."))
+    print(ui.info("Review it, fill `authorized_by` with the authorizing contact + written-auth "
+                  "reference, verify scope + window, and SIGN before any run."))
+    print(ui.info("Only the reviewed + SIGNED scope.yaml feeds the PreToolUse scope gate; this draft "
+                  "feeds nothing by itself."))
+    if not (parsed["domains"] or parsed["urls"] or parsed["cidrs"]):
+        print(ui.warn("no in-scope host/url/cidr was parsed from the text — add a target before signing "
+                      "(the draft will not launch empty)."))
+    print()
+    print(ui.rule("parsed intent"))
+    for line in nlscopemod.summary_lines(parsed):
+        print(f"  {line}")
+    print()
+
+    if args.out:
+        outp = Path(args.out)
+        if outp.exists() and not args.force:
+            print(ui.err(f"{outp} already exists — use --force to overwrite"))
+            return 1
+        outp.parent.mkdir(parents=True, exist_ok=True)
+        outp.write_text(draft, encoding="utf-8")
+        print(ui.ok(f"DRAFT written → {outp}"))
+        print(ui.info("review + fill authorized_by + sign, then launch it (e.g. place as an "
+                      "engagement's scope.yaml, or re-enter the targets via `redstrike init`)."))
+        return 0
+
+    print(ui.rule("DRAFT scope.yaml (review + sign before use)"))
+    print(draft)
     return 0
 
 
@@ -957,6 +1047,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", help="summarize findings + scope")
     s.add_argument("engagement")
 
+    sc = sub.add_parser(
+        "scope",
+        help="seed a DRAFT scope.yaml from natural language (a convenience — review + SIGN before use; "
+             "the NL text is NOT the authorization-of-record)")
+    sc.add_argument("--from-nl", dest="from_nl", metavar="TEXT", required=True,
+                    help="natural-language scope, e.g. \"only /api/* no /logout host x.com\"")
+    sc.add_argument("--client", help="engagement client/name for the draft id (default: first host, else 'draft')")
+    sc.add_argument("--out", metavar="PATH", help="write the draft to PATH (default: print to stdout)")
+    sc.add_argument("--force", action="store_true", help="overwrite --out if it already exists")
+
     ap_ = sub.add_parser("approve", help="review/approve autonomous deferrals, then --resume")
     ap_.add_argument("engagement")
     ap_.add_argument("--list", action="store_true", help="just list pending deferrals")
@@ -965,7 +1065,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     acc = sub.add_parser("accounts",
                          help="register test-account credentials (secrets stay in runtime/creds.json — never committed or served)")
-    acc.add_argument("action", choices=["add", "list", "rm", "materialize"])
+    acc.add_argument("action", choices=["add", "list", "rm", "materialize", "refresh"])
     acc.add_argument("engagement", help="engagement id or path")
     acc.add_argument("--id", help="stable account id (matches notebook test_accounts[].id)")
     acc.add_argument("--role", help="e.g. user / admin / attacker / victim")
@@ -993,9 +1093,13 @@ _DISPATCH = {
     "console": cmd_console,
     "verify": cmd_verify,
     "status": cmd_status,
+    "scope": cmd_scope,
     "approve": cmd_approve,
     "accounts": cmd_accounts,
 }
+
+# Commands that do not require locating the redstrike-ai repo (they operate standalone).
+_NO_REPO_COMMANDS = frozenset({"version", "scope"})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1011,7 +1115,7 @@ def main(argv: list[str] | None = None) -> int:
             ui.print_banner(f"authorized offensive security  ·  engine: Claude Code  ·  v{__version__}")
         ap.print_help()
         return 0
-    if args.command != "version" and repo is None:
+    if args.command not in _NO_REPO_COMMANDS and repo is None:
         print(ui.err("could not locate the redstrike-ai repo — pass --repo <path> or set REDSTRIKE_REPO"))
         return 2
     return _DISPATCH[args.command](args, repo)

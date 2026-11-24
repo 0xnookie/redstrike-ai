@@ -46,7 +46,20 @@
         "kev": { "type": "boolean", "description": "listed in the CISA Known Exploited Vulnerabilities catalog — test first." },
         "epss": { "type": "number", "minimum": 0, "maximum": 1, "description": "FIRST EPSS 30-day exploitation probability (0..1)." },
         "priority_rank": { "type": "integer", "minimum": 1, "description": "1-based rank from scripts/cve_prioritize.py (KEV > EPSS > reachability > CVSS)." },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "technique_seed": {
+          "type": "object",
+          "description": "OPTIONAL. Derived only when this CVE is confirmed reachable: a METHODOLOGY-ONLY technique-CLASS hint the ROUTED Tier-2 executor consumes as its PRIORITIZED FIRST BENIGN PROBE (which KIND of weakness to probe, and where). It is NOT a concrete exploit string, NOT a named-product PoC, NOT a copied payload — any actual exploitation stays in exploit-generator behind its approval gate.",
+          "additionalProperties": false,
+          "required": ["technique"],
+          "properties": {
+            "technique": { "type": "string", "description": "A technique-CLASS description ONLY, e.g. 'server-side template expression evaluation via the vulnerable parameter', 'deserialization of attacker data at the import sink', 'expression-language evaluation in a typed request header' — methodology, never a literal payload or product-specific PoC." },
+            "routed_class": { "type": "string", "description": "Optional Tier-2 executor class this seed routes to (e.g. ssti, deserialization, command-injection), per _contract/routing-map.json." },
+            "injection_point": { "type": "string", "description": "Optional where-to-probe location CLASS (e.g. query parameter / typed header / body field / import sink) — a location class, not a concrete value." },
+            "owasp": { "type": "string", "description": "Optional OWASP category hint (e.g. A03:2021-Injection)." },
+            "cwe": { "type": "string", "pattern": "^CWE-[0-9]+$", "description": "Optional CWE class hint (e.g. CWE-502)." }
+          }
+        }
       }
     }
   }

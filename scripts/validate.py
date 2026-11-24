@@ -423,6 +423,28 @@ if raup.is_file():
     except BaseException as e:  # noqa: BLE001
         err(f"recall_audit.py selftest failed: {e}")
 
+# 8f2 — reproduce self-test (the MEASURED per-finding reproducibility harness that PRODUCES the
+# reliability_runs/reliability_hits evidence_score consumes: hit-counting by the finding's own criterion,
+# the bounded-K + rate-limit loop, and the hard refusal to auto-repeat non-idempotent/destructive probes).
+repp = ROOT / "scripts" / "reproduce.py"
+if repp.is_file():
+    try:
+        import importlib.util
+        _rpspec = importlib.util.spec_from_file_location("rs_reproduce_lint", repp)
+        _rp = importlib.util.module_from_spec(_rpspec)
+        sys.modules["rs_reproduce_lint"] = _rp  # dataclasses need the module registered
+        _rpspec.loader.exec_module(_rp)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _rp.selftest()
+        # the harness threshold must mirror the scorer's race/timing flag threshold (no drift)
+        if _rp.RELIABILITY_MIN != 0.8:
+            err(f"reproduce.py: RELIABILITY_MIN {_rp.RELIABILITY_MIN} must mirror evidence_score's 0.8")
+        checked["reproduce"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"reproduce.py selftest failed: {e}")
+
 # 8g — dedup self-test (deterministic cross-agent de-duplication: canonical key + merge selection)
 ddup = ROOT / "scripts" / "dedup.py"
 if ddup.is_file():

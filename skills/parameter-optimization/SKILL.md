@@ -26,7 +26,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (sets non-empty, valid).
 1. Ingest the target agent's attempts + block signals · `jq payloads_tried.jsonl` · (in memory)
 2. Fingerprint the WAF + model the filter (blocked chars/keywords) · `wafw00f` + analysis · `filter_analysis.json`
 3. Generate optimized variants (encoding/case/mutation; escalate only as needed) · mutation · `optimized_payloads.jsonl`
-4. Mine additional params · `arjun`/`x8` · `mined_params.txt`
+4. Mine additional params — exercise each across EVERY carrier, not query-only (cross-ref `injection-context/refs/surface_matrix.md`) · `arjun`/`x8` · `mined_params.txt`
 5. Derive a safe throughput profile (under the rate limit) · rate analysis · `filter_analysis.json`
 6. Emit summary · synth · `summary.md`
 7. /REVIEW SKILL · `review.md`

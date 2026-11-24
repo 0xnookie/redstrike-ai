@@ -86,15 +86,18 @@
     "sink:command": "user input can reach an OS command",
     "sink:dom": "a client-side DOM sink consumes URL/input (from js-analysis)",
     "sink:html-reflect": "input is reflected into an HTML response",
+    "sink:header-reflect": "a user-controlled value is reflected into an HTTP response header (Location / Set-Cookie / a custom header)",
     "endpoint:xml": "an endpoint parses XML (SOAP, SAML, upload, API)",
     "endpoint:upload": "a file-upload endpoint exists",
     "endpoint:api": "REST/JSON API endpoints exist",
     "endpoint:graphql": "a GraphQL endpoint exists",
+    "endpoint:websocket": "a WebSocket endpoint (ws:// / wss:// / new WebSocket(...)) is reachable",
     "endpoint:https": "the target serves TLS/HTTPS",
     "flow:auth": "a login / session / token flow exists",
     "flow:login-form": "a login form is present",
     "flow:password-reset": "a password-reset / forgot-password flow exists",
     "flow:registration": "a public self-service signup/registration flow exists (test accounts can be self-provisioned)",
+    "flow:email-send": "a flow emails user-controlled input to a recipient (signup/verification, password-reset, contact/feedback, invite, invoice/order, share/notify, newsletter)",
     "flow:state-change": "cookie-authenticated state-changing actions exist",
     "flow:multi-step": "multi-step workflows / business processes exist",
     "action:limited-state-change": "single-use or quota-limited actions (coupon, purchase, vote, withdraw)",
@@ -140,15 +143,18 @@
     "sink:command": ["source-audit"],
     "sink:dom": ["js-analysis"],
     "sink:html-reflect": ["content-discovery", "js-analysis"],
+    "sink:header-reflect": ["content-discovery", "js-analysis", "source-audit"],
     "endpoint:xml": ["content-discovery", "js-analysis"],
     "endpoint:upload": ["content-discovery", "js-analysis"],
     "endpoint:api": ["content-discovery", "js-analysis", "host-discovery"],
     "endpoint:graphql": ["content-discovery", "js-analysis"],
+    "endpoint:websocket": ["js-analysis", "content-discovery", "host-discovery"],
     "endpoint:https": ["host-discovery"],
     "flow:auth": ["content-discovery", "js-analysis"],
     "flow:login-form": ["content-discovery"],
     "flow:password-reset": ["content-discovery"],
     "flow:registration": ["content-discovery", "js-analysis"],
+    "flow:email-send": ["content-discovery", "js-analysis"],
     "flow:state-change": ["content-discovery"],
     "flow:multi-step": ["content-discovery"],
     "action:limited-state-change": ["content-discovery"],
@@ -629,6 +635,60 @@
       ],
       "skip_reason": "no single-use/limited state-changing action surfaced",
       "notes": "ORPHAN-NOW-WIRED: route on coupon/purchase/vote/withdraw-style actions"
+    },
+    {
+      "id": "email-injection",
+      "name": "Email / SMTP header injection",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": "flow-context",
+      "agents": [
+        "email-injection"
+      ],
+      "baseline": false,
+      "triggers": [
+        "flow:email-send",
+        "flow:registration",
+        "flow:password-reset"
+      ],
+      "skip_reason": "no flow that emails user-controlled input (signup/reset/contact/invite/invoice) surfaced",
+      "notes": "CWE-93 email-header variant: CR/LF into a user value reaching a generated email (Bcc/Cc exfil, Reply-To redirect, Subject/Content-Type/MIME break); route when flow-context finds an email-sending flow; de-dup vs the HTTP-response CRLF class + host-header"
+    },
+    {
+      "id": "crlf-injection",
+      "name": "CRLF injection (HTTP response splitting / header injection)",
+      "owasp": "A03",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "crlf-injection"
+      ],
+      "baseline": false,
+      "triggers": [
+        "sink:header-reflect",
+        "param:redirect"
+      ],
+      "skip_reason": "no user value reaching an HTTP response-header sink (Location / Set-Cookie / custom header) surfaced",
+      "notes": "CWE-113 HTTP-response variant: CR/LF into a user value reaching a response-header sink -> add/override a header or split into a second HTTP response; proven by the injected header in the RESPONSE HEADER block (or a parsed split) + a causal CR/LF-removal differential; de-dup vs xss-* (body landing), open-redirect/host-header (redirect-host), cache-poisoning (cross-user cache), email-injection (the email-header variant)"
+    },
+    {
+      "id": "websocket",
+      "name": "WebSocket security (CSWSH / message-layer / socket authz)",
+      "owasp": "-",
+      "phase": "web",
+      "pattern": "single",
+      "feeder": null,
+      "agents": [
+        "websocket"
+      ],
+      "baseline": false,
+      "triggers": [
+        "endpoint:websocket"
+      ],
+      "skip_reason": "no WebSocket (ws:// / wss:// / new WebSocket(...)) endpoint surfaced",
+      "notes": "consumes js-analysis (ws(s):// + new WebSocket endpoints) + auth-context (cookie-vs-token on the handshake); CSWSH (de-dup vs csrf) / message-layer injection / authz-IDOR over frames / missing socket auth / ws:// cleartext; a downstream-detonating payload (XSS/SQLi/cmd) routes to its owning class"
     },
     {
       "id": "parameter-pollution",

@@ -25,6 +25,6 @@
 - [ ] RoE.md
 - [ ] report.md
 - [ ] attestation.md
-- [ ] retest.md
+- [ ] retest.md  (fill "changes since last assessment" from report/scan_diff.json when a prior baseline exists; else note "first assessment")
 - [ ] summary.md
 - [ ] /REVIEW SKILL passes  (docs are DRAFTS for a human to finalize + sign)
