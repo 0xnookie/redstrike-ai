@@ -72,6 +72,7 @@ blocked / produced nothing" visible, so a report never presents an inconclusive 
 2. Keep `review.verdict in {"accepted","blocked"}` (status `verified`); `blocked` is tagged for the caveat subsection · `jq` filter · (in memory)
 3. De-dupe across agents — run the DETERMINISTIC engine `python scripts/dedup.py --engagement <dir> --json`: it groups findings by canonical key (asset-host + normalized endpoint/param + vuln-class), keeps the strongest as primary, and marks the rest `status:"duplicate"` (excluded from counts). Use its merge map; don't eyeball the merge (same bug from `idor`+`bola-bfla`, `ssrf-inband`+`ssrf-cloud`, `exposed-surface`+`secrets` = one entry) · `scripts/dedup.py` · `findings_consolidated.json`
 4. Normalize severity/CVSS; order Critical→Info. Findings with `composite: true` (kill chains) are listed under an **Attack Chains** section and EXCLUDED from the severity counts — non-additive, they re-state already-counted components · `refs/report_template.md` · `findings_consolidated.json`
+4b. **(OPTIONAL — config-gated, default OFF)** Stamp each consolidated finding's `compliance` block by a DETERMINISTIC lookup of its `category.cwe` in `refs/compliance_crosswalk.json` (CWE → PCI-DSS v4 / SOC2 CC / ISO 27001:2022 control IDs). This is a pure dictionary lookup, NOT a model judgement; a CWE absent from the crosswalk (or a finding with no `category.cwe`) gets NO `compliance` block (a legitimate state). When the toggle is off, skip this step entirely — findings are emitted exactly as before. See §Compliance mapping · `refs/compliance_crosswalk.json` · `findings_consolidated.json`
 5. Write per-finding sections (template) + executive summary — the summary's **risk posture is gated by §0.5** (a degraded/blocked run reports as "assessment incomplete / inconclusive," never "no issues found") · synth · `report.md`
 6. Emit a short stats summary — INCLUDING the **measured evidence-sufficiency numbers** (see §Evidence-sufficiency): run `python scripts/evidence_score.py --engagement <dir> --aggregate` and fold its output into `summary.md` + the executive summary · `scripts/evidence_score.py` · `summary.md`
 7. **Seal the evidence vault (chain of custody)** — `python scripts/evidence_seal.py --engagement <dir>`: hashes every evidence/poc artifact into `evidence/manifest.json` and populates each finding's `evidence[].sha256`. Then self-verify — `python scripts/evidence_seal.py --engagement <dir> --verify` (exit 0 required; exit 3 = a tamper signal: an altered/missing/unsealed artifact — STOP and reconcile, do not ship a report over unverifiable evidence) · `scripts/evidence_seal.py` · `evidence/manifest.json` · §Chain of custody
@@ -128,6 +129,28 @@ and how many rest on probable-capped (circular) evidence (`probable_capped`). A 
 `evidence_score` falls back to a derived baseline (counted in `derived`) so the numbers cover the whole set —
 surface a nonzero `derived` as a gap to backfill. These are the measured evidence numbers the roadmap asked
 for; they sit beside the severity counts, never replace them.
+
+## Compliance mapping  (OPTIONAL — config-gated, default OFF; a deterministic CWE lookup)
+When the engagement opts in (e.g. `compliance.enabled: true` with `compliance.frameworks: [pci_dss_v4,
+soc2_cc, iso_27001_2022]` in `scope.yaml` / the run config), reporting enriches each consolidated finding
+with the controls its weakness bears on, so the report can orient the reader toward the relevant framework
+clauses. Off by default — a report built with it OFF is byte-identical to one built before this feature.
+
+- **Join key = `category.cwe`** (the standardized CWE every finding already carries), NEVER the free-text
+  title/vuln name. CWE keeps the mapping a clean, deterministic dictionary lookup instead of a fuzzy match.
+- **Lookup (deterministic, not model-judged):** for each finding read `category.cwe`; look it up in
+  `refs/compliance_crosswalk.json`; on a hit, copy its `{pci_dss_v4, soc2_cc, iso_27001_2022}` value
+  VERBATIM into the finding's `compliance` block (schema: `_contract/finding.schema.json`). The control IDs
+  come ONLY from the crosswalk — do not infer, add, re-order, or edit them per finding.
+- **Unmapped is explicit, not a guess:** a CWE absent from the crosswalk, or a finding with no
+  `category.cwe`, gets NO `compliance` block. "No mapping" is a legitimate state — never fabricate controls.
+- **Framework subset:** if the config names a subset of frameworks, keep only those keys in each block.
+- **Additive + reversible:** the field is optional in the schema, so OFF ⇒ no `compliance` blocks and no new
+  report section; existing findings stay valid either way.
+- **Advisory, not an audit:** the crosswalk is a CWE→control reference (see its `_meta.note`) — advisory
+  guidance toward likely-relevant clauses, NOT a certified compliance audit, attestation, or statement of
+  (non-)compliance. The report's **"Compliance Mapping"** appendix (engagement-docs `refs/doc_templates.md`)
+  renders Finding → CWE → PCI-DSS v4 / SOC2 CC / ISO 27001:2022 and MUST carry the scope caveat verbatim.
 
 ## Chain of custody  (court-grade: tamper-evidence + a who/what/when trail)
 Evidence that cannot be shown unaltered is not evidence. Two artifacts carry the custody, and the report

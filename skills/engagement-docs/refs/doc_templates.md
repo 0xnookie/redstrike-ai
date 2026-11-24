@@ -123,6 +123,21 @@ runtime/diagnostics.json — factual, not narrated. A degraded/incomplete run is
 - **B. Scope detail & out-of-scope:** <...>
 - **C. Methodology references:** PTES, OWASP WSTG/Top 10/LLM Top 10, MITRE ATT&CK.
 - **D. Evidence index:** <paths in the engagement dir>
+- **E. Compliance mapping:** <included only when compliance mapping was enabled — see Appendix E>
+
+## Appendix E — Compliance Mapping   *(optional; include only when enabled)*
+<Each confirmed finding mapped to the compliance controls its weakness most directly bears on, keyed
+deterministically on the finding's CWE (from findings_consolidated.json `compliance` block). One row per
+finding; omit findings whose CWE is unmapped.>
+
+| Finding | CWE | PCI-DSS v4.0 | SOC 2 (CC) | ISO 27001:2022 |
+|---|---|---|---|---|
+| <RS-YYYY-NNN> <title> | <CWE-id> | <6.2.4, 6.4.1> | <CC6.6, CC8.1> | <A.8.28, A.8.26> |
+
+*Scope caveat:* these are **advisory** CWE→control crosswalks (PCI-DSS v4.0 / SOC 2 Common Criteria /
+ISO/IEC 27001:2022 Annex A) to orient remediation and auditor discussion — **not** a certified compliance
+audit, an attestation, or a statement of (non-)compliance. A formal determination requires a qualified
+assessor scoping the actual control environment.
 ```
 
 ================================================================================

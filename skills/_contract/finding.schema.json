@@ -74,6 +74,16 @@
             "probable_cap": { "type": "boolean", "description": "True when the only evidence is the skill's own log/tool_output (no INDEPENDENT artifact) → confidence is capped at `probable` (verify-base.md check #2). A separate axis that composes with the score floor." },
             "flags": { "type": "array", "items": { "type": "string" }, "description": "Human-readable notes the scorer raised (e.g. a race/timing hit-rate, a white-box code_citation substitution, the circular-evidence probable-cap)." }
           }
+        },
+        "compliance": {
+          "type": "object",
+          "description": "OPTIONAL, additive compliance-control mapping. DETERMINISTICALLY stamped by the reporting skill (config-gated) by looking the finding's `category.cwe` up in skills/reporting/refs/compliance_crosswalk.json — a deterministic crosswalk lookup, NOT a model-guessed judgement. Advisory guidance pointing at the controls the weakness bears on, NOT a certified compliance audit or attestation. Absent when compliance mapping is disabled or the CWE is unmapped, so no existing finding is affected. Composes with (does not replace) category.cwe / owasp / wstg.",
+          "additionalProperties": false,
+          "properties": {
+            "pci_dss_v4": { "type": "array", "items": { "type": "string" }, "description": "PCI-DSS v4.0 requirement IDs the weakness bears on (e.g. 6.2.4)." },
+            "soc2_cc": { "type": "array", "items": { "type": "string" }, "description": "SOC 2 Trust Services Criteria (Common Criteria) IDs (e.g. CC6.1)." },
+            "iso_27001_2022": { "type": "array", "items": { "type": "string" }, "description": "ISO/IEC 27001:2022 Annex A control IDs (e.g. A.8.28)." }
+          }
         }
       }
     },
