@@ -9,7 +9,7 @@
 - **TOOLS:** `jq` over `js-analysis/out/<site>/findings/`, interceptor, `refs/injection_payloads.md`; `js-analysis/out/<site>/analysis/site-summary.md` (stack).
 - **GOAL:** Map injection points that reach an interpreter (template / OS command / deserializer), fingerprint the engine, and route to a variant, into `injection_context.json`. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `candidates.json`, `probes.jsonl`, `injection_context.json`, `summary.md`, `logs/`.
-- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,apis}.jsonl` + `js-analysis/out/<site>/analysis/site-summary.md` (stack) + `scope.yaml` (`oob.collaborator`). `refs/` = `injection_payloads.md`. Also ingests optional `source-audit/source_context.json` (white-box interpreter-sink candidates for this family, if source was audited — merge as higher-confidence leads the executor still PROVES). Chains FROM `js-analysis` (+ `source-audit` when source is in scope); chains TO `ssti`, `command-injection`, `deserialization`.
+- **DATA / RAG:** inputs = `js-analysis/out/<site>/findings/{params,apis}.jsonl` + `js-analysis/out/<site>/analysis/site-summary.md` (stack) + `scope.yaml` (`oob.collaborator`). `refs/` = `injection_payloads.md` + `surface_matrix.md` (the multi-carrier replay discipline — carriers map to `js-analysis` `params.jsonl` `kind`). Also ingests optional `source-audit/source_context.json` (white-box interpreter-sink candidates for this family, if source was audited — merge as higher-confidence leads the executor still PROVES). Chains FROM `js-analysis` (+ `source-audit` when source is in scope); chains TO `ssti`, `command-injection`, `deserialization`.
 - **DECOMPOSITION:** n/a (feeder).
 
 ## Goal
@@ -24,7 +24,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`injection_context.json` vali
 
 ## Steps  (action · tool · output)
 1. Enumerate reflective/processing params · `jq`/`grep` js-analysis · `candidates.json`
-2. Benign-probe interpreter sinks (`{{7*7}}`,`${7*7}`,`#{7*7}`; `;`,`|`,`` ` ``; base64 serialized marker) · interceptor · `probes.jsonl`
+2. Benign-probe interpreter sinks (`{{7*7}}`,`${7*7}`,`#{7*7}`; `;`,`|`,`` ` ``; base64 serialized marker) — replay the SAME canary across EVERY carrier per `refs/surface_matrix.md` (query/form/JSON/cookie/header/path/stored), not query-only · interceptor · `probes.jsonl`
 3. Fingerprint engine (reaction patterns + `site-summary.md` stack) · `refs/injection_payloads.md` · `probes.jsonl`
 4. Classify sink type + route (`variant_hint`) · synth · (into context)
 5. Consolidate + validate vs schema · synth · `injection_context.json`
@@ -32,12 +32,12 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (`injection_context.json` vali
 7. /REVIEW SKILL · `review.md`
 
 ## Tools
-- `jq`/`grep` over `js-analysis`, interceptor, `refs/injection_payloads.md`
+- `jq`/`grep` over `js-analysis`, interceptor, `refs/injection_payloads.md`, `refs/surface_matrix.md`
 - **Fetch ladder:** `_contract/anti-automation-ladder.md`
 
 ## Inputs
-- `js-analysis/out/<site>/`: `findings/params.jsonl`, `findings/apis.jsonl`, `analysis/site-summary.md`
-- `scope.yaml` (`oob.collaborator`), `refs/injection_payloads.md`
+- `js-analysis/out/<site>/`: `findings/params.jsonl` (carrier `kind`s), `findings/endpoints.jsonl` (path-segment carriers), `findings/apis.jsonl`, `analysis/site-summary.md`
+- `scope.yaml` (`oob.collaborator`), `refs/injection_payloads.md`, `refs/surface_matrix.md`
 
 ## Outputs
 `candidates.json` · `probes.jsonl` · `injection_context.json` · `summary.md` · `logs/`
