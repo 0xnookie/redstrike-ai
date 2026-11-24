@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/bench_label.schema.json",
+  "title": "Redstrike Benchmark Labeled-Lab Answer Key",
+  "description": "The `answer_key.json` of ONE generated labeled lab under benchmark/labs/<slug>/ (scripts/bench_labgen.py). A lab is seeded from a single cached CVE-KB row (cve_kb.schema.json) or a cve-intel entry (cve_intel.schema.json): standing up component@known-vulnerable-version makes the CVE itself the GROUND-TRUTH LABEL (a self-labeling known-answer target), so scripts/benchmark.py can finally score MEASURED recall/precision against it. This file is that label — NOT an exploit. `boot_status` is the honesty guard: the generator can boot nothing, so it ALWAYS emits 'unverified'; only a human who has confirmed the lab actually stands up the vulnerable component may promote it to 'verified', and the scorer counts ONLY verified labs toward any measured number, so an un-booted scaffold can never fabricate a figure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cve_id", "component", "version", "expected_class", "boot_status"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "Schema version of this answer-key artifact (current = 1). Lets the label shape evolve without silently breaking the scorer."
+    },
+    "slug": {
+      "type": "string",
+      "description": "The lab's directory slug under benchmark/labs/ (component-version-cve, filesystem-safe). Deterministic from the seed row."
+    },
+    "cve_id": {
+      "type": "string",
+      "pattern": "^CVE-[0-9]{4}-[0-9]+$",
+      "description": "The planted advisory — THE LABEL / known answer this lab tests the hunt against."
+    },
+    "component": {
+      "type": "string",
+      "description": "The vulnerable component/package the lab stands up (e.g. 'wordpress', 'jquery'). From the seed row's component."
+    },
+    "version": {
+      "type": "string",
+      "description": "The PINNED known-vulnerable version stood up by the lab's compose (e.g. '6.4.2'). Derived deterministically from the seed row's concrete version or its affected_range boundary."
+    },
+    "ecosystem": {
+      "type": "string",
+      "description": "Package ecosystem of the component, disambiguating same-named packages and steering the compose scaffold shape.",
+      "enum": ["npm", "pypi", "maven", "go", "gem", "nuget", "composer", "cargo", "os", "generic"]
+    },
+    "fixed_version": {
+      "type": "string",
+      "description": "First fixed version, when the seed row states one — records the boundary the lab deliberately sits BELOW."
+    },
+    "expected_class": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The expected weakness class of the planted CVE: what a correct hunt should classify the finding as. At least one of cwe / owasp / vuln_class is always present (the generator skips a row with none).",
+      "properties": {
+        "cwe": {
+          "type": "string",
+          "pattern": "^CWE-[0-9]+$",
+          "description": "Expected CWE id (e.g. 'CWE-79')."
+        },
+        "owasp": {
+          "type": "string",
+          "description": "Expected OWASP category (e.g. 'A03:2021-Injection' or an 'A03' prefix)."
+        },
+        "vuln_class": {
+          "type": "string",
+          "description": "The weakness/technique class in redstrike's vocabulary (e.g. 'prototype-pollution', 'ssti', 'deserialization') — the seed row's technique_class / routed class."
+        },
+        "cvss": {
+          "type": "string",
+          "description": "CVSS vector or base score from the seed row (string), carried as a difficulty/severity hint. Never asserted as the finding severity."
+        }
+      }
+    },
+    "expected_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The SHAPE of proof a correct hunt should produce for this label — a MATCHER plus a human-readable proof description, NOT a baked exploit or payload. `match` is the benchmark matcher (scripts/benchmark.py _match_expected shape) the scorer uses to decide whether a reported finding found the planted CVE.",
+      "properties": {
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Benchmark matcher: a reported finding satisfies it when EVERY declared key matches (cwe exact, owasp prefix, wstg substring, title_regex search). Kept to a single strong key for reliable matching against real findings.json rows.",
+          "properties": {
+            "cwe": { "type": "string" },
+            "owasp": { "type": "string" },
+            "wstg": { "type": "string" },
+            "title_regex": { "type": "string" }
+          }
+        },
+        "reachability": {
+          "type": "string",
+          "description": "What makes the vulnerable code path reachable/exposed (the feature, sink, or config that must be in use), from the seed row's reachability notes — steers the hunt and the human's boot-verification."
+        },
+        "proof_shape": {
+          "type": "string",
+          "description": "Plain-language description of the evidence a correct, reviewer-accepted finding would carry — the SHAPE of proof, never a concrete exploit string."
+        }
+      }
+    },
+    "boot_status": {
+      "enum": ["unverified", "verified", "failed"],
+      "description": "HONESTY GUARD. 'unverified' (the generator's ONLY output): the compose is a best-effort scaffold nobody has booted — excluded from every measured number. 'verified': a human stood the lab up and confirmed the vulnerable component is actually present and reachable — ONLY these count toward recall/precision. 'failed': a human tried and the scaffold does not boot / the component is not actually vulnerable — excluded and flagged. The generator MUST NEVER emit 'verified'."
+    },
+    "kev": {
+      "type": "boolean",
+      "description": "Listed in the CISA Known Exploited Vulnerabilities catalog at seed time (a priority hint for which labs to boot-verify first)."
+    },
+    "epss": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "FIRST EPSS 30-day exploitation probability (0..1) from the seed row."
+    },
+    "source_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Provenance of the seed row: the public advisory feed(s) / reference URL(s) the CVE was cached from (NVD/OSV/GHSA/KEV/EPSS). Data, not instructions."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the generator emitted this lab."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-text note (e.g. how the version was pinned, or a boot caveat)."
+    }
+  }
+}

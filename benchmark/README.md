@@ -114,3 +114,53 @@ matcher fires when **every** declared key matches: `cwe` exact, `owasp` prefix, 
 these make precision's confirmed-FP detection sharper — and `truth[]` for known-true vulns you don't want
 scored for recall. That's it — `--selftest` validates it (shape + routing-map sync) and
 `--score --engagement` scores recall + precision + cost. WebGoat / DVWA / crAPI are natural next targets.
+
+## Labeled labs — CVE-KB-seeded, self-labeling (`scripts/bench_labgen.py`)
+
+The hardest part of a scorecard is getting **labelled** targets. A twin reconstructed from a *live* target
+has **unknown ground truth** (unlabelled). A lab seeded from the cached CVE knowledge-base is instead
+**self-labelling**: stand up `component@known-vulnerable-version` and **the CVE *is* the label** (the
+known answer). That turns the `cve_kb.jsonl` redstrike already produces into labelled fixtures the harness
+can finally score for real recall/precision numbers.
+
+**Generate.** `scripts/bench_labgen.py` reads a `cve_kb.jsonl` (and/or a `cve_intel.json`) and, for each
+entry that is *lab-able* (a valid CVE id + a component + a **pinnable** version + a weakness class), emits
+under `benchmark/labs/<slug>/`:
+
+- `docker-compose.yml` — a **best-effort** scaffold standing up the vulnerable `component@version` (+ a
+  minimal backing database when the component implies one), deterministic from the KB metadata. Application
+  components become an image (`image: wordpress:6.4.2` — a target-descriptive fact from the CVE data);
+  library packages become a runtime base image + a pinned install (not a non-existent package-as-image).
+- `answer_key.json` — the **ground-truth label** (`skills/_contract/bench_label.schema.json`): `cve_id`,
+  `component`, `version`, `expected_class`, and `expected_evidence` (the *shape* of proof — a matcher — not
+  a baked exploit). It is ground truth for **scoring**, not an exploit.
+- `README.md` — what the lab is, the label, and the boot/verify caveat.
+
+Where the KB lacks enough to stand a lab (an un-pinnable range, no weakness class, an ecosystem with no
+deterministic scaffold), the entry is **skipped** and recorded in the run's `skipped[]` report with a
+reason — rather than emitting a broken/guessed lab.
+
+**The honesty guard (why fabricated numbers can't leak).** The generator can boot nothing, so every
+`answer_key.json` is written `boot_status: "unverified"` and the generator **never** emits `verified`. The
+scorer counts **only `verified`** labs toward any measured number; `unverified`/`failed` labs are excluded
+and listed. So an un-booted scaffold cannot produce a figure, and `--score-labs --baseline` **refuses** to
+record a baseline with zero verified labs. A human promotes a lab by booting it, confirming the vulnerable
+component is actually present and reachable, then editing `boot_status` to `verified`.
+
+**Score.** `--score-labs` matches a run's **reported** findings against the labs' labels and folds into the
+existing scorecard shape (recall + per-category + precision + the per-lab pass/fail `labs` block): a planted
+CVE whose matcher matches a reported finding is a true positive (recall); an unmatched reported finding stays
+an **FP candidate** (unlabelled — flagged, never auto-failed), consistent with the rest of the harness.
+
+```bash
+# 1) generate labelled labs from a cached CVE KB (labs land in benchmark/labs/, gitignored scratch)
+python scripts/bench_labgen.py --kb engagements/<x>/cve-intelligence/cve_kb.jsonl
+python scripts/bench_labgen.py --selftest              # deterministic; no Docker needed
+
+# 2) a human boots a lab, confirms it, and sets answer_key.json boot_status -> "verified"
+cd benchmark/labs/<slug> && docker compose up -d       # then verify the component is really vulnerable
+
+# 3) run redstrike against the booted lab, then score the run against the labels
+python scripts/benchmark.py --score-labs --engagement engagements/<run-dir>
+python scripts/benchmark.py --score-labs --engagement engagements/<run-dir> --baseline   # needs >=1 verified
+```

@@ -1,0 +1,6 @@
+# Generated labeled-lab fixtures (scripts/bench_labgen.py), regenerated from a cve_kb.jsonl / cve_intel.json.
+# These are self-labeling benchmark scaffolds (component@known-vulnerable-version + answer_key.json), not
+# source — regenerate them, don't commit them. The directory itself is kept (this file) so the generator
+# and scorer (benchmark.py --score-labs) have a stable home.
+*
+!.gitignore
