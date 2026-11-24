@@ -13,7 +13,7 @@ The contract, the two review altitudes, and how to build a new skill live in
 | [`xss-dom`](xss-dom/) | vuln variant (dom) | yes | `review.md` + `verify.md` | xss-context / js-analysis → reporting |
 | [`xss-blind`](xss-blind/) | vuln variant (blind/OOB) | yes | `review.md` + `verify.md` | xss-context / xss-stored → reporting |
 
-**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `forbidden-bypass` · `business-logic` · `nosql-injection` · `ldap-injection` · `prototype-pollution` · `race-condition` · `parameter-pollution` · `crypto-attacks` · `tls-attacks` · `supply-chain` · `waf-bypass` *(capability)*
+**Atomic single agents** (✅ built — same quint; statuses in [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md)): `csrf` · `cors` · `open-redirect` · `clickjacking` · `host-header` · `request-smuggling` · `cache-poisoning` · `subdomain-takeover` · `security-headers` · `secrets` · `exposed-surface` · `forbidden-bypass` · `business-logic` · `nosql-injection` · `ldap-injection` · `prototype-pollution` · `race-condition` · `parameter-pollution` · `email-injection` · `crypto-attacks` · `tls-attacks` · `supply-chain` · `waf-bypass` *(capability)*
 
 **Vuln families** (✅ built — `<class>-context` feeder + variants): **SSRF** (inband/blind/cloud) · **SQLi** (inband/blind) · **access-control** (idor/privesc) · **injection** (ssti/command-injection/deserialization) · **XXE** (inband/blind) · **file/path** (path-traversal-lfi/upload-rce) · **auth** (auth-bypass/jwt/oauth) · **API** (bola-bfla/graphql)
 
@@ -25,7 +25,7 @@ The contract, the two review altitudes, and how to build a new skill live in
 
 **Reporting & docs** (✅ built): `reporting` aggregates every skill's *accepted* findings into the client report; `engagement-docs` writes the RoE + the formal report / attestation / retest suite.
 
-> **105 skills total** — **80 findings-producing** (one `*-verify` reviewer each) + **25 review-only** (recon feeders, services, missions). The authoritative catalog is [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md).
+> **106 skills total** — **81 findings-producing** (one `*-verify` reviewer each) + **25 review-only** (recon feeders, services, missions). The authoritative catalog is [`_contract/vuln-catalog.md`](_contract/vuln-catalog.md).
 
 ## Roadmap (same quad for each)
 - **Recon feeders:** ✅ `osint` · `host-discovery` · `content-discovery` (custom wordlists) · `js-analysis` — all built

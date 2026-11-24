@@ -17,9 +17,9 @@ Redstrike AI
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Compatible-8A2BE2)]()
 [![Methodology](https://img.shields.io/badge/Methodology-PTES%20%7C%20WSTG%20%7C%20LLM%20Top%2010%20%7C%20ATT%26CK-informational)]()
-[![Skills](https://img.shields.io/badge/Skills-115-brightgreen)]()
-[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-87-brightgreen)]()
-[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-87-blueviolet)]()
+[![Skills](https://img.shields.io/badge/Skills-116-brightgreen)]()
+[![Vuln Agents](https://img.shields.io/badge/Vuln%20Agents-88-brightgreen)]()
+[![Reviewer Agents](https://img.shields.io/badge/Reviewer%20Agents-88-blueviolet)]()
 [![Tier-3](https://img.shields.io/badge/Tier--3%20Red%20Team-7%20agents-8A2BE2)]()
 [![Families](https://img.shields.io/badge/Vuln%20Families-13-red)]()
 [![Domains](https://img.shields.io/badge/Domains-Web%20%7C%20AI%2FLLM%20%7C%20Web3%20%7C%20AD%20%7C%20Cloud%20%7C%20Mobile%2FIoT%20%7C%20PostEx-red)]()
@@ -118,7 +118,7 @@ Build order and the full spec live in [`skills/_contract/README.md`](skills/_con
 
 ## 🤖 Agents & Skills
 
-**115 skills** — **87 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (87 `*-verify` agents), plus **28 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
+**116 skills** — **88 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (88 `*-verify` agents), plus **28 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 
 Above the per-class reviewers sit two **cross-cutting review agents** — `adversarial-verify` (cross-model second opinion on accepted High/Critical findings + chains) and `exhaustion-adversary` (cross-model challenge to the completion claim) — plus three deterministic **guard hooks** that catch report-integrity slips before they ship: a dangling-evidence-reference guard (never cite an artifact that doesn't exist), a chain-pressure hook (a feeder-class finding isn't done until chained or ruled out), and a bug-bounty-scoped never-submit guard.
 

@@ -40,6 +40,7 @@
         "flow:login-form",
         "flow:password-reset",
         "flow:registration",
+        "flow:email-send",
         "flow:state-change",
         "flow:multi-step",
         "action:limited-state-change",
