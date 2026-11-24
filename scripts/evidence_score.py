@@ -59,6 +59,9 @@ CLI (mirrors scripts/evidence_seal.py / scripts/cvss.py):
     python evidence_score.py --request-response --readback --impact --reliability-runs 20 --reliability-hits 18
     # from a finding (mechanical components derived; add the semantic flags the reviewer confirmed):
     python evidence_score.py --file idor/findings.json --id RS-2026-012 --readback --impact
+    # MEASURED reliability: pipe scripts/reproduce.py's {runs, hits} straight in (no hand-asserted counts):
+    python reproduce.py --spec probe.json -k 5 --rate-rps 2 \
+        | python evidence_score.py --file idor/findings.json --id RS-2026-012 --readback --impact --reliability-json -
     # aggregate every finding's score for an engagement (the measured numbers):
     python evidence_score.py --engagement engagements/<dir> --aggregate
     python evidence_score.py --selftest
@@ -230,6 +233,35 @@ def score(inputs: EvidenceInputs) -> EvidenceScore:
 def score_components(**kwargs) -> EvidenceScore:
     """Convenience: score from keyword component facts (mirrors EvidenceInputs fields)."""
     return score(EvidenceInputs(**kwargs))
+
+
+# --- MEASURED reliability intake (from scripts/reproduce.py) -----------------
+def reliability_from_json(data) -> tuple:
+    """(runs, hits) parsed from the reproducibility harness's output (scripts/reproduce.py).
+
+    This is how the RELIABILITY component becomes a MEASURED number instead of a hand-asserted one: the
+    harness re-runs a finding's OWN benign, safely-repeatable probe K times, counts hits by the finding's
+    own success criterion, and emits `{runs, hits, hit_rate, ...}`. We take `runs`/`hits` (or the
+    `reliability_runs`/`reliability_hits` spellings) and clamp both to non-negative ints. `data` may be a
+    dict or a JSON string/bytes (so `--reliability-json -` can read the piped output). Best-effort +
+    stdlib-only: a missing/garbled count defaults to 0, never raises on bad numbers."""
+    if isinstance(data, (bytes, bytearray)):
+        data = data.decode("utf-8", errors="replace")
+    if isinstance(data, str):
+        data = json.loads(data)
+    if not isinstance(data, dict):
+        raise ValueError("reliability JSON must be an object carrying runs/hits (reproduce.py output)")
+    runs = data.get("runs", data.get("reliability_runs"))
+    hits = data.get("hits", data.get("reliability_hits"))
+    try:
+        runs = max(int(runs or 0), 0)
+    except (TypeError, ValueError):
+        runs = 0
+    try:
+        hits = max(int(hits or 0), 0)
+    except (TypeError, ValueError):
+        hits = 0
+    return runs, hits
 
 
 # --- finding extraction -----------------------------------------------------
@@ -431,6 +463,9 @@ def main(argv=None) -> int:
                     help="at least one independent artifact is present (lifts the probable-cap)")
     ap.add_argument("--reliability-runs", dest="runs", type=int, default=None, help="N reliability runs")
     ap.add_argument("--reliability-hits", dest="hits", type=int, default=None, help="M successful hits of N")
+    ap.add_argument("--reliability-json", dest="rel_json", default=None, metavar="PATH",
+                    help="read MEASURED {runs, hits} from scripts/reproduce.py (a file, or '-' for stdin) "
+                         "instead of hand-asserting the counts; explicit --reliability-runs/-hits override it")
     ap.add_argument("--chain-depth", dest="depth", type=int, default=None, help="chained-leg count")
     ap.add_argument("--selftest", action="store_true", help="run the module selftest")
     args = ap.parse_args(argv)
@@ -458,6 +493,17 @@ def main(argv=None) -> int:
             ap.error(f"could not resolve finding (file={args.file!r}, engagement={args.engagement!r}, "
                      f"id={args.fid!r}) — give an existing --id, or a --file with exactly one finding")
         inputs = inputs_from_finding(finding)
+
+    # MEASURED reliability from the reproducibility harness (scripts/reproduce.py). Applied BEFORE the
+    # explicit --reliability-runs/-hits so a hand-passed number still overrides (numbers override).
+    if args.rel_json is not None:
+        try:
+            text = sys.stdin.read() if args.rel_json == "-" else Path(args.rel_json).read_text(encoding="utf-8")
+            runs, hits = reliability_from_json(text)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            ap.error(f"--reliability-json: could not read measured counts: {e}")
+        inputs.reliability_runs = runs
+        inputs.reliability_hits = hits
 
     # Apply explicit flags: booleans OR-in (you never need to turn a present artifact off); numbers override.
     if args.rr:
@@ -567,6 +613,18 @@ def selftest() -> None:
     # 13) decision bands at the exact boundaries.
     assert decision_for(54) == DECISION_KILL and decision_for(55) == DECISION_DOWNGRADE
     assert decision_for(74) == DECISION_DOWNGRADE and decision_for(75) == DECISION_PASS
+
+    # 14) MEASURED reliability intake: reproduce.py's {runs,hits,hit_rate} feeds the reliability inputs,
+    #     and the legacy reliability_runs/reliability_hits spellings are accepted too.
+    assert reliability_from_json({"runs": 5, "hits": 4, "hit_rate": 0.8}) == (5, 4)
+    assert reliability_from_json('{"runs": 10, "hits": 6}') == (10, 6)
+    assert reliability_from_json({"reliability_runs": 7, "reliability_hits": 7}) == (7, 7)
+    assert reliability_from_json({"hits": -3}) == (0, 0)  # garbage clamps to 0, never raises
+    # a measured flaky harness result (3/5 < 0.8) prorates + flags, exactly like the asserted path.
+    runs, hits = reliability_from_json({"runs": 5, "hits": 3})
+    rm = score_components(has_request_response=True, has_readback=True, has_impact_artifact=True,
+                          reliability_runs=runs, reliability_hits=hits)
+    assert any("race/timing" in f for f in rm.flags) and rm.reliability_runs == 5, rm
 
     print("evidence_score selftest: OK")
 
