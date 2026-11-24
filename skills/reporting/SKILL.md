@@ -73,9 +73,10 @@ blocked / produced nothing" visible, so a report never presents an inconclusive 
 3. De-dupe across agents — run the DETERMINISTIC engine `python scripts/dedup.py --engagement <dir> --json`: it groups findings by canonical key (asset-host + normalized endpoint/param + vuln-class), keeps the strongest as primary, and marks the rest `status:"duplicate"` (excluded from counts). Use its merge map; don't eyeball the merge (same bug from `idor`+`bola-bfla`, `ssrf-inband`+`ssrf-cloud`, `exposed-surface`+`secrets` = one entry) · `scripts/dedup.py` · `findings_consolidated.json`
 4. Normalize severity/CVSS; order Critical→Info. Findings with `composite: true` (kill chains) are listed under an **Attack Chains** section and EXCLUDED from the severity counts — non-additive, they re-state already-counted components · `refs/report_template.md` · `findings_consolidated.json`
 4b. **(OPTIONAL — config-gated, default OFF)** Stamp each consolidated finding's `compliance` block by a DETERMINISTIC lookup of its `category.cwe` in `refs/compliance_crosswalk.json` (CWE → PCI-DSS v4 / SOC2 CC / ISO 27001:2022 control IDs). This is a pure dictionary lookup, NOT a model judgement; a CWE absent from the crosswalk (or a finding with no `category.cwe`) gets NO `compliance` block (a legitimate state). When the toggle is off, skip this step entirely — findings are emitted exactly as before. See §Compliance mapping · `refs/compliance_crosswalk.json` · `findings_consolidated.json`
-5. Write per-finding sections (template) + executive summary — the summary's **risk posture is gated by §0.5** (a degraded/blocked run reports as "assessment incomplete / inconclusive," never "no issues found") · synth · `report.md`
+5. Write per-finding sections (template) + executive summary — the summary's **risk posture is gated by §0.5** (a degraded/blocked run reports as "assessment incomplete / inconclusive," never "no issues found"). When a prior-assessment baseline is supplied, add a **"changes since last assessment"** line to the executive summary (net delta + new/fixed/unchanged/severity-changed counts) sourced from the scan-diff artifact — see §Retest / scan-diff · synth · `report.md`
 6. Emit a short stats summary — INCLUDING the **measured evidence-sufficiency numbers** (see §Evidence-sufficiency): run `python scripts/evidence_score.py --engagement <dir> --aggregate` and fold its output into `summary.md` + the executive summary · `scripts/evidence_score.py` · `summary.md`
 7. **Seal the evidence vault (chain of custody)** — `python scripts/evidence_seal.py --engagement <dir>`: hashes every evidence/poc artifact into `evidence/manifest.json` and populates each finding's `evidence[].sha256`. Then self-verify — `python scripts/evidence_seal.py --engagement <dir> --verify` (exit 0 required; exit 3 = a tamper signal: an altered/missing/unsealed artifact — STOP and reconcile, do not ship a report over unverifiable evidence) · `scripts/evidence_seal.py` · `evidence/manifest.json` · §Chain of custody
+7b. **OPTIONAL (config-gated) — machine-interchange exports.** When the engagement opts in (`scope.yaml` `reporting.export_formats: true`, DEFAULT off → this step is skipped and nothing else changes), emit CI/dashboard-ready exports from the consolidated findings: `python scripts/export_formats.py --engagement <dir>` writes `report/exports/findings.sarif` (SARIF 2.1.0 — reuses the js-analysis rule/result/severity→level mapping) + `report/exports/junit.xml` (one `<testcase><failure>` per accepted/blocked finding, so a pipeline can gate on "no confirmed findings"). Purely additive — the report + consolidated JSON are unchanged · `scripts/export_formats.py` · `report/exports/{findings.sarif,junit.xml}` · §Interchange exports
 8. /REVIEW SKILL · `review.md`
 
 ## Tools
@@ -88,6 +89,8 @@ blocked / produced nothing" visible, so a report never presents an inconclusive 
 
 ## Outputs
 `findings_consolidated.json` · `report.md` · `summary.md` · `evidence/manifest.json` · `logs/`
+OPTIONAL (config-gated): `report/exports/findings.sarif` + `report/exports/junit.xml` (step 7b);
+`report/scan_diff.json` (+ optional `report/scan_diff.{md,html}`) when a baseline is supplied (§Retest / scan-diff).
 
 ## Phases
 - **Phase 1 (generic):** collect + filter-to-accepted + de-dupe.
@@ -169,3 +172,39 @@ MUST cite both so a third party can audit the result:
 In the report (methodology / appendix), state that all evidence is hashed in `evidence/manifest.json`
 (sealed + self-verified at close) and that `runtime/audit.jsonl` is the chain-of-custody log, so the
 findings rest on tamper-evident, attributable proof — not on screenshots that could have been edited.
+
+## Interchange exports  (OPTIONAL, config-gated — step 7b)
+The consolidated findings can also be emitted in two standard machine-interchange formats for CI /
+code-scanning pipelines. This is **off by default** and purely additive — the `report.md` + consolidated
+JSON are produced identically whether or not it runs; nothing downstream depends on it.
+
+```
+python scripts/export_formats.py --engagement <dir>        # writes report/exports/{findings.sarif,junit.xml}
+# or explicitly:  --input <findings_consolidated.json> --out-dir <exports/>
+```
+
+- **`findings.sarif`** — a SARIF 2.1.0 log (same `$schema`, `version`, and severity→level map the
+  js-analysis recon exporter already uses: critical/high → `error`, medium → `warning`, low/info → `note`).
+  One `rule` per vuln-class (cwe → owasp → wstg → title-slug), one `result` per finding, the finding's
+  `asset` as the result location. Folds straight into a code-scanning dashboard.
+- **`junit.xml`** — one `<testcase>` with a nested `<failure>` per accepted/blocked finding, so a CI job can
+  gate a release on "no confirmed findings". Duplicates (`status:"duplicate"`) and composite kill-chains
+  (`composite:true`) are excluded from both exports — they re-state already-counted bugs.
+
+Enable it per engagement with `scope.yaml` `reporting.export_formats: true`.
+
+## Retest / scan-diff  (finding-level delta vs a prior assessment)
+For a retest or a recurring assessment, diff this engagement's consolidated findings against a prior baseline
+to answer, mechanically, what is **new / fixed / unchanged / severity-changed** since last time:
+
+```
+python scripts/scan_diff.py --baseline <prior/findings_consolidated.json> --engagement <dir> \
+       --out <dir>/report/scan_diff.json --md <dir>/report/scan_diff.md     # --html optional
+```
+
+Identity is dedup.py's `canonical_key` (asset-host + normalized endpoint/param + vuln-class — the SAME key
+the cross-agent de-dup uses), so a re-worded title or a re-ordered query string is NOT mistaken for a new
+bug. The JSON report (schema `skills/_contract/scan_diff.schema.json`) carries a `summary` with a
+**net_delta** (new − fixed) plus per-category rows. Fold the one-line summary into the executive summary's
+**"changes since last assessment"** line (step 5); the full table feeds the engagement-docs `retest.md`
+deliverable.

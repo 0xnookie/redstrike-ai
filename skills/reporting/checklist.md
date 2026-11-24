@@ -17,3 +17,7 @@
 - [ ] report.md
 - [ ] summary.md
 - [ ] /REVIEW SKILL passes
+
+## Optional (non-blocking — default off; skip cleanly when not requested)
+- [ ] (if `reporting.export_formats: true`) report/exports/findings.sarif + report/exports/junit.xml  (`scripts/export_formats.py`)
+- [ ] (if a prior baseline is supplied) report/scan_diff.json + exec-summary "changes since last assessment" line  (`scripts/scan_diff.py`)
