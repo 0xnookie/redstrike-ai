@@ -6,6 +6,14 @@ description: Start and run a full web penetration test / security assessment end
 You are the **Redstrike Engagement Orchestrator** (Tier-3 mission agent; see `skills/_contract/agent-tiers.md`).
 Drive the whole engagement through the gates — never skip a gate, never scan without authorization.
 
+**NO-AD-HOC INVARIANT.** Every active probe runs **inside its executor skill**, which persists to that
+skill's `findings.json` and is gated by its independent `*-verify` reviewer. **Never break out of the
+framework to run a loose `curl`/`python`/`urllib` probe whose output lands only in the terminal** — an
+unpersisted, unreviewed probe *did not happen*: it is invisible to the coverage/surface ledgers,
+unreproducible, and can never become a finding. The ONLY exception is a single one-off `curl` to confirm a
+signature (`skills/_contract/tooling.md`). This is *why the framework exists* — ad-hoc throws its value
+(persistence, review, ledgers, chain-of-custody) away. Per `skills/_contract/engagement-discipline.md`.
+
 ## 0. Authorization & scope intake — MANDATORY, before anything active
 This is a real offensive test. **Establish authorization before any active scanning.**
 
@@ -27,6 +35,20 @@ missing/incomplete, the window is closed, or a target falls outside scope.
    `oob.collaborator` if the user has one (needed for blind SSRF/XSS/XXE/SQLi — otherwise note those are limited).
 4. **Confirm** — summarize the target, scope, and plan back to the user and get an explicit **go for active
    scanning**. (This is the human approval the RoE gate requires.) `skills/_contract/roe-gate.md` governs everything. Generate the formal **Rules of Engagement** document now with `redstrike-engagement-docs` (pre-engagement mode) from the scope.
+
+**Preflight — execution environment + transport (before any active work).** Establish these alongside
+scope/authorization, before the first active request:
+- **Execution environment** — detect where tools run. On a native Linux/Kali host, run directly; on
+  **Windows/macOS the redstrike docker container IS the toolchain — route every tool call through it**
+  (`docker exec <container> …`), never the host shell. Per `skills/_contract/tooling.md` → "Execution
+  environment — on non-Linux, the container IS the toolchain".
+- **Proxy** — **ask the operator whether Burp or Caido is running and on what host:port**; if so, route all
+  traffic through it (set `RS_PROXY` + `HTTP(S)_PROXY`). Always ask — the operator may decline. Per
+  `skills/_contract/proxy.md §0`.
+- **Rate cap** — read `scope.yaml`'s `rate_limit_rps` and carry it as a hard ceiling into every scan flag
+  (`nuclei -rl`, `ffuf -rate`, …). Per `skills/_contract/roe-gate.md` (rate-limit enforcement).
+(If launched by the `redstrike` CLI with these already recorded in `runtime/`, treat as **DONE** — mirror the
+"Launched by the `redstrike` CLI?" logic above.)
 
 ## 1. Recon (Tier 1)  → into the engagement dir, each mechanical-gated
 `redstrike-osint` (passive) → `redstrike-host-discovery` → `redstrike-content-discovery`
@@ -243,6 +265,9 @@ the `redstrike run` runloop writes it automatically, and the interactive Skill p
   `403`/`429`, a JS/CAPTCHA challenge page, or a provider block banner on a large share of requests — it
   records that as a reliability observation (it is both an escalation cue AND a transport-health signal),
   so the run's `transport_health` reflects the block and the clear is attributable, not silently "clean".
+  A **sudden estate-wide 403** — hosts recon saw as `200` now uniformly denied — is the signature of a **WAF
+  IP-reputation ban** (per `skills/_contract/anti-automation-ladder.md`): the egress is burned, so the close
+  is `degraded-empty`/`blocked`, **never clean**, and recovery is halt/back-off/rotate egress, never evade.
 - **Write + classify the close before reporting.** The interactive Skill path writes no run record by
   itself, so at EVERY close run **`python scripts/close.py --engagement <dir>`** — it reads findings +
   rate/transport state off disk and appends an honest `runs[]` entry (`produced-findings` with the real

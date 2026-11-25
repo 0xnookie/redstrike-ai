@@ -2,6 +2,7 @@
 # `- [ ]` = NOT done, MUST be re-run · `- [x]` = done.
 
 ## Connect
+- [ ] Operator asked whether Burp/Caido is running + on what host:port (`_contract/proxy.md` §0); on yes `HTTP_PROXY`/`HTTPS_PROXY`/`RS_PROXY` exported + egress verified to flow through it (`_contract/proxy.md` §8)
 - [ ] Proxy connected + health-checked (or a SKIP recorded when none is connected)
 - [ ] Scope filter applied (in-scope hosts only, per scope.yaml)
 

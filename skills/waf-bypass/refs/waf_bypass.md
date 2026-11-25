@@ -489,3 +489,115 @@ GET /target/endpoint?q=＄{7*7} HTTP/1.1          # that ＄ is U+FF04, not an A
 # proxy, within scope and RoE. Do NOT claim a bypass you could not reproduce: record "not bypassed from this
 # egress; needs a clean-reputation source IP" as the honest result. Any transport/desync CVE is version- and
 # patch-gated — most edge providers patch globally fast, so verify it against THIS target before relying on it.
+
+
+---
+## Extended arsenal — fingerprint FIRST (identify before you touch)
+
+# You cannot be WAF-safe, and you cannot evade, what you have not identified. Fingerprinting is the FIRST
+# WAF-relevant action of any engagement behind a filter — before the first canary, before any transform.
+# It is passive/low-signal and needs no evasion authorization.
+
+### What to capture (and record in `waf_profile.json` + the engagement)
+```
+WAF/CDN product + vendor        # from wafw00f/identYwaf + the tells in section 1
+Block-shell signature           # the EXACT deny response: status, title, body string, a stable id/ray header,
+                                #   the server banner (e.g. a named "Web Gateway" banner). This is your
+                                #   ban-detector later — you can only spot "recon-200→now-block-shell" drift
+                                #   once you know what the block-shell looks like.
+Challenge type                  # JS/managed challenge vs hard 403 vs 429 rate-limit vs silent RST/drop
+Behavior family                 # map to the behavior-families table so you know which levers may work
+```
+# Record the block signature BEFORE probing: it is both the fingerprint and the tripwire. An engagement that
+# never captured the block-shell can't tell a per-host policy deny from an estate-wide egress ban.
+
+---
+## Extended arsenal — operational WAF hygiene (ALWAYS-ON, not a "bypass")
+
+# Distinct from evasion and from any RoE evasion-authorization: this is how you STAY REACHABLE while testing
+# behind a WAF. It applies on every engagement behind a filter, even one where evasion is not authorized.
+# See `_contract/anti-automation-ladder.md` (block-vs-deny rule) + `_contract/roe-gate.md` (rate caps) — this
+# is the DEEP methodology those one-liners point to; don't restate them, apply them.
+
+### Keep detection WAF-safe
+```
+benign / low-signal canaries          # a harmless marker, not a live exploit string
+encoded over raw                      # don't put the raw signature on the wire when a benign canary proves reach
+rate-capped                           # honor roe-gate.md rate_limit_rps; slow + paced, not burst
+one identified sink at a time         # a signature string goes in ONE targeted canary, never sprayed broad
+```
+
+### The egress-burn anti-pattern (what trips IP-reputation bans)
+```
+# DON'T: broadcast raw attack-signatures across many hosts in broad discovery probes:
+/etc/passwd      {{7*7}}      ' OR '1'='1      ../../../../      <script>alert(1)</script>
+# Fired host-after-host, these are precisely what a WAF's IP-REPUTATION engine scores on. It does not ban the
+# host you hit — it bans YOUR EGRESS IP, estate-wide. Every in-scope host then serves the block-shell from
+# that IP. You have not found a bug; you have removed yourself from the engagement.
+```
+
+### Field lesson — city-of-vienna (why this section exists)
+```
+# A prior session blasted raw /etc/passwd, {{7*7}}, and SQL-tautology payloads in broad probes against a
+# government estate behind "MA 01 - Wien Digital" (server: Magistrat der Stadt Wien - Web Gateway). The
+# gateway's IP-reputation engine banned the egress IP ESTATE-WIDE: every in-scope host recon had seen as 200
+# then returned the 403 block-shell from that IP. The whole engagement's egress was burned by careless
+# signature blasting; only one app on unrelated infra still answered. The framework BARS fingerprint-spoofing-
+# to-evade during normal testing (roe-gate.md) — but the failure here was not "we didn't evade", it was "we
+# weren't WAF-SAFE". Hygiene is the fix, not a better bypass.
+```
+
+---
+## Extended arsenal — IP-reputation ban: detect early, HALT, recover
+
+# An IP-reputation ban is categorically different from a per-request content filter. The content filter keys on
+# THIS REQUEST's bytes (so a transform can change the outcome). The reputation ban keys on your CLIENT IP's
+# recent HISTORY (so NO payload transform un-bans it — the next benign request is blocked too).
+
+### Detect it early (baseline + drift)
+```
+# 1) Baseline a known-good PUBLIC path up front and snapshot its status:
+curl -s -o /dev/null -w '%{http_code}' https://HOST/robots.txt      # expect the recon-seen status (e.g. 200)
+# 2) Re-check that baseline periodically. The ban tells (vs a one-host policy deny):
+#    - a normally-public path (/robots.txt, /) suddenly 403s with the block-shell
+#    - hosts/paths recon just saw as 200 now ALL return the block-shell / 429, estate-wide
+#    - the drift is recon-200 -> now-403: the WAF is denying your CLIENT wholesale, not that resource
+# Contrast: a SINGLE host/path 403 that was ALWAYS 403 is a per-host policy deny — skip it, keep going.
+```
+
+### On a real ban: HALT (do not evade)
+```
+# Stop. Do NOT escalate fetch rungs, re-encode, or disguise the client to climb back in. Beating a reputation
+# gate by disguising the banned client is EVASION OF A REPUTATION GATE — barred by roe-gate.md + the ladder.
+# The WAF-safe path is to halt, not to beat the WAF.
+```
+
+### Recover (authorized egress only)
+```
+(a) PAUSE for the ban to lapse   # reputation bans decay (minutes–hours, vendor-dependent); resume GENTLY + WAF-safe
+(b) ROTATE to a fresh AUTHORIZED egress   # a source IP the RoE / scope.yaml permits; resume slow + benign
+# NEVER "un-ban" by spoofing the client identity/fingerprint to disguise the banned client. Record the ban +
+# which recovery you took in bypass_notes.md so the next operator doesn't re-burn the same egress.
+```
+
+---
+## Extended arsenal — the boundary: authorized evasion-to-exploit vs barred client disguise
+
+# Two things look similar on the wire and must never be conflated. Keep this boundary crisp and consistent with
+# `_contract/roe-gate.md` + `_contract/anti-automation-ladder.md`.
+
+| | Authorized evasion-to-exploit (THIS skill, Phase 2) | Barred client disguise (NOT this skill) |
+|---|---|---|
+| Purpose | Prove a SPECIFIC benign canary (hence a specific bug) is reachable past a CONTENT filter | Slip a scripted client past a gateway / bot / reputation gate during ordinary testing |
+| Techniques | encoding ladders, normalization/parser-differential, chunking, casing, alternate content-types | browser/JA3 impersonation, client-fingerprint spoofing, un-banning a burned egress by disguise |
+| Gate | RoE must AUTHORIZE evasion; recorded (roe-gate.md §2) before climbing the ladder | Barred outright by roe-gate.md + the anti-automation ladder — no authorization makes it in-scope here |
+| Target | the in-scope app's filter, to reach ITS bug | the WAF/gateway itself — treating a platform defense as the objective |
+
+# Not a license to BRUTE the WAF: the goal is the lowest transform that gets an already-BENIGN canary to its
+# sink, not thousands of mutations hammering the filter (that is both noise and a reputation-ban risk).
+#
+# On the TLS/JA3 + curl-impersonate levers catalogued above (sections 1, 5, tooling): these are legitimate
+# ONLY inside authorized evasion-to-exploit serving a specific content-filter bug — NEVER to normalize getting
+# a scraper past a bot/rate gate during ordinary testing, and NEVER to disguise a banned client back onto a
+# reputation gate. When in doubt, the test is: am I proving a SPECIFIC bug past a CONTENT filter (OK, if
+# RoE-authorized), or am I making my client look like something it isn't to beat a GATEWAY (barred)?

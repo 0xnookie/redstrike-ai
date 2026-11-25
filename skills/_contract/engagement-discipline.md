@@ -23,3 +23,17 @@ emit; the per-class gauntlet + `counterevidence.md` still apply.
 - **A feeder-class finding is not a report until chained or ruled out.** An open redirect, a reflected
   parameter, a disclosed version, a secret — carry impact to a concrete outcome (chain it) or close it as
   ruled-out-with-evidence / open-proof-gap. Do not silently drop a real candidate; do not oversell a lead.
+- **No ad-hoc — every active probe runs INSIDE a skill.** Never break out of the framework to run a loose
+  `curl`/`python`/`urllib` probe whose output lands only in the terminal. An active probe runs inside its
+  executor skill, PERSISTS to that skill's `findings.json`, and is gated by its independent `*-verify`
+  reviewer — a probe whose result was not persisted and reviewed **did not happen**: it is unreproducible,
+  invisible to the ledgers, and can never become a finding. (One-off single `curl` to confirm a signature is
+  the only exception, per `tooling.md`.) This is the orchestrator's no-ad-hoc invariant.
+- **Don't get your egress BANNED — a WAF IP-reputation block burns the whole engagement, not one host.**
+  Obvious attack-signature strings (`/etc/passwd`, `{{7*7}}`, `' OR '1'='1`) blasted broadly trip the WAF's
+  IP-reputation ban, after which **every in-scope host returns the block page from your IP** — recon that was
+  200 goes 403 estate-wide. Fingerprint the WAF FIRST (`wafw00f`), keep broad scans WAF-safe (detection-only,
+  rate-capped, not raw signatures), and the moment a 403/429 shell appears across hosts that were just
+  working, **HALT — do not keep probing a blocked egress** (field lesson: one careless signature flood flipped
+  ~1200 recon-200 hosts to the gateway's 403 shell off a single egress). See `anti-automation-ladder.md` and
+  `skills/waf-bypass/`.

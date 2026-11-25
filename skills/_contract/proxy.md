@@ -10,6 +10,28 @@ instead of ephemeral traffic that vanishes when the turn ends.
 rungs + `interactsh` for OOB). With one connected, the rules below apply. This is a layer *on top of*
 `roe-gate.md`, never a replacement for it.
 
+## 0. Engagement-start: ask for the proxy (do this FIRST)
+**At intake — before recon, alongside scope + authorization — ASK the operator:** *"Is Burp or Caido running,
+and on what host:port? I'll route all traffic through it so nothing is missed."* The ask is **mandatory** even
+though the proxy stays optional (§ intro): you always ASK, the operator may decline. **Never silently skip
+it** — a missed proxy means a missed Sitemap/History, and that is real surface lost (field lesson: a whole
+second app on an in-scope host was invisible to the wordlist and sat in plain view in the proxy sitemap — §7).
+
+- **If YES** — record the `host:port` endpoint, then wire the whole engagement through it **before the first
+  request**:
+  - export `HTTP_PROXY`/`HTTPS_PROXY` (and `NO_PROXY` for out-of-scope) **and set `RS_PROXY`** — the env var
+    `scripts/rs_http.py` and the toolchain read to route bespoke probes through the same spine;
+  - **trust the proxy CA**; generate the proxy's scope from `scope.yaml` (§6) so transport + scope gate agree;
+  - route the toolchain through it: `curl -x`, `httpx -http-proxy`, `ffuf -x`, `nuclei -proxy`,
+    `sqlmap --proxy`, `katana -proxy` (§3);
+  - then **`proxy-context` ingests the proxy's Sitemap/History FIRST** (§7), before any brute-force.
+- **If NO / none available** — proceed on the anti-automation ladder's lower rungs + `interactsh` for OOB
+  (`anti-automation-ladder.md`), and **say plainly that proxy-only capture is unavailable**: no Sitemap
+  mining, no replay-backed evidence, no human observability — so the operator can choose to start one.
+
+This ask + wiring is the engagement's **first web-touching step**; it pairs with `roe-gate.md` §1–3a at intake
+(scope · authorization · rate cap) and is recorded in the audit log (§6) either way (connected or declined).
+
 ## 1. The discipline it buys
 - **Observability** — a human can open the proxy's History/Replay and *watch what the agent did*; the work is
   not trapped in a chat transcript.
