@@ -40,7 +40,15 @@ rules:
 
 ## 3. Blast-radius controls
 
-Rate-limit to `rules.rate_limit_rps`; honor exclusion lists; **safe/dry-run is the default** — the real payload fires only after the dry run and (where required) approval.
+Rate-limit to `rules.rate_limit_rps` (**enforced per-tool — §3a**); honor exclusion lists; **safe/dry-run is the default** — the real payload fires only after the dry run and (where required) approval. **At intake, ask whether an interception proxy (Burp/Caido) is running and route through it** (`_contract/proxy.md` §0) so the scope gate and the proxy transport agree.
+
+## 3a. Rate-limit enforcement (the cap is a hard ceiling, not advice)
+
+`rules.rate_limit_rps` is **enforced at the tool, not merely declared.** Every scanning/fuzzing tool MUST be launched with the scope cap as an **explicit rate flag**:
+- `nuclei -rl <cap>` · `ffuf -rate <cap>` · `feroxbuster --rate-limit <cap>` · `httpx -rl <cap>` · `sqlmap --delay <per-request delay that holds the cap>`;
+- bespoke / one-off HTTP probes go through **`scripts/rs_http.py`**, which reads `scope.yaml`'s cap (and `RS_PROXY`, `_contract/proxy.md` §0) and enforces both.
+
+Launching a scanner **above the cap** — or with **no rate flag on a prod target** — is an **RoE deviation at the same altitude as an out-of-scope hit**, not a tuning detail. (Field lesson: on a government-production estate with `rate_limit_rps: 5`, scans went out at `-rl 18/30/35` — over 3× the authorized rate against prod. The cap is a hard ceiling; the per-tool flag is how you honor it.)
 
 ## 4. Immutable audit log
 

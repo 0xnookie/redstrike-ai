@@ -5,7 +5,7 @@
 > Honors `_contract/proxy.md` + `_contract/roe-gate.md`. Read-only export — emits NO findings → `review.md` only.
 
 ## Interview
-- **STEPS:** confirm a proxy is connected (health) → pull captured History for in-scope hosts → normalize each exchange (method/path/status/type/params/headers/body/timing) → **redact secrets** → write `http_history.json` + `summary.md` → review.
+- **STEPS:** **ask the operator if Burp/Caido is running + on what host:port** (`_contract/proxy.md` §0) → on yes export `HTTP_PROXY`/`HTTPS_PROXY` + **`RS_PROXY`** and **verify egress actually flows through it** (`_contract/proxy.md` §8) → confirm the proxy is connected (health) → pull captured History for in-scope hosts → normalize each exchange (method/path/status/type/params/headers/body/timing) → **redact secrets** → write `http_history.json` + `summary.md` → review.
 - **TOOLS:** the connected proxy's history/export capability (Caido History · Burp proxy history · `mitmproxy` flow dump · ZAP) via its MCP/SDK/CLI; `jq` to shape. Tool-first — `_contract/proxy.md` + `_contract/tooling.md`.
 - **GOAL:** a structured, redacted export of what the proxy has already seen (agent + human browsing), so the surface views and executors read **real traffic** instead of re-crawling. Done = checklist `- [x]`, review passes.
 - **OUTPUT:** `http_history.json`, `summary.md`, `logs/`.
@@ -25,7 +25,7 @@ A redacted `http_history.json` of the proxy's captured traffic. DONE = `checklis
   These writes are **not reconstructable from scratch**; the capture *is* the only replayable copy.
 
 ## Steps  (action · tool · output)
-1. Health-check the connected proxy · proxy capability · (gate: **no proxy ⇒ SKIP** — write an empty `http_history.json` + note, pass)
+1. **Ask the operator: is Burp/Caido running, on what host:port?** (`_contract/proxy.md` §0) → health-check the connected proxy; on yes export `HTTP_PROXY`/`HTTPS_PROXY` + **`RS_PROXY`** and **verify egress actually reaches the target through it** (`_contract/proxy.md` §8 — don't trust proxy output blindly) · proxy capability · (gate: **no proxy ⇒ SKIP** — write an empty `http_history.json` + note, pass)
 2. Pull captured History, **in-scope hosts only** · proxy history/export · (raw)
 3. Normalize each exchange (method/path/status/mime/params/headers/body/timing) · synth + `jq` · (shaped)
 4. **Redact** secrets/PII → `‹redacted›` · synth · (safe)

@@ -1,0 +1,676 @@
+#!/usr/bin/env python3
+"""rs_http.py -- the ONE reusable, engagement-aware HTTP primitive for bespoke probes.
+
+Why this exists (a real failure it prevents): a live engagement re-rolled the same
+urllib+proxy+login boilerplate in ~6 separate ad-hoc scripts (login -> set proxy ->
+request -> parse), each re-implementing an HTTP client, and every one of them IGNORED
+the scope's `rate_limit_rps` cap. tooling.md bars hand-rolling a tool's core job and
+mandates that a genuinely-needed bespoke primitive be written ONCE, parameterized, in
+scripts/. This is that primitive: the legitimate exceptions (business-logic abuse,
+authed multi-step probes, a race single-packet) point their HTTP at THIS, instead of a
+seventh copy of the same login/proxy/request boilerplate.
+
+It is engagement-aware, so a bespoke probe inherits the engagement's guardrails for free:
+  * SCOPE   -- refuses (hard-stop, non-zero exit / ScopeError) any URL whose host is
+               explicitly out_of_scope, or is not matched by in_scope. Matching mirrors
+               the framework's scope gate exactly (``*.`` wildcard domains, CIDRs,
+               hosts embedded in in_scope.urls; explicit excludes win).
+  * RATE    -- a real client-side throttle: it sleeps to keep the GLOBAL request rate
+               <= the scope's `rules.rate_limit_rps` (conservative default when unset),
+               across both an in-process loop and separate CLI invocations (shared
+               runtime/rs_http_rate.json window). nuclei at -rl 18 against a 5-rps
+               engagement is exactly what this stops.
+  * PROXY   -- routes through RS_PROXY / HTTPS_PROXY / HTTP_PROXY (or --proxy) so every
+               request lands in the operator's Burp/Caido history; TLS tolerant by
+               default (the interception proxy's CA).
+  * COOKIES -- a persistent Mozilla cookie jar file (--cookies) for the authed-probe use
+               case: log in once, reuse the session across probes.
+  * LOG     -- appends every request/response (method, url, status, timing, sizes, rung)
+               as JSONL to <engagement>/runtime/http_log.jsonl, with Authorization /
+               Cookie / token values REDACTED to a marker (secrets never hit disk).
+
+Usable BOTH ways:
+  CLI        python scripts/rs_http.py --engagement engagements/acme-2026-10 \
+                 GET https://app.acme.com/me -H 'Authorization: Bearer T' --cookies jar.txt
+  import     from rs_http import request
+             r = request("GET", "https://app.acme.com/me", engagement=eng,
+                         headers={"Authorization": "Bearer T"})
+             print(r.status, len(r.body))
+
+Stdlib only (urllib / ssl / http.cookiejar / json / time / argparse), to match scripts/*.py.
+`python scripts/rs_http.py --selftest` exercises the pure logic (no network).
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import http.cookiejar
+import ipaddress
+import json
+import os
+import re
+import ssl
+import sys
+import time
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.request import (HTTPCookieProcessor, HTTPSHandler, ProxyHandler,
+                            Request, build_opener)
+
+# ‹redacted› (U+2039/U+203A guillemets) — the marker secrets become in the log. Distinctive so a
+# grep for a leaked token never collides with it, and so "is it redacted?" is unambiguous.
+REDACTED = "‹redacted›"
+
+DEFAULT_RPS = 5.0            # conservative pace when scope carries no rate_limit_rps (matches rate_gate)
+RATE_WINDOW_SEC = 1.0        # the sliding window the rps budget is measured over
+LOG_NAME = "http_log.jsonl"
+RATE_STATE_NAME = "rs_http_rate.json"
+DEFAULT_UA = "redstrike-rs_http/1"   # generic client name — never the operator's identity
+
+# Request/response header names whose VALUE is a secret -> redacted in the log (lower-cased compare).
+_SECRET_HEADERS = frozenset({
+    "authorization", "proxy-authorization", "authentication",
+    "cookie", "set-cookie", "x-api-key", "api-key", "x-auth-token",
+    "x-amz-security-token", "x-csrf-token", "x-xsrf-token", "x-session-token",
+})
+# Query / form param NAMES whose value is a secret -> value redacted in the logged URL.
+_SECRET_PARAM = re.compile(
+    r"(?i)(?:^|_|-)?(token|passwd|password|pwd|secret|api[_-]?key|access[_-]?key|"
+    r"auth|session|sig|signature|assertion|code|otp)")
+
+_IGNORABLE_TLDS = (".localhost", ".test", ".example", ".invalid")
+
+
+class ScopeError(RuntimeError):
+    """Raised when a request target is out-of-scope / not in scope — the hard stop."""
+
+
+# --------------------------------------------------------------------------- scope matching
+# Vendored, self-contained copies of the framework scope gate's host matching so scripts/ stays
+# stdlib-only and import-free (the cli package is not importable from a bare scripts/ run). This
+# mirrors how cli/.../scope_gate.py itself duplicates scope.parse_iso to stay self-contained; the
+# semantics are intentionally identical to scope_gate.classify so a bespoke probe and the live gate
+# agree on what is in scope.
+def normalize_host(h: str) -> str:
+    h = (h or "").strip().lower().rstrip(".")
+    if h.startswith("[") and "]" in h:          # [ipv6]
+        return h[1:h.index("]")]
+    if h.count(":") == 1:                        # host:port (not ipv6)
+        h = h.split(":", 1)[0]
+    return h
+
+
+def domain_matches(host: str, pattern: str) -> bool:
+    host, pattern = normalize_host(host), normalize_host(pattern)
+    if pattern.startswith("*."):
+        base = pattern[2:]
+        return host == base or host.endswith("." + base)
+    return host == pattern
+
+
+def _as_ip(token: str):
+    try:
+        return ipaddress.ip_address(token)
+    except ValueError:
+        return None
+
+
+def ip_in_cidrs(ip, cidrs) -> bool:
+    for c in cidrs or []:
+        try:
+            if ip in ipaddress.ip_network(c, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def is_ignorable(token: str) -> bool:
+    """localhost / private / loopback / link-local / reserved — not an in-scope external target."""
+    ip = _as_ip(token)
+    if ip is not None:
+        return bool(ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_reserved or ip.is_multicast)
+    host = normalize_host(token)
+    if host in ("localhost", ""):
+        return True
+    return host.endswith(_IGNORABLE_TLDS)
+
+
+def host_of_url(url: str):
+    try:
+        return normalize_host(urlsplit(url).hostname or "")
+    except Exception:
+        return None
+
+
+def classify(token: str, scope: dict) -> str:
+    """'out' (explicitly excluded), 'in' (matched by in_scope), or 'unknown'. Explicit excludes win."""
+    ins = scope.get("in_scope", {}) or {}
+    out = scope.get("out_of_scope", {}) or {}
+    ip = _as_ip(token)
+    host = normalize_host(token)
+    # explicit excludes win
+    if ip is not None:
+        if ip_in_cidrs(ip, out.get("cidrs", [])):
+            return "out"
+    elif any(domain_matches(host, p) for p in (out.get("domains", []) or [])):
+        return "out"
+    # in scope
+    if ip is not None:
+        if ip_in_cidrs(ip, ins.get("cidrs", [])):
+            return "in"
+    else:
+        if any(domain_matches(host, p) for p in (ins.get("domains", []) or [])):
+            return "in"
+        for u in ins.get("urls", []) or []:        # hosts embedded in in_scope.urls count too
+            uh = host_of_url(u)
+            if uh and domain_matches(host, uh):
+                return "in"
+    return "unknown"
+
+
+def scope_verdict(url: str, scope: dict) -> tuple[bool, str]:
+    """(allowed, reason). An out-of-scope / unknown-and-not-ignorable host is refused."""
+    host = host_of_url(url)
+    if not host:
+        return False, f"could not parse a host from URL {url!r}"
+    k = classify(host, scope)
+    if k == "out":
+        return False, f"{host} is explicitly OUT of scope"
+    if k == "in":
+        return True, f"{host} is in scope"
+    if is_ignorable(host):
+        return True, f"{host} is a local/ignorable host"
+    return False, (f"{host} is not in the engagement scope — add it to scope.yaml in_scope "
+                   f"or correct the target")
+
+
+# --------------------------------------------------------------------------- scope loading
+def resolve_rps(scope: dict, max_rps: float | None = None) -> float:
+    """rate_limit_rps from the scope (conservative DEFAULT_RPS when unset), optionally clamped below by
+    --max-rps (a bug-bounty profile can pace under the scope number without editing scope)."""
+    rps = DEFAULT_RPS
+    v = (scope.get("rules", {}) or {}).get("rate_limit_rps")
+    if v is not None:
+        try:
+            rps = float(v)
+        except (TypeError, ValueError):
+            pass
+    if max_rps is not None and max_rps > 0:
+        rps = min(rps, max_rps)
+    return rps
+
+
+def load_scope(engagement) -> dict:
+    """Load the engagement's authoritative scope record. Prefers the signed scope.yaml (the instruction's
+    source of truth) and falls back to the launcher-derived runtime/scope.json (pure JSON) — either yields
+    the same in_scope/out_of_scope/rules shape the matcher needs."""
+    eng = Path(engagement)
+    y = eng / "scope.yaml"
+    if y.is_file():
+        try:
+            return _load_yaml(y.read_text(encoding="utf-8"))
+        except Exception:
+            pass   # fall through to the derived JSON
+    j = eng / "runtime" / "scope.json"
+    if j.is_file():
+        return json.loads(j.read_text(encoding="utf-8"))
+    raise ScopeError(f"no scope.yaml or runtime/scope.json under {eng} — cannot scope-check requests")
+
+
+def _load_yaml(text: str) -> dict:
+    """PyYAML when present, else a tiny stdlib reader for the 2-level maps / sequences / scalars that
+    scope.yaml uses (mirrors cli/.../yamlio so scripts/ needs no YAML dependency)."""
+    try:
+        import yaml  # type: ignore
+        return yaml.safe_load(text) or {}
+    except ImportError:
+        return _mini_yaml(text)
+
+
+def _strip_comment(s: str) -> str:
+    out, q = [], None
+    for ch in s:
+        if q:
+            out.append(ch)
+            if ch == q:
+                q = None
+        elif ch in ('"', "'"):
+            q = ch
+            out.append(ch)
+        elif ch == "#":
+            break
+        else:
+            out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _yscalar(v: str):
+    v = v.strip()
+    if v in ("", "~") or v.lower() == "null":
+        return None
+    if v == "[]":
+        return []
+    if v == "{}":
+        return {}
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+        return v[1:-1]
+    low = v.lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    if re.match(r"^-?\d+$", v):
+        return int(v)
+    if re.match(r"^-?\d+\.\d+$", v):
+        return float(v)
+    return v
+
+
+def _mini_yaml(text: str) -> dict:
+    lines = text.split("\n")
+    n = len(lines)
+
+    def indent(i):
+        return len(lines[i]) - len(lines[i].lstrip(" "))
+
+    def skip(i):
+        while i < n and (lines[i].strip() == "" or lines[i].strip().startswith("#")):
+            i += 1
+        return i
+
+    def parse_map(i, base):
+        res: dict = {}
+        while True:
+            i = skip(i)
+            if i >= n or indent(i) < base:
+                break
+            if indent(i) > base:
+                i += 1
+                continue
+            line = _strip_comment(lines[i].strip())
+            if line.startswith("- ") or line == "-":
+                break
+            if ":" not in line:
+                i += 1
+                continue
+            key, _, rest = line.partition(":")
+            key, rest = key.strip(), rest.strip()
+            i += 1
+            if rest in (">", "|"):                       # block scalar — collect, not needed for matching
+                body, blk = [], rest
+                while i < n and (lines[i].strip() == "" or indent(i) > base):
+                    body.append(lines[i].strip())
+                    i += 1
+                res[key] = (" " if blk == ">" else "\n").join(b for b in body if b != "").strip()
+            elif rest == "":
+                j = skip(i)
+                if j < n and indent(j) > base:
+                    nxt = _strip_comment(lines[j].strip())
+                    if nxt.startswith("- ") or nxt == "-":
+                        res[key], i = parse_seq(j, indent(j))
+                    else:
+                        res[key], i = parse_map(j, indent(j))
+                else:
+                    res[key] = None
+            else:
+                res[key] = _yscalar(rest)
+        return res, i
+
+    def parse_seq(i, base):
+        items: list = []
+        while True:
+            i = skip(i)
+            if i >= n or indent(i) < base:
+                break
+            line = _strip_comment(lines[i].strip())
+            if not (line.startswith("- ") or line == "-"):
+                break
+            val = line[1:].strip()
+            i += 1
+            items.append(_yscalar(val) if val else None)
+        return items, i
+
+    data, _ = parse_map(skip(0), 0)
+    return data
+
+
+# --------------------------------------------------------------------------- rate throttle
+def _throttle_sleep(timestamps, rps: float, now: float,
+                    window: float = RATE_WINDOW_SEC) -> tuple[float, list]:
+    """Pure: given recent request timestamps + the rps cap, return (sleep_seconds, updated_timestamps).
+
+    A sliding window: at most `rps` requests per `window`. When the window is already full, the next
+    request must wait until the oldest in-window timestamp ages out — that wait is the returned sleep,
+    and the (post-sleep) request time is recorded. Unit-tested directly, so the throttle is proven with
+    no clock or network."""
+    recent = sorted(t for t in timestamps if t >= now - window)
+    if rps <= 0:
+        recent.append(now)
+        return 0.0, recent
+    if len(recent) >= rps:
+        sleep = max(0.0, (recent[0] + window) - now)
+        t = now + sleep
+        recent = [x for x in recent if x >= t - window]
+        recent.append(t)
+        return sleep, recent
+    recent.append(now)
+    return 0.0, recent
+
+
+def _load_rate_state(eng: Path) -> dict:
+    try:
+        p = Path(eng) / "runtime" / RATE_STATE_NAME
+        if p.is_file():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(d, dict):
+                return d
+    except Exception:
+        pass
+    return {"ts": []}
+
+
+def _save_rate_state(eng: Path, state: dict) -> None:
+    try:
+        p = Path(eng) / "runtime" / RATE_STATE_NAME
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(state), encoding="utf-8")
+    except Exception:
+        pass   # pacing is best-effort; a state-write miss must never wedge a legitimate request
+
+
+# --------------------------------------------------------------------------- redaction + logging
+def redact_headers(headers: dict) -> dict:
+    return {k: (REDACTED if str(k).lower() in _SECRET_HEADERS else v) for k, v in (headers or {}).items()}
+
+
+def redact_url(url: str) -> str:
+    """Redact secret-looking query-param VALUES in a URL (keys kept, so the log still shows the shape).
+
+    The redacted query is rebuilt by hand (not urlencode) so the ‹redacted› marker stays human-readable
+    in the log instead of being percent-encoded."""
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return url
+    if not parts.query:
+        return url
+    red = "&".join(
+        f"{k}={REDACTED if _SECRET_PARAM.search(k) else v}"
+        for k, v in parse_qsl(parts.query, keep_blank_values=True))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, red, parts.fragment))
+
+
+def _iso(epoch: float) -> str:
+    return _dt.datetime.fromtimestamp(epoch, _dt.timezone.utc).isoformat()
+
+
+def log_request(eng, entry: dict) -> None:
+    """Append one request/response record as JSONL to <engagement>/runtime/http_log.jsonl.
+
+    ``ensure_ascii=False`` so the ‹redacted› marker is written literally. Best-effort: a logging failure
+    never fails the request."""
+    try:
+        p = Path(eng) / "runtime" / LOG_NAME
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# --------------------------------------------------------------------------- response + opener
+class Response:
+    """A minimal, dependency-free HTTP response. `status` is None on a transport error (`error` set)."""
+
+    __slots__ = ("status", "headers", "body", "url", "elapsed_ms", "error")
+
+    def __init__(self, status, headers, body, url, elapsed_ms, error=None):
+        self.status = status
+        self.headers = headers or {}
+        self.body = body or b""
+        self.url = url
+        self.elapsed_ms = elapsed_ms
+        self.error = error
+
+    @property
+    def text(self) -> str:
+        return self.body.decode("utf-8", "replace") if isinstance(self.body, (bytes, bytearray)) else str(self.body)
+
+    def __repr__(self):
+        return f"<Response {self.status} {self.url} {len(self.body)}B {self.elapsed_ms}ms>"
+
+
+def env_proxy() -> str | None:
+    """The proxy to route through, from the environment (so requests land in the operator's history)."""
+    for k in ("RS_PROXY", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        v = os.environ.get(k)
+        if v:
+            return v
+    return None
+
+
+def _build_opener(proxy=None, insecure=True, jar=None):
+    handlers = [ProxyHandler({"http": proxy, "https": proxy} if proxy else {})]
+    ctx = ssl.create_default_context()
+    if insecure:                                   # tolerate the interception proxy's CA (-k equivalent)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    handlers.append(HTTPSHandler(context=ctx))
+    if jar is not None:
+        handlers.append(HTTPCookieProcessor(jar))
+    return build_opener(*handlers)
+
+
+# --------------------------------------------------------------------------- the primitive
+def request(method: str, url: str, *, engagement, headers=None, data=None, cookies=None,
+            proxy=None, insecure=True, timeout: float = 30.0, rung: str = "direct",
+            max_rps: float | None = None, scope: dict | None = None,
+            opener=None, log: bool = True, clock=None, sleeper=None) -> Response:
+    """Make ONE engagement-aware HTTP request. Enforces scope (raises ScopeError), throttles to the
+    scope rps, routes through the proxy, persists the cookie jar, and appends a redacted JSONL log line.
+
+    Importable: `from rs_http import request`. `scope`/`opener`/`clock`/`sleeper` are injection points
+    (unit tests stub the opener + clock so nothing touches the network)."""
+    clock = clock or time.time
+    sleeper = sleeper or time.sleep
+    eng = Path(engagement)
+    scope = scope if scope is not None else load_scope(eng)
+    method = method.upper()
+
+    # 1. SCOPE — hard stop before anything touches the wire.
+    allowed, reason = scope_verdict(url, scope)
+    if not allowed:
+        raise ScopeError(f"refusing {method} {url}: {reason}")
+    host = host_of_url(url)
+
+    # 2. RATE — sleep to keep the global rate <= the scope cap (shared window across invocations).
+    rps = resolve_rps(scope, max_rps)
+    now = clock()
+    st = _load_rate_state(eng)
+    sleep_s, ts = _throttle_sleep(list(st.get("ts", [])), rps, now)
+    if sleep_s > 0:
+        sleeper(sleep_s)
+    st["ts"] = ts[-max(10, int(rps) * 4):]
+    _save_rate_state(eng, st)
+
+    # 3. build the request
+    body_bytes = data.encode("utf-8") if isinstance(data, str) else data
+    hdrs = dict(headers or {})
+    if not any(k.lower() == "user-agent" for k in hdrs):
+        hdrs["User-Agent"] = DEFAULT_UA
+    req = Request(url, data=body_bytes, method=method)
+    for k, v in hdrs.items():
+        req.add_header(k, v)
+
+    # 4. opener (+ persistent cookie jar for the authed-probe case), unless one was injected
+    jar = None
+    if opener is None:
+        if cookies:
+            jar = http.cookiejar.MozillaCookieJar(str(cookies))
+            if Path(cookies).is_file():
+                try:
+                    jar.load(ignore_discard=True, ignore_expires=True)
+                except Exception:
+                    pass
+        opener = _build_opener(proxy=proxy or env_proxy(), insecure=insecure, jar=jar)
+
+    # 5. send + time it
+    start = clock()
+    status, resp_headers, body, err = None, {}, b"", None
+    try:
+        r = opener.open(req, timeout=timeout)
+        status = getattr(r, "status", None) or r.getcode()
+        resp_headers = dict(r.headers.items()) if getattr(r, "headers", None) else {}
+        body = r.read()
+    except HTTPError as e:                          # a 4xx/5xx is a normal probe result, not an exception
+        status = e.code
+        resp_headers = dict(e.headers.items()) if getattr(e, "headers", None) else {}
+        try:
+            body = e.read()
+        except Exception:
+            body = b""
+    except URLError as e:
+        err = str(getattr(e, "reason", e))
+    except Exception as e:                          # noqa: BLE001 — never let a probe crash the caller
+        err = f"{type(e).__name__}: {e}"
+    elapsed_ms = round((clock() - start) * 1000, 1)
+
+    if jar is not None and cookies:
+        try:
+            jar.save(ignore_discard=True, ignore_expires=True)
+        except Exception:
+            pass
+
+    # 6. LOG — redacted (secrets never reach disk)
+    if log:
+        log_request(eng, {
+            "ts": _iso(now),
+            "method": method,
+            "url": redact_url(url),
+            "host": host,
+            "status": status,
+            "elapsed_ms": elapsed_ms,
+            "req_bytes": len(body_bytes or b""),
+            "resp_bytes": len(body or b""),
+            "rung": rung,
+            "proxied": bool(proxy or env_proxy()),
+            "request_headers": redact_headers(hdrs),
+            "error": err,
+        })
+
+    return Response(status, resp_headers, body, url, elapsed_ms, error=err)
+
+
+# --------------------------------------------------------------------------- selftest (CI, no network)
+def selftest() -> int:
+    scope = {"in_scope": {"domains": ["*.example.com", "api.example.com"], "cidrs": ["203.0.113.0/24"],
+                          "urls": ["https://portal.acme.io/login"]},
+             "out_of_scope": {"domains": ["admin.example.com"], "cidrs": ["203.0.113.200/29"]},
+             "rules": {"rate_limit_rps": 5}}
+    # scope matching
+    assert classify("app.example.com", scope) == "in"
+    assert classify("admin.example.com", scope) == "out"      # explicit exclude wins over *.example.com
+    assert classify("evil.com", scope) == "unknown"
+    assert classify("203.0.113.10", scope) == "in"
+    assert classify("203.0.113.201", scope) == "out"
+    assert classify("portal.acme.io", scope) == "in"          # host from in_scope.urls
+    assert scope_verdict("https://admin.example.com/x", scope)[0] is False
+    assert scope_verdict("https://app.example.com/x", scope)[0] is True
+    # rps resolution + throttle
+    assert resolve_rps(scope) == 5.0
+    assert resolve_rps({"rules": {}}) == DEFAULT_RPS
+    sleep, ts = _throttle_sleep([0.1, 0.3, 0.5, 0.7, 0.9], 5, 1.0)
+    assert sleep > 0 and len(ts) >= 1, "a full window must force a positive sleep"
+    sleep0, _ = _throttle_sleep([0.9], 5, 1.0)
+    assert sleep0 == 0.0, "an under-budget window must not sleep"
+    # redaction
+    rh = redact_headers({"Authorization": "Bearer abc", "Accept": "application/json"})
+    assert rh["Authorization"] == REDACTED and rh["Accept"] == "application/json"
+    assert "SECR3T" not in redact_url("https://app.example.com/cb?token=SECR3T&page=2")
+    assert "page=2" in redact_url("https://app.example.com/cb?token=SECR3T&page=2")
+    print("rs_http.py selftest: OK (scope matching, rps throttle, redaction)")
+    return 0
+
+
+# --------------------------------------------------------------------------- CLI
+def _parse_headers(items) -> dict:
+    out = {}
+    for it in items or []:
+        if ":" not in it:
+            raise SystemExit(f"[!] bad header (want 'Name: value'): {it!r}")
+        k, _, v = it.partition(":")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        prog="rs_http.py",
+        description="Engagement-aware HTTP primitive: scope-checked, rate-throttled, proxied, "
+                    "cookie-persisting, with a redacted JSONL log. Use this instead of re-rolling "
+                    "urllib+proxy+login boilerplate in a bespoke probe.",
+        epilog="examples:\n"
+               "  rs_http.py --engagement engagements/acme-2026-10 GET https://app.acme.com/me \\\n"
+               "      -H 'Authorization: Bearer T' --cookies acme.jar\n"
+               "  RS_PROXY=http://127.0.0.1:8080 rs_http.py --engagement <dir> POST \\\n"
+               "      https://api.acme.com/login --data 'u=a&p=b' --cookies acme.jar\n"
+               "  rs_http.py --selftest",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--engagement", help="engagement dir (reads scope.yaml / runtime/scope.json)")
+    ap.add_argument("method", nargs="?", help="HTTP method (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)")
+    ap.add_argument("url", nargs="?", help="absolute target URL (must be in the engagement scope)")
+    ap.add_argument("-H", "--header", action="append", default=[], metavar="'Name: value'",
+                    help="request header (repeatable)")
+    ap.add_argument("-d", "--data", help="request body (string); implies a body-bearing method")
+    ap.add_argument("--data-file", help="read the request body from this file")
+    ap.add_argument("--cookies", help="persistent cookie-jar file (Mozilla format) — load + save")
+    ap.add_argument("--proxy", help="proxy URL (else RS_PROXY / HTTPS_PROXY / HTTP_PROXY)")
+    ap.add_argument("-k", "--insecure", action="store_true",
+                    help="tolerate an untrusted TLS cert (default ON; the proxy CA) — kept for clarity")
+    ap.add_argument("--verify", action="store_true", help="REQUIRE a valid TLS cert (turn tolerance off)")
+    ap.add_argument("--timeout", type=float, default=30.0, help="per-request timeout seconds (default 30)")
+    ap.add_argument("--rung", default="direct", help="anti-automation ladder rung this request used "
+                    "(recorded in the log; default 'direct')")
+    ap.add_argument("--max-rps", type=float, help="clamp the throttle below the scope's rate_limit_rps")
+    ap.add_argument("-i", "--include", action="store_true", help="print response headers before the body")
+    ap.add_argument("--selftest", action="store_true", help="run the no-network self-test (CI)")
+    args = ap.parse_args(argv)
+
+    if args.selftest:
+        return selftest()
+    if not args.engagement or not args.method or not args.url:
+        ap.error("need --engagement METHOD URL (or --selftest)")
+    eng = Path(args.engagement)
+    if not eng.is_dir():
+        ap.error(f"engagement dir not found: {eng}")
+
+    data = args.data
+    if args.data_file:
+        data = Path(args.data_file).read_bytes()
+
+    try:
+        r = request(args.method, args.url, engagement=eng,
+                    headers=_parse_headers(args.header), data=data, cookies=args.cookies,
+                    proxy=args.proxy, insecure=(not args.verify), timeout=args.timeout,
+                    rung=args.rung, max_rps=args.max_rps)
+    except ScopeError as e:
+        print(f"[!] {e}", file=sys.stderr)
+        return 2
+
+    summary = (f"{r.status if r.status is not None else 'ERR'} {args.method} {args.url}  "
+               f"{r.elapsed_ms}ms  {len(r.body)}B  [rung={args.rung}]")
+    print(summary, file=sys.stderr)
+    if r.error:
+        print(f"[!] transport error: {r.error}", file=sys.stderr)
+    if args.include:
+        for k, v in r.headers.items():
+            print(f"{k}: {v}", file=sys.stderr)
+    sys.stdout.buffer.write(r.body if isinstance(r.body, (bytes, bytearray)) else str(r.body).encode())
+    return 0 if (r.status is not None and not r.error) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
