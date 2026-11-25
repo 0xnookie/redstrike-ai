@@ -12,11 +12,33 @@ not initiative.
 
 Scripting is **glue only**: orchestrate tools, parse their output (`jq`, `ripgrep`, `awk`), de-dupe, pipe
 one into the next, shape artifacts. The moment a script starts *re-implementing a tool's core job*, stop
-and call the tool.
+and call the tool. And glue is **reused, not duplicated** — see *Reuse before you write* below.
 
 **Legitimate exceptions** (a tool genuinely can't express the logic): bespoke `business-logic` abuse, the
 `race-condition` single-packet attack, `exploit-dev` / `fuzzing` harnesses and PoCs, a one-off `curl` to
 confirm a signature. Even then prefer a library/tool primitive (`turbo-intruder`, `pwntools`) over raw code.
+
+### Reuse before you write — one job, one tool, never twice
+If a tool already exists for the job, **use it**. If a *bespoke* primitive is genuinely needed (one of the
+legitimate exceptions above — business-logic abuse, an authed multi-step probe, the race single-packet
+attack), write it **ONCE** as a reusable, parameterized helper in **`scripts/`** — do **not** re-write the
+same login/proxy/request boilerplate per probe. **Before writing a probe script, check `scripts/` for an
+existing helper** (`rg -l 'def ' scripts/` / read the `scripts/*.py` headers); a second hand-rolled copy of
+logic that already lives there is the bug, not the first one.
+
+For bespoke **authed / proxied HTTP probes** this helper already exists: **`scripts/rs_http.py`**. Point your
+probe at it (`from rs_http import request`, or `python scripts/rs_http.py --engagement <dir> GET <url> …`)
+instead of re-rolling `urllib`. It is engagement-aware, so a bespoke probe inherits the guardrails for free:
+it **refuses out-of-scope URLs** (hard stop), **throttles to the scope's `rate_limit_rps`** (a real
+client-side sleep, not prose), **routes through `RS_PROXY`/`HTTP(S)_PROXY`** (so every request lands in the
+operator's Burp/Caido history), **persists a cookie jar** (`--cookies`, the login-once case), and **appends a
+redacted JSONL log** to `runtime/http_log.jsonl` (Authorization / Cookie / token values redacted).
+
+> Field lesson (city-of-vienna): a session re-rolled the same `urllib`+proxy+login boilerplate in ~6 separate
+> ad-hoc scripts — each one re-implementing an HTTP client (the anti-pattern this file bars) — and every one
+> of them **ignored the scope rate cap** (`rate_limit_rps: 5`), while `nuclei` was separately launched at
+> `-rl 18/30/35` against government production. One reused, scope-aware primitive (`scripts/rs_http.py`) is
+> exactly what stops both the duplication and the cap-busting.
 
 ## Standard roster (modern-first; each SKILL.md §Tools names the per-step primary)
 
@@ -63,6 +85,26 @@ The anti-automation ladder (`anti-automation-ladder.md`) stays orthogonal: it de
 blocked; this file decides **which** tool does the job. The proxy spine (`proxy.md`) is orthogonal too: when an
 interception proxy (the `intercept` category — Caido / Burp / `mitmproxy` / ZAP) is connected it becomes the
 HTTP **transport** for the whole toolchain, and `proxy-context` exports its History into the engagement.
+
+## Execution environment — on non-Linux, the container IS the toolchain
+The roster above assumes a **Linux** host. On **Windows or macOS** the host shell ships almost none of it, so
+the operator runs a redstrike **docker container** (image `redstrike-ai:latest`) that carries the roster, and
+**every tool call MUST go through that container** — `docker exec <container> bash -lc '…'`, never the bare
+host shell. Run `ffuf`/`nuclei`/`curl`/a python probe on the Windows host and you find "no tools"; the same
+call inside the container runs the roster and egresses through the operator's proxy.
+
+Order of preference for *where a tool runs* (first that applies wins):
+1. a **native Linux / Kali** host (or you are already inside one) → run the tool directly;
+2. else the **redstrike docker container** (`redstrike-ai:latest`) → `docker exec <container> bash -lc '…'`;
+3. else a **WSL distro** (`wsl.exe -e bash -lc '…'` — the Preflight note below already covers its detection).
+
+At preflight, **detect the container** (`docker ps`, find the running `redstrike-ai` container) alongside the
+other environment probes, **record which container/shell runs the roster in `runtime/tooling.json`**, and then
+**route every tool invocation there**. This is the MANDATE the "Preflight — detect, don't assume" section below
+only *detects*: on non-Linux, "the container is present" means "the container is now the target for all
+tooling", not an option to weigh. (Field lesson: the city-of-vienna engagement ran on Windows — every
+`ffuf`/`nuclei`/`curl`/python probe executed inside the container and egressed through the operator's proxy;
+running them on the Windows host would have reported a toolless, falsely-"clean" target.)
 
 ## Preflight — detect, don't assume
 The roster above *assumes a Linux host that ships these*. Do not confuse that assumption with the shell a
