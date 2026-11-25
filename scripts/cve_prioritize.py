@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-cve_prioritize.py -- deterministic CVE prioritization (KEV + EPSS + reachability + CVSS).
+cve_prioritize.py -- deterministic CVE prioritization (n-day lane + KEV + EPSS + reachability + CVSS).
 
 CVSS measures *impact*; it does NOT predict *exploitation*, and most CVEs are never exploited — so a
 CVSS-only "patch the 9s first" order wastes effort and misranks the real risks. Combine three signals
@@ -9,12 +9,21 @@ CVSS-only "patch the 9s first" order wastes effort and misranks the real risks. 
 unknown > not — but 'not reachable' only LOWERS rank, it never DROPS a version-matched CVE: that would be a
 silent false negative; carry it as an open-proof-gap). CVSS is the final tie-break.
 
+**0-hour / n-day lane (top band).** A record may carry `nday: true` — set upstream when a CVE is
+confirmed-affected on the target, freshly disclosed, and has NO public exploit yet (the heuristics live in
+skills/cve-intelligence/refs/nday.md). KEV and EPSS both LAG a fresh no-PoC disclosure (nothing observed
+yet → EPSS ≈0, not in KEV), so a plain KEV/EPSS sort buries exactly the time-critical, lowest-competition
+window. The elevation, ordering-only (never a filter): a confirmed-affected + REACHABLE n-day is the top
+band — ahead of KEV and of a stale CVE that has a public PoC; a non-reachable n-day is still boosted above
+an equal-reachability stale-PoC CVE but cannot jump a reachable in-the-wild KEV. Absent `nday`, behaviour is
+identical to before.
+
 Stdlib only. KEV/EPSS come from a cached file (CI-friendly) or, with --fetch, the live feeds; records may
-also carry their own `epss`/`kev`. Usage:
+also carry their own `epss`/`kev`/`nday`. Usage:
   python scripts/cve_prioritize.py --rank cves.json [--kev-file kev.json] [--epss-file epss.json] [--fetch]
   python scripts/cve_prioritize.py --selftest
 
-`cves.json` = a list of {id, cvss?, epss?, reachable?(yes|unknown|no), component?, version?}.
+`cves.json` = a list of {id, cvss?, epss?, reachable?(yes|unknown|no), nday?, component?, version?}.
 """
 import argparse
 import csv
@@ -93,8 +102,17 @@ def rank(records: list, kev: set, epss: dict) -> list:
         enriched.append(r)
 
     def key(r):
-        return (0 if r["kev"] else 1,
-                _REACH_RANK.get(str(r.get("reachable", "unknown")).lower(), 1),
+        reach = _REACH_RANK.get(str(r.get("reachable", "unknown")).lower(), 1)
+        nday = bool(r.get("nday"))
+        # Top band: the 0-hour/n-day window — confirmed-affected, REACHABLE, freshly disclosed, no public
+        # PoC. Elevated above everything (KEV included) because KEV/EPSS lag a pre-PoC disclosure and this
+        # is the act-now, lowest-competition priority; gated on reachability so an unreachable n-day can't
+        # queue-jump a reachable in-the-wild KEV. The `0 if nday else 1` sub-rank (below reachability) keeps
+        # a fresh no-PoC n-day ahead of a stale public-PoC CVE at equal reachability.
+        return (0 if (nday and reach == 0) else 1,
+                0 if r["kev"] else 1,
+                reach,
+                0 if nday else 1,
                 -(float(r.get("epss") or 0.0)),
                 -(float(r.get("cvss") or 0.0)),
                 str(r.get("id", "")))
@@ -102,8 +120,11 @@ def rank(records: list, kev: set, epss: dict) -> list:
 
 
 def test_first(ranked: list) -> list:
-    """The 'test these first' set: KEV-listed, or EPSS>=threshold and not proven-unreachable."""
+    """The 'test these first' set: an n-day (fresh, no-PoC) that is not proven-unreachable, KEV-listed, or
+    EPSS>=threshold and not proven-unreachable. The n-day clause is explicit because a fresh no-PoC CVE has
+    EPSS ≈0 and is not KEV-listed, yet is exactly what this window must surface first."""
     return [r for r in ranked if r["kev"]
+            or (bool(r.get("nday")) and str(r.get("reachable", "unknown")).lower() not in ("no", "not"))
             or ((r.get("epss") or 0.0) >= _EPSS_HIGH and str(r.get("reachable", "unknown")).lower() not in ("no", "not"))]
 
 
@@ -129,7 +150,36 @@ def selftest() -> int:
     # record-carried kev/epss also honored (no feeds)
     r2 = rank([{"id": "CVE-X", "cvss": 1.0, "kev": True}, {"id": "CVE-Y", "cvss": 9.0}], set(), {})
     assert r2[0]["id"] == "CVE-X", "record-carried KEV must win"
-    print("cve_prioritize.py selftest: OK (KEV>EPSS>reachability>CVSS; unreachable kept, not dropped)")
+
+    # --- n-day lane (0-hour / fresh / no public PoC) ---
+    nrecs = [
+        {"id": "CVE-ND", "cvss": 8.1, "epss": 0.01, "reachable": "yes", "nday": True},   # reachable n-day
+        {"id": "CVE-KV", "cvss": 9.8, "epss": 0.90, "reachable": "yes"},                 # reachable KEV
+        {"id": "CVE-PoC", "cvss": 9.0, "epss": 0.80, "reachable": "yes"},                # stale, public PoC
+        {"id": "CVE-NDU", "cvss": 7.0, "epss": 0.00, "reachable": "unknown", "nday": True},  # n-day, unknown reach
+        {"id": "CVE-ST", "cvss": 6.0, "epss": 0.50, "reachable": "unknown"},             # stale PoC, unknown reach
+    ]
+    nkev = {"CVE-KV"}
+    nranked = rank(nrecs, nkev, {})
+    norder = [r["id"] for r in nranked]
+    # the reachable, fresh, no-PoC n-day is the top band — ahead of KEV AND of the stale public-PoC CVE,
+    # despite EPSS ≈0 and no KEV listing
+    assert norder[0] == "CVE-ND", f"reachable n-day must rank first, got {norder}"
+    assert norder.index("CVE-ND") < norder.index("CVE-KV"), f"n-day must beat KEV: {norder}"
+    assert norder.index("CVE-ND") < norder.index("CVE-PoC"), f"n-day must beat stale-PoC: {norder}"
+    # a reachable in-the-wild KEV still beats an UNREACHABLE n-day (reachability gates the top band)
+    assert norder.index("CVE-KV") < norder.index("CVE-NDU"), f"reachable KEV must beat unreachable n-day: {norder}"
+    # at equal (unknown) reachability, the fresh no-PoC n-day still beats the stale public-PoC CVE
+    assert norder.index("CVE-NDU") < norder.index("CVE-ST"), f"n-day must beat equal-reach stale-PoC: {norder}"
+    # a reachable n-day is in 'test first' even with EPSS ≈0 and no KEV listing
+    ntf = [r["id"] for r in test_first(nranked)]
+    assert "CVE-ND" in ntf, f"reachable n-day must be test-first: {ntf}"
+    # absent `nday`, ordering is byte-for-byte the legacy order (full backward-compat)
+    legacy = [{"id": "CVE-A", "cvss": 9.8, "epss": 0.02, "reachable": "yes"},
+              {"id": "CVE-B", "cvss": 5.0, "epss": 0.90, "reachable": "yes"}]
+    assert [r["id"] for r in rank(legacy, set(), {})] == ["CVE-B", "CVE-A"], "no-nday order must be unchanged"
+
+    print("cve_prioritize.py selftest: OK (n-day>KEV>EPSS>reachability>CVSS; unreachable kept, not dropped)")
     return 0
 
 
