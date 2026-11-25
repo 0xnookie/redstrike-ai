@@ -132,6 +132,85 @@ def _live_client(body, status=200):
     return _C()
 
 
+import base64 as _b64  # noqa: E402
+import time as _time   # noqa: E402
+
+
+def _mint_jwt(exp, *, extra=None):
+    """Mint an UNSIGNED test JWT (header.payload.sig) whose payload carries `exp`. Test material only."""
+    def _seg(d):
+        return _b64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    payload = {"sub": "u"}
+    if exp is not None:
+        payload["exp"] = int(exp)
+    if extra:
+        payload.update(extra)
+    return f"{_seg({'alg': 'RS256', 'typ': 'JWT'})}.{_seg(payload)}.sig"
+
+
+class TestJwtExpPreflight(unittest.TestCase):
+    """MED-5 — cheap session-liveness preflight: decode a JWT exp with zero network, and on expiry
+    emit a clear re-capture result instead of failing opaquely on a 401/403."""
+
+    def test_decode_jwt_exp_bare_and_in_cookie_blob(self):
+        jwt = _mint_jwt(2_000_000_000)
+        self.assertEqual(lr.decode_jwt_exp(jwt), 2_000_000_000)
+        # a JWT embedded in a cookie blob (Authorization=...) is still found
+        blob = f"20min-Session=opaquevalue; Authorization={jwt}"
+        self.assertEqual(lr.decode_jwt_exp(blob), 2_000_000_000)
+
+    def test_decode_jwt_exp_rejects_garbage(self):
+        for bad in ("", None, "not-a-jwt", "session=plainopaquecookie", _mint_jwt(None),
+                    "eyJ.only.two"):
+            self.assertIsNone(lr.decode_jwt_exp(bad))
+
+    def test_jwt_session_status_bands(self):
+        now = 1_000_000.0
+        self.assertEqual(lr.jwt_session_status(_mint_jwt(now + 3600), now=now), lr.LIVE)
+        self.assertEqual(lr.jwt_session_status(_mint_jwt(now + 10), now=now, skew=60), lr.EXPIRING)
+        self.assertEqual(lr.jwt_session_status(_mint_jwt(now - 1), now=now), lr.EXPIRED)
+        self.assertEqual(lr.jwt_session_status("opaque-cookie", now=now), lr.UNKNOWN)
+
+    def test_preflight_expired_jwt_flags_recapture_zero_network(self):
+        acct = {"session": {"cookie": f"Authorization={_mint_jwt(_time.time() - 5)}"}}
+        pre = lr.session_preflight(acct)          # no client passed → must NOT need one
+        self.assertEqual(pre.status, lr.EXPIRED)
+        self.assertEqual(pre.source, "jwt-exp")
+        self.assertTrue(pre.needs_recapture())
+        self.assertIn("RE-CAPTURE", pre.reason)
+
+    def test_preflight_live_jwt_ok(self):
+        acct = {"secret": {"token": _mint_jwt(_time.time() + 3600)}}
+        pre = lr.session_preflight(acct)
+        self.assertTrue(pre.ok())
+        self.assertEqual(pre.source, "jwt-exp")
+
+    def test_preflight_opaque_falls_back_to_probe(self):
+        acct = {"session": {"cookie": "session=OPAQUE"}}
+        ac = {"url": "/account", "must_contain": "Sign out"}
+        self.assertTrue(lr.session_preflight(acct, auth_check=ac,
+                                             client=_live_client("Sign out")).ok())
+        pre = lr.session_preflight(acct, auth_check=ac, client=_live_client("Please Sign in"))
+        self.assertEqual(pre.status, lr.EXPIRED)
+        self.assertEqual(pre.source, "probe")
+
+    def test_preflight_unknown_when_nothing_to_check(self):
+        pre = lr.session_preflight({"session": {"cookie": "session=OPAQUE"}})
+        self.assertEqual(pre.status, lr.UNKNOWN)
+        self.assertEqual(pre.source, "none")
+
+    def test_refresh_expired_jwt_skips_wasted_probe_and_replays(self):
+        # The current-session probe WOULD report live (fresh_cookie == the stored cookie), so without
+        # the JWT fast-path this returns FRESH. With it, the expired exp forces a stale → REFRESHED.
+        expired = f"Authorization={_mint_jwt(_time.time() - 5)}"
+        with tempfile.TemporaryDirectory() as tmp:
+            eng = _eng(tmp, cookie=expired)
+            acct = accounts.load_creds(eng)["accounts"][0]
+            r = lr.refresh_identity(eng, acct, RECIPE,
+                                    client_factory=lambda: FakeClient(fresh_cookie=expired))
+            self.assertEqual(r.status, lr.REFRESHED)
+
+
 class TestRefreshGate(unittest.TestCase):
     def test_stale_refreshes_and_persists(self):
         with tempfile.TemporaryDirectory() as tmp:

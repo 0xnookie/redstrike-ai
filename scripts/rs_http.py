@@ -16,10 +16,14 @@ It is engagement-aware, so a bespoke probe inherits the engagement's guardrails 
                the framework's scope gate exactly (``*.`` wildcard domains, CIDRs,
                hosts embedded in in_scope.urls; explicit excludes win).
   * RATE    -- a real client-side throttle: it sleeps to keep the GLOBAL request rate
-               <= the scope's `rules.rate_limit_rps` (conservative default when unset),
-               across both an in-process loop and separate CLI invocations (shared
-               runtime/rs_http_rate.json window). nuclei at -rl 18 against a 5-rps
-               engagement is exactly what this stops.
+               <= the scope's `rules.rate_limit_rps` (conservative default when unset).
+               The budget is enforced ACROSS ALL CONCURRENT PROCESSES, not per-process:
+               the read-modify-write of the shared sliding window (runtime/rs_http_rate.json)
+               happens under an OS file lock, and each call RESERVES its send-slot in that
+               window BEFORE it sleeps — so K parallel agents sum to <= the cap instead of
+               K x the cap (the exact aggregate-rate blind spot that gets a shared egress IP
+               WAF-banned estate-wide). nuclei at -rl 18 against a 5-rps engagement, or three
+               autonomous agents each pacing to the cap, is exactly what this stops.
   * PROXY   -- routes through RS_PROXY / HTTPS_PROXY / HTTP_PROXY (or --proxy) so every
                request lands in the operator's Burp/Caido history; TLS tolerant by
                default (the interception proxy's CA).
@@ -66,6 +70,10 @@ DEFAULT_RPS = 5.0            # conservative pace when scope carries no rate_limi
 RATE_WINDOW_SEC = 1.0        # the sliding window the rps budget is measured over
 LOG_NAME = "http_log.jsonl"
 RATE_STATE_NAME = "rs_http_rate.json"
+RATE_LOCK_NAME = "rs_http_rate.lock"   # OS file lock serialising the shared-window read-modify-write
+RATE_LOCK_TIMEOUT_SEC = 20.0           # how long to contend for the lock before degrading (best-effort)
+RATE_LOCK_STALE_SEC = 20.0             # steal a lock older than this (a crashed holder must not wedge us)
+RATE_MAX_KEEP = 256                    # cap the persisted window so the state file can't grow unbounded
 DEFAULT_UA = "redstrike-rs_http/1"   # generic client name — never the operator's identity
 
 # Request/response header names whose VALUE is a secret -> redacted in the log (lower-cased compare).
@@ -338,26 +346,98 @@ def _mini_yaml(text: str) -> dict:
 
 
 # --------------------------------------------------------------------------- rate throttle
+def _prune_reservations(reservations, now: float, window: float) -> list:
+    """Drop send-slots that can no longer constrain a future one (older than one window before `now`),
+    keep every future reservation, and bound the list so the persisted state can't grow without limit."""
+    horizon = now - window
+    kept = sorted(t for t in reservations if t >= horizon)
+    return kept[-RATE_MAX_KEEP:] if len(kept) > RATE_MAX_KEEP else kept
+
+
 def _throttle_sleep(timestamps, rps: float, now: float,
                     window: float = RATE_WINDOW_SEC) -> tuple[float, list]:
-    """Pure: given recent request timestamps + the rps cap, return (sleep_seconds, updated_timestamps).
+    """Pure sliding-window SLOT RESERVER: given the shared send-slots `timestamps` (recent + already-
+    reserved future slots, pooled across ALL concurrent processes via the file-locked state file) and
+    the rps cap, return (sleep_seconds, updated_timestamps).
 
-    A sliding window: at most `rps` requests per `window`. When the window is already full, the next
-    request must wait until the oldest in-window timestamp ages out — that wait is the returned sleep,
-    and the (post-sleep) request time is recorded. Unit-tested directly, so the throttle is proven with
-    no clock or network."""
-    recent = sorted(t for t in timestamps if t >= now - window)
-    if rps <= 0:
-        recent.append(now)
-        return 0.0, recent
-    if len(recent) >= rps:
-        sleep = max(0.0, (recent[0] + window) - now)
-        t = now + sleep
-        recent = [x for x in recent if x >= t - window]
-        recent.append(t)
-        return sleep, recent
-    recent.append(now)
-    return 0.0, recent
+    The new request's SEND time is reserved no sooner than `window` after the `rps`-th most recent
+    already-reserved send — so at most `rps` sends ever land in any `window` (an initial burst of up to
+    `rps` is allowed, then one slot frees per window). `updated_timestamps` INCLUDES the new reservation;
+    the caller persists it UNDER THE LOCK *before* it sleeps, so a concurrent process sees this slot and
+    reserves AFTER it. That is what makes the budget global (SUM of all processes <= rps) rather than
+    per-process. Pure (no clock/lock/network) so the reservation maths is unit-tested directly."""
+    res = sorted(float(t) for t in timestamps)
+    if rps is None or rps <= 0:                         # unlimited — record the slot, never sleep
+        res.append(now)
+        return 0.0, _prune_reservations(res, now, window)
+    burst = int(rps)                                    # whole requests allowed to fire inside one window
+    if burst >= 1:
+        earliest = res[-burst] + window if len(res) >= burst else now
+    else:                                               # rps < 1 — even-space at window/rps
+        earliest = (res[-1] + window / rps) if res else now
+    send_at = max(now, earliest)
+    res.append(send_at)
+    return max(0.0, send_at - now), _prune_reservations(res, now, window)
+
+
+class _RateLock:
+    """A tiny portable (POSIX + Windows), stdlib advisory file lock over the shared rate-state file.
+
+    The lock is held ONLY for the quick read-modify-write of `rs_http_rate.json` (never across the
+    throttle sleep), so contention windows are microseconds. Acquisition is BEST-EFFORT: it contends
+    for up to `timeout`, steals a lock older than `stale` (a crashed holder must never wedge a
+    legitimate request), and if it still can't get it, proceeds UNLOCKED and degraded rather than
+    blocking the request — the same best-effort posture `_save_rate_state` takes. `O_CREAT|O_EXCL`
+    file creation is the cross-platform mutex; no fcntl/msvcrt, so it is identical on every OS."""
+
+    def __init__(self, eng: Path, *, timeout: float = RATE_LOCK_TIMEOUT_SEC,
+                 stale: float = RATE_LOCK_STALE_SEC):
+        self.path = Path(eng) / "runtime" / RATE_LOCK_NAME
+        self.timeout = timeout
+        self.stale = stale
+        self.held = False
+
+    def acquire(self) -> bool:
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return False
+        deadline = time.time() + self.timeout
+        while True:
+            try:
+                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                os.close(fd)
+                self.held = True
+                return True
+            except FileExistsError:
+                try:                                    # steal a stale lock (crashed holder)
+                    if time.time() - os.path.getmtime(self.path) > self.stale:
+                        os.unlink(self.path)
+                        continue
+                except OSError:
+                    pass
+                if time.time() >= deadline:
+                    return False                        # degrade to unlocked, never wedge the request
+                time.sleep(0.01)
+            except OSError:
+                return False
+
+    def release(self) -> None:
+        if not self.held:
+            return
+        self.held = False
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
 
 
 def _load_rate_state(eng: Path) -> dict:
@@ -486,15 +566,23 @@ def request(method: str, url: str, *, engagement, headers=None, data=None, cooki
         raise ScopeError(f"refusing {method} {url}: {reason}")
     host = host_of_url(url)
 
-    # 2. RATE — sleep to keep the global rate <= the scope cap (shared window across invocations).
+    # 2. RATE — reserve a send-slot in the GLOBAL shared window, then sleep until it. The read-modify-
+    # write runs under a cross-process file lock and the reservation is persisted BEFORE the sleep, so
+    # K concurrent processes serialise onto distinct slots and the SUM of their rates stays <= the cap
+    # (not K x the cap). `--max-rps` already clamped `rps` below the scope number as an extra lower bound.
     rps = resolve_rps(scope, max_rps)
     now = clock()
-    st = _load_rate_state(eng)
-    sleep_s, ts = _throttle_sleep(list(st.get("ts", [])), rps, now)
+    lock = _RateLock(eng)
+    lock.acquire()                                       # best-effort: proceeds unlocked if it can't get it
+    try:
+        st = _load_rate_state(eng)
+        sleep_s, ts = _throttle_sleep(list(st.get("ts", [])), rps, now)
+        st["ts"] = ts
+        _save_rate_state(eng, st)
+    finally:
+        lock.release()
     if sleep_s > 0:
         sleeper(sleep_s)
-    st["ts"] = ts[-max(10, int(rps) * 4):]
-    _save_rate_state(eng, st)
 
     # 3. build the request
     body_bytes = data.encode("utf-8") if isinstance(data, str) else data
@@ -586,12 +674,23 @@ def selftest() -> int:
     assert sleep > 0 and len(ts) >= 1, "a full window must force a positive sleep"
     sleep0, _ = _throttle_sleep([0.9], 5, 1.0)
     assert sleep0 == 0.0, "an under-budget window must not sleep"
+    # GLOBAL cap: chaining reservations (as concurrent processes would, each reserving under the lock
+    # then persisting its slot BEFORE sleeping) keeps the SUM <= rps — at most `rps` sends per window.
+    rps, win, state, sends = 2, RATE_WINDOW_SEC, [], []
+    for now in (0.0, 0.0, 0.0, 0.0, 0.0, 0.0):          # 6 "processes" all arriving at once, rps=2
+        sl, state = _throttle_sleep(list(state), rps, now, win)
+        sends.append(now + sl)                          # the reserved send time
+    sends.sort()
+    assert all(sends[i + rps] - sends[i] >= win - 1e-9 for i in range(len(sends) - rps)), \
+        "any rps+1 consecutive reserved sends must span >= one window (global cap holds)"
+    assert sends[0] == sends[1] == 0.0 and sends[-1] >= 2 * win - 1e-9, \
+        "an initial burst of rps is allowed, then the batch is spaced by the window"
     # redaction
     rh = redact_headers({"Authorization": "Bearer abc", "Accept": "application/json"})
     assert rh["Authorization"] == REDACTED and rh["Accept"] == "application/json"
     assert "SECR3T" not in redact_url("https://app.example.com/cb?token=SECR3T&page=2")
     assert "page=2" in redact_url("https://app.example.com/cb?token=SECR3T&page=2")
-    print("rs_http.py selftest: OK (scope matching, rps throttle, redaction)")
+    print("rs_http.py selftest: OK (scope matching, global rps slot-reservation, redaction)")
     return 0
 
 

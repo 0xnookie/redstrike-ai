@@ -37,3 +37,24 @@ emit; the per-class gauntlet + `counterevidence.md` still apply.
   working, **HALT — do not keep probing a blocked egress** (field lesson: one careless signature flood flipped
   ~1200 recon-200 hosts to the gateway's 403 shell off a single egress). See `anti-automation-ladder.md` and
   `skills/waf-bypass/`.
+- **A FORK/subagent executor cannot gate itself — hand findings back; the PARENT runs the reviewer + writes
+  `report.md`.** An executor running inside a `fork`/`Agent` subagent can neither spawn its `<class>-verify`
+  reviewer (no nested delegation) nor write `report.md` (harness-blocked). So it writes only its
+  `findings.json` with the `review{}` block UNSET (never self-attest a verdict) and the orchestrator runs the
+  independent reviewer + writes the report. A fork finding with no roster `*-verify` reviewer is an un-gated
+  finding — the completion gate HARD-FAILS it before a report. See `verify-base.md` → "Independent review is
+  mandatory" and the orchestrator §2b.
+- **Stay inside the APPROVED benign-probe envelope — don't drift a marker into exploitation.** The probe you
+  send must be the benign one the RoE approved, not an escalation of it: a stored-XSS validation marker is the
+  approved NON-executing set (inert tags + raw metacharacters), NOT `<script>`/event-handler/`javascript:`
+  payloads (those need a separate execution-proof approval on a non-public surface); an SSRF *feeder* probe
+  confirms a fetch of an EXTERNAL benign OOB URL, NOT a hit on internal/metadata (`169.254.169.254`, loopback,
+  RFC1918) — that is the approval-gated variant's job. Escalating a benign marker toward impact without the
+  gate is the drift an external guardrail should never have to catch.
+- **Session-liveness preflight before an authed hunt — an expired token fails OPAQUELY.** A test-account
+  session (especially a ~1h JWT) can expire mid-engagement and then silently return `401`/`403`, wasting
+  effort across leads that read as "clean/blocked". Before an authed executor spends a lead, cheaply check
+  liveness — decode the JWT `exp` when the session token is a JWT (zero network), else one benign authed probe
+  — and on expiry emit a clear **"session expired → re-capture needed"** block and refresh, rather than
+  interpreting the Forbidden as a finding-free surface. See `browser-session.md` → "Deterministic session
+  refresh".

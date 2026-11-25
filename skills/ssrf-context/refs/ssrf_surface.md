@@ -20,6 +20,17 @@ A DNS/HTTP interaction from the server (not your browser) = SSRF sink. Note the 
 ## Characterize (feeds variant_hint)
 - **Response reflected** (status/body/length differs by target) → `inband`.
 - **No reflection, only OOB** → `blind`.
-- **Reaches link-local / cloud metadata** (test `169.254.169.254` carefully, in scope) → `cloud`.
+- **Looks like it could reach link-local / cloud metadata** → route `cloud` — but **the feeder does NOT
+  probe `169.254.169.254` / loopback / RFC1918 itself** (that is exploitation, `ssrf-cloud`'s job, under
+  approval; see §Safety). Classify by the sink's shape (server-side fetcher, follows redirects, no egress
+  allowlist, cloud-hosted) from the EXTERNAL benign-OOB behaviour you already observed, and set
+  `variant_hint: cloud` so `ssrf-cloud` runs the metadata probe later.
 - Record: follows redirects? (301→internal bypass), protocols (`http`,`https`,`gopher`,`file`,`dict`),
   allowlist style (host suffix? scheme? DNS re-bind window?).
+
+> **Feeder scope boundary (benign envelope).** This feeder confirms a sink fetches an **external benign
+> OOB URL** (`http://TOKEN.oob.example/`) and records its behaviour — nothing more. Aiming a probe at an
+> **internal/metadata target** (`169.254.0.0/16`, `127.0.0.1`/`localhost`, RFC1918) is **exploitation**,
+> OUT of feeder scope, and belongs to `ssrf-cloud` / `ssrf-inband` / `ssrf-blind` under their approval
+> gate. The feeder only *routes* (sets `variant_hint`) and *lists* candidate internal targets for the
+> variant to use — it never fires at them.

@@ -153,6 +153,20 @@ a parallel multi-model swarm batched by rank, not a single serial pass. This is 
   cheaper model per the routing policy.
 - **Each executor writes ITS OWN `<skill>/findings.json`** — never a shared file — so concurrent executors
   in a wave never collide on a write.
+- **A FORK/SUBAGENT-RUN EXECUTOR CANNOT SELF-GATE — the PARENT owns the reviewer gate AND `report.md`.**
+  When an executor skill runs inside a `fork`/`Agent` subagent (the autonomous parallel-hunt mode above), that
+  subagent **cannot spawn its own `<class>-verify` reviewer** (no nested delegation — a subagent can't launch a
+  subagent) and **cannot write `report.md`** (the harness blocks subagent report writes). So a subagent executor
+  must **hand its findings back to you (the parent)** by writing only its `<skill>/findings.json` with the
+  `review{}` block **UNSET** (`review.reviewer` left blank — it must NEVER self-attest a verdict), and **you,
+  the parent, then (1) spawn the `<class>-verify` reviewer** (the MERGE/DEDUP checkpoint below) **and (2) write
+  the executor's `report.md`.** If the parent skips this, the reviewer gate — the whole point of the gated-
+  executor discipline — is silently skipped for every finding a fork produced. **The mechanical backstop:** a
+  subagent-produced finding carries no real `*-verify` `review.reviewer`, and `verify_completion.py --engagement`
+  HARD-FAILS any reportable finding whose reviewer is not a roster `*-verify` agent (§2 "After EACH findings-
+  producing skill"; `verify-base.md` "Independent review is mandatory") — so an un-reviewed fork finding can
+  never reach a report. Treat an un-reviewed `findings.json` returned from a subagent as the flag "reviewer not
+  yet run": run it before the wave is complete.
 - **MERGE / DEDUP CHECKPOINT after each wave (before the next one).** When the wave's executors return:
   **hand every executor's findings to its matching independent `<skill>-verify` reviewer FIRST — spawn each
   as its own `Agent` subagent (`subagent_type: <skill>-verify`, e.g. `xss-reflected-verify`,
