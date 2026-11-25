@@ -1,15 +1,23 @@
 # Web Cache Poisoning — VERIFY (SEMANTIC gate)
 # Inherits _contract/verify-base.md. SUBAGENT, fresh context. Precondition: review.md PASSED.
 
-Run the 7 base checks + the cache-poisoning gauntlet. Confirmed = an unkeyed input lands in a CACHED
-response served to a DIFFERENT request. The cache HIT is the proof — re-fetch without the buster.
+Run the 7 base checks + the cache-poisoning gauntlet. Confirmed = a shared cache serves one request's
+content to a DIFFERENT request, by EITHER mode: (a) an unkeyed input reflected into a cached response, or
+(b) a cache-key COLLISION (cache key injection — keyed fragments manipulated so two different requests
+resolve to one key). The cache HIT on the second, differently-shaped request is the proof.
 
 ## Cache-poisoning false-positive gauntlet (base check #3)
-- [ ] **Cross-user cache HIT.** Evidence shows a second, clean request (no attacker header/param)
-      receiving the poisoned response from cache (`X-Cache: hit` / `Age` > 0) — not just per-request
-      reflection. Reflection without a cache hit is a different (or no) bug.
-- [ ] **Input is genuinely UNKEYED.** The poisoning input is not part of the cache key (changing it
-      doesn't change the cached variant) — otherwise each attacker only poisons their own key.
+- [ ] **Cross-request cache HIT.** Evidence shows a SECOND request (classic mode: clean, no attacker
+      header/param; CKI mode: the same key reached via a DIFFERENT byte-split) receiving the primed
+      response from cache (`X-Cache: hit` / `Age` > 0) — not just per-request reflection. Reflection
+      without a cache hit is a different (or no) bug.
+- [ ] **The confirmation mode is sound.**
+      - *Classic poisoning:* the input is genuinely UNKEYED — changing it doesn't change the cached
+        variant — otherwise each attacker only poisons their own key.
+      - *Cache key injection:* the two requests are genuinely DIFFERENT (distinct uri/header/scheme bytes)
+        yet share ONE cache entry because the key is built by delimiter-less concatenation — the collision
+        is the bug, so "the input is keyed" is NOT a rejection here. Reject only if the "collision" is two
+        identical requests, or the HIT came from the attacker's own normal key (no real cross-request serve).
 - [ ] **Impact is real.** The cached payload does something (executes XSS, redirects, breaks the page
       for DoS, or — deception — caches a private/authenticated page for anonymous users).
 - [ ] **Hygiene.** Payload benign; poison scoped to a buster you control or short-TTL; recorded in

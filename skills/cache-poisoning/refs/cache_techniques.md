@@ -82,8 +82,10 @@ cache treats as part of an unkeyed/excluded param reaches the origin as a real, 
 /path%2f..%2fother    /path/%2e%2e/other    /path/..;/other    /PATH (case)    /path//    /path/.
 # Encoded chars the cache normalizes but the origin decodes late (or vice-versa) -> key says A, body reflects B.
 ```
-"Cache key injection": two requests share a key but differ in a reflected value. Prove with your own buster
-plus a second fetch on the same key. HPP mechanics → parameter-pollution skill.
+This section is the cache-vs-origin **parser-discrepancy** cousin (the two layers disagree about which
+bytes are params/path). The distinct **key-collision** mechanism — where the cache's OWN key string is
+built by delimiter-less concatenation so two different requests serialize to one key — has its own section
+below (**cache key injection**). HPP mechanics → parameter-pollution skill.
 
 ---
 ## Extended arsenal — fat-GET & method/verb tricks
@@ -150,3 +152,77 @@ execute against a shared cache (it harms real users). Note feasibility for the r
 - **Confirmation discipline:** prime and read back on the SAME self-chosen buster; prove cross-user with a
   SECOND identity hitting that buster (never the real key). Never issue PURGE/BAN. If the only way to show
   impact is poisoning the real key, STOP and report the unkeyed input + gadget as the finding.
+
+---
+## Extended arsenal — cache key injection (keyed-input collisions via delimiter-less key construction)
+A SECOND, distinct way to make a shared cache serve one request's content to another — the mirror image of
+classic poisoning. **Classic poisoning abuses an UNKEYED input; cache key injection abuses the KEYED ones.**
+No unkeyed reflection is needed: you manipulate the keyed fragments so **two DIFFERENT requests serialize to
+the SAME cache-key string**, then one request reads (or overwrites) the other's cached entry.
+
+**Root cause.** The cache builds its key by CONCATENATING variable-length, attacker-influenceable fragments
+— scheme, host, path, query, and selected request headers — into one string, then hashes/stores under it.
+When those fragments are joined **without an unambiguous delimiter**, adjacent fragments abut, so a byte can
+be **shifted across a fragment boundary** and still produce an identical concatenation. The cache sees one
+key; the origin routes/reflects by its OWN independent parse of the real request, so it treats the two
+requests differently. Hashing the key is NOT a fix — identical strings hash identically; the fix is a
+delimiter (or length-prefix/encoding) that can't appear inside a fragment.
+
+**Distinguish from the neighbours (route correctly):**
+- vs **classic unkeyed poisoning** — opposite mechanism: CKI weaponises the KEYED inputs, not an unkeyed one.
+- vs **parameter cloaking / normalization** (section above) — that is a cache-vs-ORIGIN disagreement about
+  which bytes are a param/path; CKI is a collision of the cache's OWN key string via boundary confusion.
+- vs **web cache deception** — the ACL-bypass READ outcome resembles deception (read a cached privileged
+  response) but the vector is a KEY COLLISION, needs no crafted content-type / path-extension, and no victim
+  interaction (no one has to visit your link).
+
+### Boundary-confusion primitives (the byte-shift catalogue)
+Find two ADJACENT, unseparated, attacker-influenceable keyed fragments `A|B` where moving a byte from the
+end of `A` to the start of `B` (or vice-versa) yields the same concatenation. Common pairs:
+```
+# URI ↔ a keyed header (key = …$uri$http_<header>)  — move bytes across the uri/header seam:
+/XY     + <keyed-header>: Z         collides with     /XYZ    + <keyed-header>: (empty)
+#   concrete: /*  + Accept: /*      collides with     /*      + Accept: */*   (the extra '*' migrates)
+# scheme ↔ host (key = $scheme$host) — the trailing 's' of 'https' migrates into a reflected Host:
+http   + Host: sdummy.example       collides with     https   + Host: dummy.example
+#   (needs http & https serving the same content with no forced redirect, and Host reflected)
+# empty-fragment shifting — an empty $is_args/$args/$query lets the neighbours abut and the seam move.
+# generic: any unseparated A|B pair in the key where end-of-A and start-of-B are both controllable.
+```
+
+### Detect (benign, always on YOUR cache-buster channel)
+A delimiter-less key is exposed by a **split-invariance probe**: send the same bytes split two different ways
+across a seam and see if they share a cache entry.
+```
+# 1. pick a cacheable endpoint; prime on a buster you own with one split:
+curl -s "https://TARGET/anyendpoint?cb=rsK1" -H 'X-Test: 123'
+# 2. request the SAME buster with the bytes split differently across the uri↔header seam:
+curl -s "https://TARGET/anyend?cb=rsK1"       -H 'X-Test: point123'
+# 3. if step 2 is served step 1's body (X-Cache: HIT, no fresh origin fetch) -> keys collided -> CKI-capable.
+```
+In YOUR OWN lab, request a debug header that echoes the assembled key string to SEE the missing delimiter;
+against a live target, infer it from the HIT on the second (differently-split) request.
+
+### Confirm BENIGNLY (the proof — same cross-request-serve discipline as the rest of this skill)
+The confirmation standard is a **collision pair with a self-canary**, buster-scoped, no real user touched:
+1. **Prime** key K via request **A** carrying your own canary marker, on a unique `?cb=` you control.
+2. **Read back** via a DIFFERENT request **B** whose split you computed to collide to the SAME K.
+3. If **B returns A's canary from cache** (`X-Cache: HIT` / `Age` > 0) — two different requests sharing one
+   cached entry — the collision is CONFIRMED. The HIT on the differently-shaped request IS the proof.
+- **ACL-bypass READ variant:** demonstrate ONLY with your own two test requests — a response YOU authorised
+  + cached, read back through a colliding unprivileged request. NEVER read a real user's cached private data.
+- Both prime and read-back ride a unique buster you own; never collide onto a production key / real path.
+  No PURGE/BAN; let a short TTL expire; record in `cleanup.md`. If impact can only be shown by colliding onto
+  the real key, STOP and report the collision primitive + gadget as the finding.
+
+### Impact → hand-off
+| CKI outcome | Impact | Hand-off |
+|---|---|---|
+| unprivileged request collides onto a cached PRIVILEGED response | ACL-bypass disclosure of cached content | host-header (if Host-driven) |
+| scheme-confused key caches a reflected `Host` in `<script src>` | persistent XSS served from cache | xss-* |
+| collide onto the key for a real page + serve a cached error/404 | cache-poisoned DoS (**catalogue only — do NOT fire on a shared cache**) | — |
+| edge cache bypasses for your request (e.g. an `Authorization` header) while the origin cache does not | poison the ORIGIN cache THROUGH the edge (layered) | — |
+
+Severity scales with endpoint sensitivity, TTL, the number of users sharing the key, and whether the poison
+propagates across cache layers. Confirm the collision benignly first, then rate; execute any downstream bug
+only via its own skill, still buster-scoped.

@@ -11,10 +11,13 @@
   - [ ] X-Host / X-Original-URL / X-Rewrite-URL
   - [ ] unkeyed query params
 - [ ] Reflection of unkeyed input into cacheable content
+- [ ] Cache-key-injection probe (delimiter-less key → keyed-input collision)
+  - [ ] Split-invariance probe run (same bytes split two ways across a seam)
+  - [ ] Boundary-confusion primitive identified (uri↔header / scheme↔host / empty-fragment)
 
 ## Confirm (scope-gated, buster-scoped)
-- [ ] Cross-user cache HIT of the poisoned response confirmed
-- [ ] Impact assessed (cache XSS / redirect / DoS / deception of private page)
+- [ ] Cross-request cache HIT confirmed (unkeyed-input reflection OR key-collision pair)
+- [ ] Impact assessed (cache XSS / redirect / DoS / deception / CKI ACL-bypass read)
 - [ ] CVSS rated
 
 ## Emit
