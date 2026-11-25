@@ -142,3 +142,17 @@ avoid. The launcher therefore ships a **deterministic login-recipe refresher** t
   whichever backend is connected (the table above), then let the refresher persist the resulting
   cookie-jar. This is the same "**browser only when the prior rung is blocked**" ladder discipline:
   the HTTP recipe is the cheap deterministic path; the browser drive is the escalation, not the default.
+
+- **Session-liveness preflight — run it BEFORE an authed executor spends a lead (an expired session
+  fails OPAQUELY).** A ~1h test-account session can expire mid-engagement and then silently return
+  `401`/`403`; an executor reads the Forbidden as a finding-free surface and wastes effort across
+  several leads. The cheapest check comes FIRST and is **zero-network**: when the session token is a
+  **JWT**, decode its `exp` claim (never verifying/trusting the token — only reading the expiry it
+  states) and treat an already-past / within-skew exp as stale; only an **opaque** session cookie
+  falls back to **one** benign authed probe (the `auth_check` liveness assertion). On expiry, emit a
+  clear **"session expired → re-capture needed"** block and refresh (this recipe, or a re-capture)
+  rather than probing on with a dead token. The launcher ships this as
+  `cli/redstrike_cli/login_replay.py` → `session_preflight()` / `decode_jwt_exp()` /
+  `jwt_session_status()`, and the refresher's own liveness gate uses the JWT fast-path so an expired
+  JWT skips the wasted probe and goes straight to a replay with a stated reason. Per
+  `skills/_contract/engagement-discipline.md` → "Session-liveness preflight".

@@ -161,6 +161,16 @@ If a finding's class has no matching reviewer in the roster, that is a gap to fi
 agent, or route the finding to the closest existing reviewer), not a license to self-verify — the accept file
 is a temporary, auditable exception, not the normal path.
 
+**An executor run inside a `fork`/subagent cannot gate itself — it hands back, the PARENT gates.** A subagent
+executor (the autonomous parallel-hunt mode) **cannot spawn its `<class>-verify` reviewer** (no nested
+delegation) and **cannot write `report.md`** (the harness blocks subagent report writes). So it emits its
+`findings.json` with the `review{}` block **UNSET** (never self-attesting a verdict) and hands those findings
+back to the orchestrator, which **runs the independent `<class>-verify` reviewer AND writes `report.md`** on
+its behalf. This is not a loophole in the no-self-attestation rule — it is the same rule: an un-reviewed fork
+finding has no roster `*-verify` `reviewer`, so the engagement gate above HARD-FAILS it before a report. The
+missing `review.reviewer` is therefore the mechanical flag "this executor ran in a subagent — its reviewer has
+not run yet". See the orchestrator's §2b "A FORK/SUBAGENT-RUN EXECUTOR CANNOT SELF-GATE".
+
 ### Two axes: `review.verdict` (the decision) vs finding `status` (the lifecycle)
 
 These are **not** two names for the same thing — they are different axes, and conflating them is a recurring

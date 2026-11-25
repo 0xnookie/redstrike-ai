@@ -20,7 +20,7 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS · accepted.
 1. Ingest upload sinks + stored-path/exec hints · `jq file_context.json` · (into tests)
 2. Bypass type/validation (ext, magic bytes, content-type, double-ext, .htaccess) · refs · `upload_tests.jsonl`
 3. Upload a BENIGN marker-webshell (echoes `RS7F3Q` / calls OOB — NOT a real shell) · interceptor · `upload_tests.jsonl`
-4. Locate the stored path; request it; confirm execution (marker / OOB) · interceptor · `poc/<id>/`
+4. Locate the stored path; request it; confirm execution (marker / OOB) · interceptor · `poc/<id>/`. **Read the SERVED FORM:** a content-hashed / normalized served path (`/static/<sha>.png`, a CDN transcode URL, a re-generated filename/dimensions) is evidence the backend **re-encodes/transcodes** the upload — which strips an SVG script body / polyglot payload and defeats stored-markup vectors. When the served bytes are re-encoded, **deprioritize SVG-XSS / polyglot / embedded-script vectors** and confirm by diffing the served bytes against what you uploaded (hash/size/metadata changed ⇒ re-encoded). A path that preserves your original filename + bytes is the opposite signal (raw passthrough — those vectors stay live).
 5. Record + remove the uploaded file · synth · `cleanup.md`
 6. Rate (CVSS) + write finding · synth · `findings.json`
 7. Emit report + curl · synth · `report.md`, `curl_commands.sh`

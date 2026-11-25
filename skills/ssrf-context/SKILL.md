@@ -49,5 +49,10 @@ DONE = `checklist.md` all `- [x]` · `review.md` PASS (artifacts non-zero, valid
 - **Phase 2 (target-specific):** behavior characterization + variant routing + consolidation.
 
 ## Safety
-Benign OOB probes only (no internal scanning beyond confirming a fetch) — scope-gate every probe,
-rate-limit, audit-log. Exploitation (internal access, metadata creds) is the variants' job, under approval.
+Benign OOB probes only — the feeder's single active action is confirming a sink fetches an **external
+benign OOB URL** (`http://TOKEN.oob.example/`), then recording its behaviour. **Internal/metadata targets
+are OUT of feeder scope:** a probe aimed at `169.254.0.0/16` (cloud metadata), `127.0.0.1`/`localhost`, or
+an RFC1918 host is **exploitation**, not feeder reconnaissance — it belongs to `ssrf-cloud` (metadata creds)
+/ `ssrf-inband` / `ssrf-blind` under their approval gate. The feeder only **routes** each sink
+(`variant_hint`) and **lists** candidate internal targets for the variant to use; it never fires at them.
+Scope-gate every probe, rate-limit, audit-log.

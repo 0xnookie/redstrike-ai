@@ -34,6 +34,7 @@
   - [ ] outdated
   - [ ] security (CVEs)
 - [ ] Framework & tech analysis
+  - [ ] every product/tech/feature tag backed by ≥1 concrete signal (component/bundle string · `?ver=` asset · response header · matched script path) — a URL-word/page-copy guess is `tentative`, never a confirmed tag
 - [ ] Feature map
 - [ ] Secrets (known-regex vs high-entropy strings)
   - [ ] offline enrichment (provider/account/key-type · JWT decode + expiry · demo/placeholder tagging) — never validated against the issuer

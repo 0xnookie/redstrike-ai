@@ -174,3 +174,61 @@ digraph{ a[URL="javascript:alert(document.domain)"] }
 A diagram endpoint that returns **SVG served same-origin inline** is an SVG-upload XSS surface — treat
 it as such (cookie-scope impact). Pin the renderer version (bundle string / `libraries.jsonl`):
 label/HTML support and the default `securityLevel` differ across versions.
+
+---
+
+## The approved NON-executing marker set (the store-probe envelope — do NOT drift past it)
+Steps 3 + 6 probe the **store/output sanitizer**. The probe that does that is a benign marker whose job is
+to reveal how the server **treats** markup — stored raw / entity-encoded / stripped / annotated to safe
+markup — **without attempting execution**. That observation does NOT need an execution approval, so it is
+the default. Keep the validation/tracer marker inside this inert set:
+
+- **Inert tags** (no event handler, no active scheme): `<b>`, `<i>`, `<u>`, `<x>`, a custom `<rsmark>`
+  tag, `<img src=x>` **without** `onerror`. They show whether tag *structure* survives storage/render.
+- **Raw metacharacters** (bare, not forming an executing construct): `<`, `>`, `"`, `'`, `` ` ``, `=`, `/`
+  — to see entity-encoding vs pass-through — paired with a short greppable alnum token (`rsxb<rand>`).
+- A representative combined marker: `<i>rsxb7df5d</i> "'><rsmark>` — inert tag + quote/bracket break +
+  a custom tag, all NON-executing. This is what a `validate`/tracer probe should carry.
+
+**Escalation past the inert set is an EXECUTION probe and needs a SEPARATE approval on a NON-PUBLIC
+surface.** A `<script>` element, ANY event-handler attribute (`onerror`/`onload`/`ontoggle`/`onmouseover`/
+…), a `javascript:` / `data:text/html` scheme, or an auto-exec foreign/allowed-tag vector is an attempt to
+**prove execution**, not to observe storage treatment. Because stored payloads can fire on **real users/
+staff** (SKILL §Safety), such a payload is fired only **after** an execution-proof approval (`no_destructive`
++ `prod_touch_requires_approval`, `roe-gate.md`) and only against a surface **you alone render** — your own
+pending/test-account view — never a shared or other-user render. A validate-probe marker must not quietly
+grow a `<script>`/`<img onerror>`/`javascript:` body to "save a round trip"; that is exactly the drift an
+external guardrail should never have had to catch.
+
+---
+
+## Passive-at-scale store-side corroboration (when the active write path is GATED) — a first-class technique
+The active submit is sometimes un-testable: CAPTCHA-gated, human-moderated, invite-only, or the session
+expired mid-run. **Do not stall or call the class "unconfirmed" — resolve the decisive storage-treatment
+fact PASSIVELY, read-only, with ZERO writes**, by scanning the **existing persisted corpus at scale** and
+measuring how the server's STORED form treats markup. The decisive question ("does a full `<tag>` / URL /
+annotation survive storage+moderation to reach the render sink?") is answered by the corpus itself:
+
+1. Enumerate many existing persisted items of the same type (comments, reviews, profiles, Q&A, posts)
+   across the surface — fetch them via `rs_http.py` at a WAF-safe pace, Burp egress (no writes).
+2. For each stored `body`, count: tag-shaped (`<…>`), URL-shaped (`http(s)://`, `www.`), entity-encoded
+   (`&lt;`/`&gt;`/`&amp;`), the client-parser **annotation classes** (`class="link"`/`"mention"`), plain
+   `@name` mentions (text, not markup), and stray single `<`/`>` (conversational `-->`, `=>`).
+3. **Interpret:** a corpus of thousands of real items with **ZERO** surviving tags / URLs / annotation
+   classes is decisive evidence the storage+moderation pipeline **strips markup before storage** → the
+   stored-XSS path is **REFUTED** without a single write. Mentions kept as plain `@name` text (client
+   linkifies by regex at render) and stray brackets that never form a tag corroborate "strips tag
+   structure, not entity-encodes". Record `n`, the counts, and a few sample IDs as the evidence artifact
+   (e.g. `passive_storage_scan.jsonl` + a `passive_storage_summary.md`).
+
+**Honest caveat (does NOT flip the verdict):** passive inference proves that *normal* markup does not
+survive; it cannot by itself disprove a crafted **mutation-XSS (mXSS)** that evades the stripper and
+re-forms inside the render-side parser. That residual, low-probability angle is the ONLY thing an approved
+benign-marker execution test on a **non-public** surface (store the inert-set marker → read back your OWN
+pending item) would still add — deprioritize it against other leads, but state it.
+
+**Generalize** — this is the persist→render analogue of "observe behavior before you act": when the active
+write is gated for any **persisted** class (stored-XSS, stored/second-order SQLi candidates, stored
+open-redirect / SSRF URL fields), **scan the existing persisted content at scale to observe the server's
+storage/sanitization treatment BEFORE or INSTEAD of an active post** — the stored corpus is free, honest,
+zero-write evidence that often settles the class on its own.

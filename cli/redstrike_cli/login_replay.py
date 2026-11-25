@@ -48,8 +48,10 @@ the Netscape cookie-jar at ``runtime/cookies.txt`` (the jar ``browser-session.md
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -217,6 +219,117 @@ def _resp_status(resp):
         if isinstance(v, int):
             return v
     return None
+
+
+# --- session-liveness preflight (JWT exp fast-path, else a benign authed probe) ----------
+# A long engagement's authed session (often a ~1h JWT) expires mid-run and then silently returns
+# 401/403 — an executor reads the Forbidden as a finding-free surface and wastes effort across leads.
+# A cheap preflight closes that: if the stored session carries a JWT, decide staleness from its own
+# `exp` claim with ZERO network (never trusting/verifying the token — we only read the expiry it
+# states); only an opaque/sessionless token falls back to ONE benign authed probe. On expiry the
+# caller emits a clear "session expired -> re-capture needed" block instead of failing opaquely.
+LIVE = "live"
+EXPIRING = "expiring"      # within the skew of its exp — treat as stale, refresh proactively
+EXPIRED = "expired"
+UNKNOWN = "unknown"        # no decodable JWT exp — the caller must fall back to a probe / decide
+
+_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
+
+
+def decode_jwt_exp(token):
+    """Return the `exp` (epoch seconds, int) carried by a JWT in ``token`` WITHOUT verifying its
+    signature, else None. Stdlib base64url-decodes the PAYLOAD segment only — zero network, never
+    trusts the token (used solely to read the expiry it claims). Finds the first 3-segment JWT inside
+    a cookie/header blob (so ``Authorization=eyJ...`` inside a cookie string is handled). Any malformed
+    input / missing-or-non-numeric exp → None."""
+    if not isinstance(token, str) or "eyJ" not in token:
+        return None
+    m = _JWT_RE.search(token)
+    raw = m.group(0) if m else token.strip()
+    parts = raw.split(".")
+    if len(parts) < 2 or not parts[1]:
+        return None
+    try:
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)            # restore base64url padding
+        claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8", "replace"))
+    except Exception:
+        return None
+    exp = claims.get("exp") if isinstance(claims, dict) else None
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        return None
+    return int(exp)
+
+
+def jwt_session_status(token, *, now: float | None = None, skew: int = 60) -> str:
+    """Classify a JWT-bearing session by its own `exp` (zero network): ``live`` / ``expiring`` (within
+    ``skew`` seconds of exp) / ``expired`` / ``unknown`` (no decodable exp — caller falls back)."""
+    exp = decode_jwt_exp(token)
+    if exp is None:
+        return UNKNOWN
+    now = time.time() if now is None else now
+    if now >= exp:
+        return EXPIRED
+    if now >= exp - skew:
+        return EXPIRING
+    return LIVE
+
+
+@dataclass
+class PreflightResult:
+    status: str                         # live / expiring / expired / unknown
+    source: str                         # "jwt-exp" | "probe" | "none"
+    seconds_left: float | None = None
+    reason: str = ""
+
+    def ok(self) -> bool:
+        return self.status == LIVE
+
+    def needs_recapture(self) -> bool:
+        return self.status in (EXPIRED, EXPIRING)
+
+
+def _session_token_blob(account: dict) -> str:
+    """The joined session material to scan for a JWT: the session cookie, any session header values,
+    and a stored bearer/token secret (one of these carries the authed JWT when the identity uses one)."""
+    acct = account or {}
+    session = acct.get("session") or {}
+    secret = acct.get("secret") or {}
+    pieces = [session.get("cookie") or "", secret.get("token") or ""]
+    pieces += [str(v) for v in (session.get("headers") or {}).values()]
+    return " ".join(p for p in pieces if p)
+
+
+def session_preflight(account: dict, *, auth_check: dict | None = None, client=None,
+                      now: float | None = None, skew: int = 60) -> PreflightResult:
+    """Cheap session-liveness preflight for an authed executor, run BEFORE it spends a lead.
+
+    1. JWT fast-path (zero network): if the stored session carries a JWT, classify by its `exp`. An
+       already-past / within-``skew`` exp returns ``expired``/``expiring`` with a clear re-capture
+       reason — so the executor never wastes an authed request that would just 401/403 opaquely.
+    2. Opaque session (no decodable JWT exp): fall back to ONE benign authed probe (``auth_check`` via
+       ``client``, reusing ``liveness_check``) when one is available.
+    3. Nothing to check → ``unknown`` (the caller decides).
+    """
+    blob = _session_token_blob(account)
+    status = jwt_session_status(blob, now=now, skew=skew)
+    if status != UNKNOWN:
+        exp = decode_jwt_exp(blob)
+        left = None if exp is None else round(exp - (time.time() if now is None else now), 1)
+        reason = {
+            LIVE: f"JWT exp is {left}s in the future — session live",
+            EXPIRING: f"JWT exp within {skew}s ({left}s left) — refresh before it 401s",
+            EXPIRED: "JWT exp is in the past — session expired, RE-CAPTURE needed",
+        }[status]
+        return PreflightResult(status, "jwt-exp", left, reason)
+    if client is not None and auth_check:
+        live = liveness_check(client, auth_check)
+        return PreflightResult(
+            LIVE if live else EXPIRED, "probe",
+            reason="benign authed probe is live" if live
+            else "benign authed probe returned not-live — session expired, RE-CAPTURE needed")
+    return PreflightResult(UNKNOWN, "none",
+                           reason="no decodable JWT exp and no auth_check probe available")
 
 
 # --- the liveness probe + the player -----------------------------------------
@@ -431,16 +544,20 @@ def refresh_identity(eng: Path, account: dict, recipe: dict, *, client_factory=N
     auth_check = substitute(recipe.get("auth_check") or {}, vars_)
     factory = client_factory or _default_client_factory(eng)
 
-    # 2 — liveness on the CURRENT session.
-    try:
-        probe = factory()
-        sess = _session_of(account)
-        probe.set_session(cookie=sess.get("cookie"), headers=sess.get("headers"))
-        if liveness_check(probe, auth_check):
-            return RefreshResult(rid, FRESH, "current session is still live — no refresh needed")
-    except Exception as e:
-        # A probe failure is not fatal — fall through to a replay (treat as stale).
-        _ = e
+    # 2 — liveness on the CURRENT session. JWT-exp FAST-PATH first (zero network): an already-past /
+    # near-expiry JWT will only 401 the probe, so skip the wasted authed request and go straight to a
+    # replay with a clear reason. Only a live-or-opaque JWT reaches the benign probe below.
+    pre = session_preflight(account)
+    if not (pre.source == "jwt-exp" and pre.needs_recapture()):
+        try:
+            probe = factory()
+            sess = _session_of(account)
+            probe.set_session(cookie=sess.get("cookie"), headers=sess.get("headers"))
+            if liveness_check(probe, auth_check):
+                return RefreshResult(rid, FRESH, "current session is still live — no refresh needed")
+        except Exception as e:
+            # A probe failure is not fatal — fall through to a replay (treat as stale).
+            _ = e
 
     # 3 — stale: replay the recipe on a fresh client.
     try:

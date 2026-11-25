@@ -9,6 +9,7 @@
 - [ ] Type/validation bypass found (ext / magic bytes / content-type / double-ext / .htaccess)
 - [ ] BENIGN marker-webshell uploaded (echoes marker / OOB — NOT a real shell)
 - [ ] Stored path located (web-reachable + executable)
+  - [ ] served form checked: content-hashed/transcoded path (e.g. /static/<hash>.png, bytes/size/metadata changed) ⇒ backend re-encodes ⇒ deprioritize SVG-XSS/polyglot; raw filename+bytes passthrough ⇒ those vectors stay live
 - [ ] Execution confirmed (marker returned / OOB callback)
 - [ ] CVSS rated
 

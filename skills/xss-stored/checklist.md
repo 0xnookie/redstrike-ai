@@ -12,6 +12,8 @@
   - [ ] admin
   - [ ] anonymous
 - [ ] Submit benign tracer per candidate
+  - [ ] tracer/validation marker stays in the approved NON-executing set (inert tags + raw metacharacters) — NO `<script>`/event-handler/`javascript:` without a separate execution-proof approval on a non-public surface (refs/stored_payloads.md)
+- [ ] If the active write path is GATED (captcha/moderation/invite/expired session): passive-at-scale store-side scan of the EXISTING persisted corpus (read-only, zero writes) to observe storage/sanitizer treatment and confirm-or-refute (refs/stored_payloads.md)
 - [ ] Confirm which surface/viewer each tracer renders on
 - [ ] Classify context at the RENDER surface
   - [ ] output encoder / sanitizer canary recorded
