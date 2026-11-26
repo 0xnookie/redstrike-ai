@@ -16,6 +16,12 @@ It flags gaps NO existing gate catches:
                          routing triggers -> a route wrongly dropped.
   - pending-at-close   : a routed class never ran (also caught by the coverage gate; repeated here so the
                          recall report is self-contained).
+  - blocked-unverified : a recon-signalled family marked `blocked` that neither enumerates the blocked
+                         sub-surface(s) nor shows non-destructive detection ran before the block.
+  - leg-uncovered      : the SUB-SURFACE generalization (roadmap L-A) — a high-prior `pattern: family`
+                         class whose per-leg sub-surface marks (or the surface ledger's consumed_by)
+                         show a routing-map leg that was NEVER tested, under ANY top-level status. A
+                         family marked `attempted` can still hide an untested leg (the near-missed-P1).
 
 coverage.py proves categories are ACCOUNTED FOR; this asks whether an ACCOUNTED-FOR-as-clear result is
 actually trustworthy. Pure logic (inputs injected) so it is unit-testable with no network; a thin
@@ -54,14 +60,43 @@ def _family_agents_by_cat(map_categories) -> dict:
     return out
 
 
+def _subsurface_status_map(entry, family_agents) -> dict:
+    """{leg_agent_id: status} for a family entry, from the AUTHORITATIVE ``subsurfaces[]`` first, then the
+    compat fields (``blocked_subsurfaces`` -> 'blocked', ``pending_subsurfaces`` -> 'pending') for any leg
+    not already covered, restricted to the family's routing-map sub-agents. {} when no per-leg detail (the
+    uniform, backward-compatible case). Mirror of coverage.subsurface_map — kept local so the two modules
+    stay decoupled. Pure."""
+    fam_set = set(family_agents or ())
+    out = {}
+    for ss in (entry.get("subsurfaces") or []):
+        if not isinstance(ss, dict):
+            continue
+        leg = str(ss.get("agent") or ss.get("id") or "").strip()
+        st = str(ss.get("status") or "").strip()
+        if leg and st and (not fam_set or leg in fam_set):
+            out.setdefault(leg, st)
+    for leg in (entry.get("blocked_subsurfaces") or []):
+        leg = str(leg).strip()
+        if leg and leg not in out and (not fam_set or leg in fam_set):
+            out[leg] = "blocked"
+    for leg in (entry.get("pending_subsurfaces") or []):
+        leg = str(leg).strip()
+        if leg and leg not in out and (not fam_set or leg in fam_set):
+            out[leg] = "pending"
+    return out
+
+
 def _blocked_enumerates_subsurfaces(entry, family_agents) -> bool:
     """A `blocked` entry ENUMERATES its blocked sub-surface(s) when it carries an explicit
-    ``blocked_subsurfaces`` list (coverage.py records this when it marks a family blocked) OR, for a family,
-    its reason names at least one of the family's sub-agents. Without an enumeration a family-level block
-    covers the WHOLE family — silently absorbing an untested in-scope sibling. For a non-family class
-    (``family_agents`` empty) a substantive, specific reason enumerates the single blocked surface."""
+    ``blocked_subsurfaces`` list (coverage.py records this when it marks a family blocked), OR a
+    ``subsurfaces[]`` leg recorded 'blocked' (the authoritative form), OR, for a family, its reason names at
+    least one of the family's sub-agents. Without an enumeration a family-level block covers the WHOLE
+    family — silently absorbing an untested in-scope sibling. For a non-family class (``family_agents``
+    empty) a substantive, specific reason enumerates the single blocked surface."""
     named = [str(x).strip() for x in (entry.get("blocked_subsurfaces") or []) if str(x).strip()]
     if named:
+        return True
+    if any(v == "blocked" for v in _subsurface_status_map(entry, family_agents).values()):
         return True
     reason = entry.get("reason") or ""
     if family_agents:
@@ -101,13 +136,23 @@ def _detection_ran(entry) -> bool:
 _SINK_SIGNALS = frozenset({"sink:template", "sink:command"})
 
 
-def audit(categories, signals, map_categories, escalations=None) -> dict:
+def _is_whole_surface_block(entry) -> bool:
+    """A `blocked` row sourced from a disclosed WHOLE-surface environmental block (diagnostics transport
+    auto-populate writes reason `"transport: ..."`): the host/WAF was down, so NO sibling was reachable and
+    the block can't mask an untested-but-reachable sibling. Exempt from the sub-surface requirements."""
+    return str((entry or {}).get("reason") or "").strip().lower().startswith("transport:")
+
+
+def audit(categories, signals, map_categories, escalations=None, tested_subsurfaces=None) -> dict:
     """Compute recall gaps from already-parsed inputs.
 
-    categories:   ledger entries [{id,status,reason?,triggers_matched?,findings_count?}, ...]
+    categories:   ledger entries [{id,status,reason?,triggers_matched?,findings_count?,subsurfaces?}, ...]
     signals:      iterable of recon signal tokens actually available for this engagement
     map_categories: routing-map categories [{id,triggers,...}, ...]
     escalations:  {category_id: [escalation-technique-ids already tried]} (optional)
+    tested_subsurfaces: set of sub-agent / leg ids the SURFACE ledger shows were actually consumed (any
+                  surface element's consumed_by) — the cross-check that CLEARS a leg's `leg-uncovered` gap
+                  (a leg tested there is covered even if the coverage ledger's per-leg mark lags). Optional.
 
     Returns {gaps: [...], summary: {...}} with gaps ranked (high before medium).
     """
@@ -115,6 +160,7 @@ def audit(categories, signals, map_categories, escalations=None) -> dict:
     esc_done = escalations or {}
     trig = _triggers_by_cat(map_categories)
     fam_agents = _family_agents_by_cat(map_categories)
+    tested_legs = {str(x).strip() for x in (tested_subsurfaces or ()) if str(x).strip()}
     gaps = []
 
     for c in categories:
@@ -200,6 +246,34 @@ def audit(categories, signals, map_categories, escalations=None) -> dict:
                              "suggested_action": ("probe it black-box on injectable params (behavioural / timing "
                                                   "/ OOB), or run source-audit (white-box) to emit the sink signal")})
 
+        # SUB-SURFACE / PER-LEG COVERAGE (roadmap L-A): the GENERALIZATION of `blocked-unverified` beyond
+        # the blocked case. A high-prior `pattern: family` class whose per-leg sub-surface marks (or the
+        # surface ledger) show a routing-map leg that was NEVER tested is a `leg-uncovered` gap under ANY
+        # top-level status — so an `attempted` family can no longer silently absorb an untested in-scope leg
+        # (the near-missed-P1 root cause: `auth` looked covered while its `jwt` leg was never touched). The
+        # `blocked` top-level keeps its dedicated blocked-unverified gap above (which already names owed
+        # siblings), so it is skipped here to avoid double-reporting. A family with NO per-leg detail is the
+        # uniform case (handled by the existing branches). The surface-ledger `tested_subsurfaces` cross-check
+        # CLEARS a leg the coverage ledger's per-leg mark may lag on.
+        fam = fam_agents.get(cid, [])
+        if fam and high_prior and st != "blocked" and not _is_whole_surface_block(c):
+            declared = _subsurface_status_map(c, fam)
+            if declared:
+                uncovered = {leg for leg, ls in declared.items()
+                             if ls in ("pending", "blocked") and leg not in tested_legs}
+                uncovered |= {leg for leg in fam if leg not in declared and leg not in tested_legs}
+                if uncovered:
+                    legs = ", ".join(sorted(uncovered))
+                    gaps.append({"category": cid, "type": "leg-uncovered", "severity": "high",
+                                 "detail": (f"family '{cid}' is '{st}' but sub-surface leg(s) {legs} were "
+                                            "never tested — a family-level status can mask an untested in-scope "
+                                            "leg, so this is not yet a trustworthy clear"),
+                                 "suggested_action": ("test the leg(s) and mark each (coverage.py --mark "
+                                            + str(cid) + " --subsurface <agent> --status attempted ...), or "
+                                            "record an honest accept with a named blocker "
+                                            "(recall_audit.py --accept leg-uncovered:" + str(cid)
+                                            + " --blocker <named-blocker> --reason ...)")})
+
     order = {"high": 0, "medium": 1, "low": 2}
     gaps.sort(key=lambda g: (order.get(g["severity"], 9), g["type"], g["category"] or ""))
     from collections import Counter
@@ -239,9 +313,24 @@ def load_and_audit(eng: Path) -> dict:
     led = json.loads(led_p.read_text(encoding="utf-8"))
     mp = json.loads((_repo_root() / "skills" / "_contract" / "routing-map.json").read_text(encoding="utf-8"))
     escalations = {c["id"]: c.get("escalations", []) for c in led.get("categories", []) if c.get("escalations")}
-    res = audit(led.get("categories", []), _load_signals(eng), mp.get("categories", []), escalations)
-    # fold in surface-coverage gaps (fix #5): discovered-but-untested surface elements are concrete misses
+    # SUB-SURFACE cross-check (roadmap L-A): any sub-agent / leg id the surface ledger records as consumed
+    # (consumed_by) counts as TESTED, so a leg exercised there clears its `leg-uncovered` gap even if the
+    # coverage ledger's per-leg mark lags. Best-effort (missing/unreadable ledger -> empty set).
     surf_p = eng / "surface_ledger.json"
+    tested_subsurfaces = set()
+    if surf_p.is_file():
+        try:
+            _surf = json.loads(surf_p.read_text(encoding="utf-8"))
+            for s in _surf.get("surfaces", []) or []:
+                for by in (s.get("consumed_by") or []):
+                    b = str(by).strip()
+                    if b:
+                        tested_subsurfaces.add(b)
+        except Exception:  # noqa: BLE001
+            tested_subsurfaces = set()
+    res = audit(led.get("categories", []), _load_signals(eng), mp.get("categories", []), escalations,
+                tested_subsurfaces=tested_subsurfaces)
+    # fold in surface-coverage gaps (fix #5): discovered-but-untested surface elements are concrete misses
     if surf_p.is_file():
         try:
             import surface as _sf  # scripts/ on sys.path
@@ -457,6 +546,27 @@ def selftest() -> None:
     # (conservative — a block that recon never flagged as a real surface is no false positive).
     led_lp = [{"id": "auth", "status": "blocked", "reason": "x"}]
     assert audit(led_lp, set(), mapc_fam)["summary"]["total"] == 0
+
+    # 7c) leg-uncovered (roadmap L-A): a high-prior family marked `attempted` with an UNTESTED leg is a
+    #     recall gap — a family status can't mask an untested in-scope leg (the near-missed-P1 generalized
+    #     past the blocked case).
+    led_lu = [{"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+               "subsurfaces": [{"agent": "auth-bypass", "status": "attempted"},
+                               {"agent": "jwt", "status": "attempted"},
+                               {"agent": "oauth", "status": "pending"}]}]
+    r = audit(led_lu, {"flow:auth"}, mapc_fam)
+    g = next(x for x in r["gaps"] if x["type"] == "leg-uncovered")
+    assert g["category"] == "auth" and g["severity"] == "high" and "oauth" in g["detail"], r
+    # every leg tested -> cleared.
+    led_ok2 = [{"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+                "subsurfaces": [{"agent": a, "status": "attempted"} for a in ("auth-bypass", "jwt", "oauth")]}]
+    assert not any(x["type"] == "leg-uncovered" for x in audit(led_ok2, {"flow:auth"}, mapc_fam)["gaps"])
+    # the surface-ledger cross-check CLEARS a lagging leg: oauth tested there -> no leg-uncovered gap.
+    assert not any(x["type"] == "leg-uncovered"
+                   for x in audit(led_lu, {"flow:auth"}, mapc_fam, tested_subsurfaces={"oauth"})["gaps"])
+    # a family with NO per-leg detail (uniform) stays silent — backward compatible.
+    led_uni = [{"id": "auth", "status": "attempted", "findings_count": 2, "triggers_matched": ["flow:auth"]}]
+    assert not any(x["type"] == "leg-uncovered" for x in audit(led_uni, {"flow:auth"}, mapc_fam)["gaps"])
 
     # 8) honest-accept writer refusals that fire BEFORE any disk read (un-gameable guard rails):
     ok, msg = write_accept(Path("."), "sqli", blockers=["opaque-session"], ladder_run=[], reason="r")

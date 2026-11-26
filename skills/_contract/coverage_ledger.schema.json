@@ -44,7 +44,32 @@
         "differential": { "type": "string", "description": "DEPTH-SUBSTANCE BAR: alias for depth_note — the observed differential/blocker on the worked surface." },
         "evidence": { "type": "string", "description": "DEPTH-SUBSTANCE BAR: an evidence pointer for the depth work (notebook/log/path), an alternative to depth_note for proving a zero-finding clear." },
         "depth_substantiated": { "type": "boolean", "description": "DEPTH-SUBSTANCE BAR: computed by coverage.py on an 'attempted' flip — true when the clear proved depth (enough attempts + variants + a note/evidence) or carries >=1 finding; false for a shallow clear the completion gate will re-drive." },
+        "subsurfaces": {
+          "type": "array", "items": { "$ref": "#/$defs/subsurface" },
+          "description": "SUB-SURFACE / PER-LEG GRANULARITY (roadmap L-A): for a `pattern: family` category (auth={auth-bypass,jwt,oauth}, sqli={sqli-inband,sqli-blind}, …) the per-sub-agent (per-leg) status. When present it is the AUTHORITY for what was actually tested, and the family's top-level `status` is a ROLL-UP (worst-case / least-covered: pending > blocked > attempted > skipped > n/a) so no family status can mask an untested/under-covered leg. ADDITIVE: a family with no subsurfaces[] behaves exactly as before, and single-agent categories never carry it. Maintained by coverage.py (`--mark <family> --subsurface <agent> --status …`)." },
+        "blocked_subsurfaces": {
+          "type": "array", "items": { "type": "string" },
+          "description": "SUB-SURFACE GRANULARITY (compat): the family sub-agent id(s)/host(s) a `blocked` family is blocked on — named so one leg's block can't silently absorb an untested in-scope sibling. Projected from / mirrored with subsurfaces[] (legs with status 'blocked'). Recorded by coverage.py on a `--status blocked` family mark." },
+        "pending_subsurfaces": {
+          "type": "array", "items": { "type": "string" },
+          "description": "SUB-SURFACE GRANULARITY (compat): the family sub-agent id(s) still OWED (not covered by the block/attempt) — still re-drivable, never silently covered. Projected from / mirrored with subsurfaces[] (legs with status 'pending')." },
         "decided_by": { "enum": ["deterministic-map", "operator", "model"], "description": "deterministic-map for a planned route/skip; operator/model when a human or the agent overrode it (with reason)." }
+      }
+    },
+    "subsurface": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "description": "One leg (sub-agent) of a `pattern: family` category and its own coverage status — the first-class per-sub-surface record. Identify the leg with `agent` (matches routing-map agents[]) or its alias `id`.",
+      "properties": {
+        "agent": { "type": "string", "description": "the family sub-agent / leg id this status is for (matches routing-map agents[], e.g. jwt / oauth / sqli-blind)." },
+        "id": { "type": "string", "description": "alias for `agent` (one of agent/id identifies the leg)." },
+        "status": {
+          "enum": ["attempted", "blocked", "skipped", "pending", "n/a"],
+          "description": "this leg's coverage: attempted=the leg's executor ran; blocked=ran but demonstration blocked; skipped=deliberately not run (needs reason); pending=routed, not yet run (a gap); n/a=leg not in scope."
+        },
+        "reason": { "type": "string", "description": "why this leg's status — expected for blocked/skipped/n-a." },
+        "findings_count": { "type": "integer", "minimum": 0, "description": "accepted findings this leg produced." }
       }
     }
   }

@@ -521,6 +521,236 @@ class FamilyBlockGranularity(unittest.TestCase):
             self.assertTrue(ok, _msgs)
 
 
+class SubSurfaceGranularity(unittest.TestCase):
+    """roadmap L-A: per-sub-surface (per-leg) status is first-class for a `pattern: family` category under
+    ALL statuses, not just `blocked`. The family top-level status is a worst-case / least-covered ROLL-UP
+    over the legs, so no family status can mask an untested leg (an `attempted` family with an untested leg
+    is a GAP). Additive + backward-compatible: a family with no sub-surface detail behaves exactly as today,
+    single-agent categories reject --subsurface."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = c.load_map()
+
+    def _plan_auth_pending(self, eng):
+        led = c.plan(self.m, {"flow:auth"}, {"web"}, eng.name)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def _auth_open_rest_terminal(self, eng):
+        """A full ledger where ONLY `auth` stays open (pending); every other pending category is forced to a
+        terminal skipped-with-reason. This isolates the auth family so a full `validate()` PASS reflects the
+        auth entry alone (the rest are not under test)."""
+        led = c.plan(self.m, {"flow:auth"}, {"web"}, eng.name)
+        for cat in led["categories"]:
+            if cat["id"] != "auth" and cat["status"] == "pending":
+                cat["status"] = "skipped"
+                cat["reason"] = "test: forced terminal (not under test)"
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def _terminal_ledger(self, eng):
+        led = c.plan(self.m, set(), {"web"}, eng.name)
+        for cat in led["categories"]:
+            if cat["status"] == "pending":
+                cat["status"] = "skipped"
+                cat["reason"] = "test: forced terminal (not under test)"
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def _flip(self, eng, cid, **fields):
+        led = json.loads((eng / "coverage_ledger.json").read_text())
+        hit = next(x for x in led["categories"] if x["id"] == cid)
+        hit.update(fields)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    # --- pure helpers --------------------------------------------------------
+    def test_rollup_precedence_least_covered_wins(self):
+        self.assertEqual(c.rollup_status(["attempted", "attempted", "attempted"]), "attempted")
+        self.assertEqual(c.rollup_status(["attempted", "pending"]), "pending")   # un-run leg dominates
+        self.assertEqual(c.rollup_status(["blocked", "attempted"]), "blocked")
+        self.assertEqual(c.rollup_status(["attempted", "skipped", "n/a"]), "attempted")
+        self.assertEqual(c.rollup_status(["skipped", "n/a"]), "skipped")
+        self.assertIsNone(c.rollup_status([]))
+
+    def test_subsurface_map_merges_authority_and_compat(self):
+        fam = ["auth-bypass", "jwt", "oauth"]
+        entry = {"subsurfaces": [{"agent": "jwt", "status": "attempted"}],
+                 "blocked_subsurfaces": ["oauth"], "pending_subsurfaces": ["auth-bypass"]}
+        self.assertEqual(c.subsurface_map(entry, fam),
+                         {"jwt": "attempted", "oauth": "blocked", "auth-bypass": "pending"})
+        self.assertEqual(c.subsurface_map({}, fam), {})   # no detail -> empty (uniform/backward-compatible)
+
+    # --- mark --subsurface ---------------------------------------------------
+    def test_mark_subsurface_derives_rollup_and_leaves_siblings_pending(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_auth_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "auth", "attempted", subsurface="jwt",
+                            note="jwt forge battery ran, all rejected", count=0)
+            self.assertEqual(rc, 0)
+            auth = next(x for x in json.loads((eng / "coverage_ledger.json").read_text())["categories"]
+                        if x["id"] == "auth")
+            # auth-bypass + oauth still un-run -> the family rolls up to PENDING (no mask).
+            self.assertEqual(auth["status"], "pending")
+            byleg = {s["agent"]: s["status"] for s in auth["subsurfaces"]}
+            self.assertEqual(byleg["jwt"], "attempted")
+            self.assertEqual(sorted(auth["pending_subsurfaces"]), ["auth-bypass", "oauth"])
+
+    def test_mark_all_legs_attempted_rolls_up_attempted(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._auth_open_rest_terminal(eng)
+            with redirect_stdout(io.StringIO()):
+                c.mark(eng, "auth", "attempted", subsurface="jwt", count=1, note="jwt forgery confirmed")
+                c.mark(eng, "auth", "attempted", subsurface="auth-bypass", count=0, note="battery ran")
+                rc = c.mark(eng, "auth", "attempted", subsurface="oauth", count=0, note="pkce+state ok")
+            self.assertEqual(rc, 0)
+            auth = next(x for x in json.loads((eng / "coverage_ledger.json").read_text())["categories"]
+                        if x["id"] == "auth")
+            self.assertEqual(auth["status"], "attempted")
+            self.assertFalse(auth.get("pending_subsurfaces"))
+            self.assertEqual(auth["findings_count"], 1)                 # summed from the legs
+            self.assertTrue(auth["depth_substantiated"])               # a leg produced a finding
+            ok, _l, _m = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _m)
+
+    def test_mark_subsurface_blocked_leg_then_covered_siblings_is_clean(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._auth_open_rest_terminal(eng)
+            with redirect_stdout(io.StringIO()):
+                c.mark(eng, "auth", "attempted", subsurface="auth-bypass", count=0, note="battery ran")
+                c.mark(eng, "auth", "attempted", subsurface="jwt", count=1, note="jwt forgery confirmed")
+                c.mark(eng, "auth", "blocked", subsurface="oauth",
+                       note="oauth IdP host auth.example.com is out of scope")
+            auth = next(x for x in json.loads((eng / "coverage_ledger.json").read_text())["categories"]
+                        if x["id"] == "auth")
+            self.assertEqual(auth["status"], "blocked")                # blocked leg, rest attempted -> blocked
+            self.assertEqual(auth["blocked_subsurfaces"], ["oauth"])
+            ok, _l, _m = c.validate(eng, self.m, strict=False)         # enumerated block + all legs accounted
+            self.assertTrue(ok, _m)
+
+    def test_mark_subsurface_on_nonfamily_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            c.plan(self.m, None, {"web"}, eng.name)
+            led = c.plan(self.m, None, {"web"}, eng.name)
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "secrets", "attempted", subsurface="x", count=0)
+            self.assertEqual(rc, 2)
+
+    def test_mark_subsurface_unknown_leg_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_auth_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "auth", "attempted", subsurface="not-a-leg", count=0)
+            self.assertEqual(rc, 2)
+
+    def test_mark_subsurface_blocked_without_reason_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_auth_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "auth", "blocked", subsurface="oauth")   # no --note
+            self.assertEqual(rc, 2)
+
+    # --- validate leg-accounting ---------------------------------------------
+    def test_validate_attempted_family_with_pending_leg_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="attempted", findings_count=1,
+                       subsurfaces=[{"agent": "auth-bypass", "status": "attempted"},
+                                    {"agent": "jwt", "status": "attempted"},
+                                    {"agent": "oauth", "status": "pending"}])
+            ok, _l, msgs = c.validate(eng, self.m, strict=False)
+            self.assertFalse(ok)
+            self.assertTrue(any("'auth' is 'attempted'" in str(x) and "oauth" in str(x) for x in msgs), msgs)
+
+    def test_validate_partial_detail_unaccounted_leg_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="attempted", findings_count=1,
+                       subsurfaces=[{"agent": "jwt", "status": "attempted"}])  # auth-bypass + oauth missing
+            ok, _l, msgs = c.validate(eng, self.m, strict=False)
+            self.assertFalse(ok)
+            self.assertTrue(any("un-accounted leg" in str(x) and "auth" in str(x) for x in msgs), msgs)
+
+    def test_validate_full_attempted_subsurfaces_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="attempted", findings_count=1, depth_substantiated=True,
+                       subsurfaces=[{"agent": a, "status": "attempted"}
+                                    for a in ("auth-bypass", "jwt", "oauth")])
+            ok, _l, _m = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _m)
+
+    def test_single_agent_category_unaffected_by_leg_accounting(self):
+        # a single-agent class (secrets) attempted with findings has no legs and no new requirement.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "secrets", status="attempted", findings_count=2)
+            ok, _l, _m = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _m)
+
+
+class CoverageLedgerSchema(unittest.TestCase):
+    """The coverage_ledger schema must VALIDATE the new subsurfaces[] (+ the #128 compat fields) and REJECT
+    a malformed sub-surface. Validated with the repo's own stdlib JSON-Schema subset checker (stdlib only,
+    no jsonschema dependency), loaded by path read-only (not edited)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        root = pathlib.Path(__file__).resolve().parents[2]
+        cls.schema = json.loads((root / "skills" / "_contract" / "coverage_ledger.schema.json")
+                                .read_text(encoding="utf-8"))
+        vp = root / "skills" / "_contract" / "verify_completion.py"
+        spec = importlib.util.spec_from_file_location("vc_for_schema_test", vp)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        cls.vc = mod   # store the MODULE (a plain function stored as a class attr would bind `self`)
+
+    def _sub_errors(self, obj):
+        return self.vc._stdlib_schema_errors(obj, self.schema["$defs"]["subsurface"], root=self.schema)
+
+    def _entry_errors(self, obj):
+        return self.vc._stdlib_schema_errors(obj, self.schema["$defs"]["entry"], root=self.schema)
+
+    def test_valid_subsurface_passes(self):
+        self.assertEqual(self._sub_errors({"agent": "jwt", "status": "attempted", "findings_count": 1}), [])
+        self.assertEqual(self._sub_errors({"id": "oauth", "status": "blocked", "reason": "IdP OOS"}), [])
+
+    def test_malformed_subsurface_rejected(self):
+        self.assertTrue(self._sub_errors({"agent": "jwt", "status": "bogus"}))        # bad enum
+        self.assertTrue(self._sub_errors({"agent": "jwt"}))                           # missing status
+        self.assertTrue(self._sub_errors({"agent": "jwt", "status": "attempted", "x": 1}))  # extra prop
+        self.assertTrue(self._sub_errors({"agent": "jwt", "status": "attempted",
+                                          "findings_count": -1}))                      # below minimum
+
+    def test_family_entry_with_subsurfaces_validates(self):
+        entry = {"id": "auth", "phase": "web", "status": "blocked",
+                 "reason": "family roll-up over sub-surfaces [attempted: jwt; blocked: oauth]",
+                 "subsurfaces": [{"agent": "auth-bypass", "status": "attempted"},
+                                 {"agent": "jwt", "status": "attempted"},
+                                 {"agent": "oauth", "status": "blocked", "reason": "IdP OOS"}],
+                 "blocked_subsurfaces": ["oauth"], "pending_subsurfaces": []}
+        self.assertEqual(self._entry_errors(entry), [])
+
+    def test_entry_with_malformed_subsurface_rejected(self):
+        entry = {"id": "auth", "phase": "web", "status": "attempted", "reason": "x",
+                 "subsurfaces": [{"agent": "jwt", "status": "attempted", "unexpected": True}]}
+        self.assertTrue(self._entry_errors(entry))
+
+
 class SelfTest(unittest.TestCase):
     def test_coverage_selftest_passes(self):
         self.assertEqual(c.selftest(), 0)
