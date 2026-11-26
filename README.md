@@ -81,6 +81,50 @@ graph TD
 
 ---
 
+## 🔄 How an Engagement Runs
+
+The tiers above are the *structure*; this is the *flow*. Authorization → recon → a gated, model-diverse hunt that feeds its own discoveries back into recon → a cross-model exhaustion check → report. Every finding passes an independent reviewer, every category must prove depth (a merely *blocked* class can't pass as covered), and nothing reaches the report until a **different-model** adversary fails to find a gap.
+
+```mermaid
+flowchart TD
+    classDef gate fill:#1e1b4b,stroke:#8b5cf6,color:#ede9fe;
+    classDef recon fill:#3b0d0d,stroke:#b91c1c,color:#fee2e2;
+    classDef hunt fill:#4a1111,stroke:#ef4444,color:#fee2e2;
+    classDef rev fill:#07314a,stroke:#38bdf8,color:#e0f2fe;
+    classDef out fill:#0b3b1e,stroke:#22c55e,color:#dcfce7;
+
+    A([Authorization + scope gate<br/>RoE · allowlist · approval-gated phases]):::gate --> R1
+
+    subgraph RECON["① Recon — Tier 1 feeders, once, in order"]
+        R1[osint → host → content → js-analysis]:::recon --> R2[coverage + surface ledgers<br/>· strategist hunt plan]:::recon
+    end
+
+    R2 --> SQ{session live?}:::gate
+    SQ -- dead / expiring --> SR[front-load session-independent classes<br/>flag dependent queue · needs fresh-session]:::recon --> EX
+    SQ -- live --> EX
+
+    subgraph HUNT["② Gated hunt — model-diverse waves"]
+        EX[per-class executor<br/>xss · sqli · ssrf · idor · jwt · bola · …]:::hunt --> VF["&lt;class&gt;-verify reviewer<br/>independent · fresh context · adversarial"]:::rev
+        VF -- accepted only --> FN[(findings)]:::hunt
+        VF -- rejected --> DR[dropped]:::rev
+    end
+
+    FN -. new surface .-> R2
+    FN --> RA[recall audit · coverage gate<br/>blocked ≠ covered]:::rev
+    RA --> XA[[cross-model exhaustion adversary<br/>disprove 'complete' · HARD gate]]:::rev
+    XA -- gap found --> EX
+    XA -- no gaps --> CH
+
+    subgraph REPORT["③ Report — accepted findings only"]
+        CH[attack-chain + exploit<br/>approval-gated · benign PoC]:::out --> RP[reporting + consolidated findings]:::out
+        RP --> DC[engagement docs · attestation · retest<br/>+ VRT-validated bug-bounty submission]:::out
+    end
+```
+
+**Legend —** 🟣 gate · 🔴 recon / executor · 🔵 independent reviewer & cross-model adversary · 🟢 output. The two loops are the whole point: **confirmed findings flow back into recon** (re-convergence, until a fixpoint — an SSRF that reveals an internal host reopens that surface), and **a gap the adversary names reopens the hunt** (it's a hard gate, not advice).
+
+---
+
 ## 🔁 The Two-Altitude Review
 
 This is the core idea. **Review happens twice, at two different altitudes — do not conflate them.**
