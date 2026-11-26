@@ -160,6 +160,52 @@ class TestFallbackRecord(unittest.TestCase):
         self.assertEqual(len(_runs(eng)), 2)
 
 
+class TestOrphanFindingsWarn(unittest.TestCase):
+    """QW-3: a stray non-canonical findings file (the bola-bfla/findings_authed_bfla.json incident) is NOT
+    scanned by the pipeline — close.py must WARN loudly so it is never silently missed (it does NOT widen the
+    discovery glob, which would risk double-counting partials/backups)."""
+
+    def _eng(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        return pathlib.Path(self._tmp.name)
+
+    def test_orphan_detected_beside_canonical(self):
+        eng = self._eng()
+        (eng / "bola-bfla").mkdir()
+        (eng / "bola-bfla" / "findings.json").write_text(json.dumps([_finding("RS-2026-001")]), encoding="utf-8")
+        (eng / "bola-bfla" / "findings_authed_bfla.json").write_text(
+            json.dumps([_finding("RS-2026-002")]), encoding="utf-8")
+        orphans = close.orphan_findings_files(eng)
+        self.assertEqual([p.name for p in orphans], ["findings_authed_bfla.json"])
+
+    def test_canonical_only_is_not_an_orphan(self):
+        eng = self._eng()
+        (eng / "idor").mkdir()
+        (eng / "idor" / "findings.json").write_text(json.dumps([_finding()]), encoding="utf-8")
+        (eng / "findings.json").write_text(json.dumps([]), encoding="utf-8")
+        self.assertEqual(close.orphan_findings_files(eng), [])
+
+    def test_warn_emits_and_returns_orphans(self):
+        eng = self._eng()
+        (eng / "x").mkdir()
+        (eng / "x" / "findings.partial.json").write_text(json.dumps([_finding()]), encoding="utf-8")
+        orphans = close.warn_orphan_findings(eng)
+        self.assertEqual(len(orphans), 1)
+
+    def test_cli_warns_on_stderr(self):
+        eng = self._eng()
+        (eng / "bola-bfla").mkdir()
+        (eng / "bola-bfla" / "findings.json").write_text(json.dumps([_finding()]), encoding="utf-8")
+        (eng / "bola-bfla" / "findings_authed_bfla.json").write_text(
+            json.dumps([_finding("RS-2026-050")]), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(SCRIPTS / "close.py"), "--engagement", str(eng)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("findings_authed_bfla.json", r.stderr)
+        self.assertIn("NOT scanned", r.stderr)
+
+
 class TestCloseCli(unittest.TestCase):
     def test_cli_runs_and_records(self):
         with tempfile.TemporaryDirectory() as d:

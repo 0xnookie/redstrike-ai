@@ -33,9 +33,20 @@ rules:
 - `exploitation` and `post-exploitation` phases **pause** for explicit human sign-off before the first active action.
 - Any action that could cause outage or data loss requires per-action approval even inside an approved phase.
 - **Record the grant BEFORE acting.** When the operator approves, write it to `runtime/approvals.json`
-  (`{phase, scope_granted, granted_by, method, granted_at, covers:[finding ids]}`) *before* the first gated
+  (`{phase, scope_granted, granted_by, method, granted_at, covers:[finding ids]}` — the full grant shape,
+  including the reversibility fields below, is `_contract/approvals.schema.json`) *before* the first gated
   action — not after. The reviewers see only engagement files (never the chat), so the audit trail must show
   the approval pre-dates the action; an approved action with no recorded grant reads as an RoE deviation.
+- **Reversibility is part of the grant (write vs. probe).** Before approving — or self-authorizing — any
+  request that changes state, classify it per `_contract/write-vs-probe.md` and record `intent`,
+  `write_class`, and `reversible` on the grant. **A `reversible-self-write` basis is INVALID without a
+  recorded `delete_path`** (the exact route/command/id that reverses the write): no delete route recorded ⇒
+  not approvable as reversible, so it is a production write and needs the full gate (and under
+  `no_destructive`, per-action approval). **Probe for the delete route BEFORE a write-to-prove** — and
+  first confirm the finding with the least-persistent evidence: if a GET readback (or an existing accepted
+  finding / a boolean-or-timing differential / a validation-failing response) already proves it, **no write
+  is needed at all** (the field incident: a GET readback had already confirmed the finding, yet an
+  un-deletable production write was fired "to prove" it — it proved nothing and left permanent state).
 - **Scanners can cross this gate by accident.** Automated scanners (nuclei, metasploit aux, sqlmap `--os-*`, etc.) ship *active-exploit* templates/modules that execute RCE/DoS, not just detect. In any recon/corroboration/CVE-intel phase run them **detection-only** — exclude active-exploit classes (nuclei: `-etags rce,intrusive,dos,oast`; never `-tags <product>`, which pulls that product's exploit templates). Firing an exploit template IS exploitation and needs the approval gate above first, regardless of which skill launches it.
 
 ## 3. Blast-radius controls
@@ -69,6 +80,11 @@ the framing tells it to **pivot** instead. Two corollaries:
   approval-gated phases gate — do not deny a read for being "sensitive."
 - **Approval-pending ≠ dangerous.** An action that needs sign-off is paused for *authorization*, not because
   it is unsafe; summarize and wait — do not treat it as a hard deny or try to route around it.
+- **A probe that cannot persist state is not a write (wrongly-blocked benign probe).** A request that
+  meets a probe basis in `_contract/write-vs-probe.md` — a safe method, a validation-failing body, or an
+  immediately-reversed write via a recorded `delete_path` — is *not* an exploitation/write action: do not
+  gate it as one. The opposite error (a write with no probe basis riding in as a "probe") is a production
+  write and *does* get the gate. Classify, don't guess.
 
 ---
 

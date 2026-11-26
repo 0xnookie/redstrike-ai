@@ -40,6 +40,60 @@ def _triggers_by_cat(map_categories) -> dict:
     return {c["id"]: set(c.get("triggers", []) or []) for c in map_categories}
 
 
+def _family_agents_by_cat(map_categories) -> dict:
+    """{category_id: [sub-agent ids]} for every routing-map category that is a ``pattern: family`` with
+    MORE THAN ONE sub-agent — i.e. a category whose SINGLE `blocked` row can silently absorb an untested
+    in-scope sibling sub-surface (the near-missed-P1 pattern: `auth` blocked on its out-of-scope OAuth leg
+    masked the in-scope `jwt` surface). A single-agent category can't mask a sibling, so it's excluded."""
+    out = {}
+    for c in map_categories or ():
+        if c.get("pattern") == "family":
+            agents = [str(a) for a in (c.get("agents") or []) if str(a).strip()]
+            if len(agents) > 1:
+                out[c.get("id")] = agents
+    return out
+
+
+def _blocked_enumerates_subsurfaces(entry, family_agents) -> bool:
+    """A `blocked` entry ENUMERATES its blocked sub-surface(s) when it carries an explicit
+    ``blocked_subsurfaces`` list (coverage.py records this when it marks a family blocked) OR, for a family,
+    its reason names at least one of the family's sub-agents. Without an enumeration a family-level block
+    covers the WHOLE family — silently absorbing an untested in-scope sibling. For a non-family class
+    (``family_agents`` empty) a substantive, specific reason enumerates the single blocked surface."""
+    named = [str(x).strip() for x in (entry.get("blocked_subsurfaces") or []) if str(x).strip()]
+    if named:
+        return True
+    reason = entry.get("reason") or ""
+    if family_agents:
+        rl = reason.lower()
+        return any(a.lower() in rl for a in family_agents)
+    return len(reason.strip()) >= 12
+
+
+def _detection_ran(entry) -> bool:
+    """True when a `blocked` entry records that NON-DESTRUCTIVE detection actually ran on the class before
+    it was called blocked — not just an asserted block. Reuses the depth/escalation evidence an executor
+    already records (the recall shallow-clear fix + the depth-substance bar): an explicit ``detection_ran``
+    flag, any recorded escalation-ladder step or technique variant, a non-zero ``attempts``, or a
+    differential/blocker note of real length. Pure."""
+    if entry.get("detection_ran") is True:
+        return True
+    for key in ("escalations", "variants_tried"):
+        v = entry.get(key)
+        if isinstance(v, list) and any(str(x).strip() for x in v):
+            return True
+    try:
+        if int(entry.get("attempts") or 0) >= 1:
+            return True
+    except (TypeError, ValueError):
+        pass
+    for key in ("depth_note", "differential"):
+        v = entry.get(key)
+        if isinstance(v, str) and len(v.strip()) >= 12:
+            return True
+    return False
+
+
 # Server-side interpreter-sink signals. A category gated by one of these (the `injection` family:
 # ssti / command-injection / deserialization) can only be ROUTED when a white-box source-audit (or a
 # limited js-analysis pass) emits the signal — black-box recon cannot SEE a template/command/deserializer
@@ -60,6 +114,7 @@ def audit(categories, signals, map_categories, escalations=None) -> dict:
     sig = set(signals or ())
     esc_done = escalations or {}
     trig = _triggers_by_cat(map_categories)
+    fam_agents = _family_agents_by_cat(map_categories)
     gaps = []
 
     for c in categories:
@@ -83,6 +138,45 @@ def audit(categories, signals, map_categories, escalations=None) -> dict:
                              "detail": ("empty on a recon-signalled surface with the escalation ladder "
                                         "unexhausted — a clear here is not yet trustworthy"),
                              "suggested_action": "escalate: " + ", ".join(a["remaining"][:4])})
+
+        elif st == "blocked":
+            # A `blocked` row was a DOUBLE blind spot: coverage.py treats only `pending` as open (so a
+            # `blocked` with any non-empty reason passes the coverage gate), and this engine had NO `blocked`
+            # branch — so a blocked class produced ZERO deterministic recall gaps. One family-level block on
+            # an OUT-OF-SCOPE leg could then silently absorb an untested IN-SCOPE sibling surface (the
+            # near-missed-P1: `auth` blocked on its OAuth leg masked the in-scope `jwt` surface, caught only
+            # by the LLM adversary). Make it deterministic: a recon-signalled `blocked` class is a
+            # `blocked-unverified` gap UNLESS it both ENUMERATES the blocked sub-surface(s) AND records that
+            # NON-DESTRUCTIVE detection actually ran before the block. The honest-close path is the same
+            # accept mechanism as the shallow-clear gap (write_accept + a named _BLOCKER_VOCAB blocker).
+            # A WHOLE-SURFACE environmental block (the diagnostics transport auto-populate writes
+            # `reason="transport: ..."`) means the host/WAF was down — NO sibling was reachable, so the block
+            # can't mask an untested-but-reachable sibling. It's disclosed via diagnostics, so exempt it here.
+            whole_surface = str(c.get("reason") or "").strip().lower().startswith("transport:")
+            if high_prior and not whole_surface:
+                fam = fam_agents.get(cid, [])
+                enumerated = _blocked_enumerates_subsurfaces(c, fam)
+                detected = _detection_ran(c)
+                owed = [str(a) for a in (c.get("pending_subsurfaces") or []) if str(a).strip()]
+                if not (enumerated and detected):
+                    miss = []
+                    if not enumerated:
+                        miss.append("does not enumerate the blocked sub-surface(s)"
+                                    + (f" of family [{', '.join(fam)}]" if fam else ""))
+                    if not detected:
+                        miss.append("records no non-destructive detection run before the block")
+                    gaps.append({"category": cid, "type": "blocked-unverified", "severity": "high",
+                                 "detail": ("recon-signalled class marked 'blocked' but it "
+                                            + ", and ".join(miss)
+                                            + " — a family-level block can mask an untested in-scope sibling "
+                                            "surface, so a block here is not yet a trustworthy clear"
+                                            + (f"; still-owed sibling(s): {', '.join(owed)}" if owed else "")),
+                                 "suggested_action": ("name the blocked sub-surface(s) and run non-destructive "
+                                            "detection on the un-blocked siblings (coverage.py --mark "
+                                            + str(cid) + " --status blocked --blocked-subsurfaces <agent/host> "
+                                            "--note ...), or record an honest accept with a named blocker "
+                                            "(recall_audit.py --accept blocked-unverified:" + str(cid)
+                                            + " --blocker <named-blocker> --reason ...)")})
 
         elif st in ("skipped", "n/a"):
             if trig.get(cid, set()) & sig:
@@ -198,6 +292,8 @@ _BLOCKER_VOCAB = {
     "no-sink-surface",       # black-box: no reachable template/command/deserializer sink to probe
     "destructive-withheld",  # the only remaining escalation is destructive and withheld by the RoE
     "no-mailbox",            # no mailbox/inbox to receive a reset/confirmation and complete the flow
+    "oauth-leg-oos",         # a family's OAuth/delivery sub-surface (e.g. the IdP host) is out of scope
+    "session-expired",       # the session/token the surface needs expired + can't be renewed in-scope
 }
 
 
@@ -343,6 +439,24 @@ def selftest() -> None:
     assert "pending-at-close" in types
     assert all(g["category"] != "xss" for g in r["gaps"]), "a class with findings is not a gap"
     assert r["gaps"][0]["severity"] == "high"
+
+    # 7b) blocked branch (QW1): a recon-signalled `blocked` FAMILY is a blocked-unverified HIGH gap when it
+    #     neither enumerates the blocked legs nor shows detection ran — the near-missed-P1 `auth` mask.
+    mapc_fam = mapc + [{"id": "auth", "triggers": ["flow:auth"], "pattern": "family",
+                        "agents": ["auth-bypass", "jwt", "oauth"]}]
+    led_b = [{"id": "auth", "status": "blocked", "reason": "session expired",
+              "triggers_matched": ["flow:auth"]}]
+    r = audit(led_b, {"flow:auth"}, mapc_fam)
+    assert r["gaps"][0]["type"] == "blocked-unverified" and r["gaps"][0]["severity"] == "high", r
+    # an HONEST block — names the blocked leg (oauth) AND records detection ran on the rest — is NOT a gap.
+    led_ok = [{"id": "auth", "status": "blocked", "triggers_matched": ["flow:auth"],
+               "blocked_subsurfaces": ["oauth"], "attempts": 32,
+               "reason": "oauth leg OOS; jwt + auth-bypass forge-battery ran, all rejected"}]
+    assert audit(led_ok, {"flow:auth"}, mapc_fam)["summary"]["total"] == 0, audit(led_ok, {"flow:auth"}, mapc_fam)
+    # a blocked class with NO recorded trigger and NO matching signal (low-prior) is silent
+    # (conservative — a block that recon never flagged as a real surface is no false positive).
+    led_lp = [{"id": "auth", "status": "blocked", "reason": "x"}]
+    assert audit(led_lp, set(), mapc_fam)["summary"]["total"] == 0
 
     # 8) honest-accept writer refusals that fire BEFORE any disk read (un-gameable guard rails):
     ok, msg = write_accept(Path("."), "sqli", blockers=["opaque-session"], ladder_run=[], reason="r")

@@ -347,6 +347,104 @@ def split_observations(records, vocab, kinds, followup_routes=None):
     return clean, rejections, followups
 
 
+# --- write-time inbox validator (QW-2): reject prose at the moment an executor appends --------------- #
+# The root cause of the inbox.rejected.jsonl pollution (20min retro, incident 3): executors stuffed
+# CLEAN/residual PROSE into the inbox -- free text in `signals` (not the closed vocab) and NOTE-shaped
+# surface kinds (`note`/`behavior`/`path`) -- because the inbox had no write-time schema AND a class-clean
+# note had no legitimate home. `split_observations` already HARD-fails the report on exactly these at the
+# coordination-integrity gate, but only DOWNSTREAM, after the bad line is on disk. `--append` runs that same
+# check at WRITE time: a clean record is appended, a dirty one is REFUSED (nothing written) and the caller
+# is told the closed vocab AND -- for a note/residual -- WHERE the note actually belongs (a coverage mark).
+
+# Surface kinds that are really a NOTE in disguise -- the exact `kind:note`/`kind:behavior`/`kind:path`
+# pollution. These never belong in the inbox; they are redirected to a coverage --depth-note / skip.
+_NOTE_LIKE_KINDS = {"note", "behavior", "path", "residual", "clean", "comment", "observation", "status"}
+_RESIDUAL_WORDS = ("clean", "residual", "not demonstrable", "n/a", "tested", "nothing", "no finding")
+
+
+def build_record(source: str, signals, surfaces) -> dict:
+    """Build one inbox observation record from CLI parts (pure). `surfaces` is a list of (kind, value)."""
+    return {"source": source or "hunt",
+            "signals": [str(s) for s in (signals or [])],
+            "surface": [{"kind": k, "value": v} for (k, v) in (surfaces or [])]}
+
+
+def _prose_signals(signals) -> list:
+    """Signals that are PROSE, not a `token:token` vocab tag -- a space, or no ':' at all. Caught
+    STRUCTURALLY (independent of the vocab) so a prose signal is refused even if the routing map is
+    unreadable and `split_observations` would fail-open and keep it."""
+    bad = []
+    for s in signals or []:
+        s = str(s)
+        if (" " in s) or (":" not in s) or any(w in s.lower() for w in _RESIDUAL_WORDS):
+            bad.append(s)
+    return bad
+
+
+def classify_append(record, vocab, kinds, followup_routes=None) -> dict:
+    """Decide whether ONE record may be appended to the inbox (pure, no I/O). Returns
+    {ok, rejections, prose_signals, note_kinds, has_payload}. ok is True only when the record carries
+    payload and nothing is rejected / prose / note-shaped."""
+    clean, rejections, _followups = split_observations([record], vocab, kinds, followup_routes)
+    prose = _prose_signals(record.get("signals"))
+    note_kinds = sorted({str((it or {}).get("kind")) for it in (record.get("surface") or [])
+                         if str((it or {}).get("kind", "")).lower() in _NOTE_LIKE_KINDS})
+    has_payload = bool(record.get("signals")) or bool(record.get("surface"))
+    ok = has_payload and not rejections and not prose and not note_kinds
+    return {"ok": ok, "rejections": rejections, "prose_signals": prose,
+            "note_kinds": note_kinds, "has_payload": has_payload}
+
+
+def _coverage_redirect(source: str) -> str:
+    """The redirect emitted when a record is really a class-clean / residual NOTE: a note has NO home in the
+    reconvergence inbox -- it belongs on the coverage ledger. Stops the behaviour at the source instead of
+    just blocking it (the `kind:note` pollution root cause)."""
+    cat = source or "<class>"
+    return ("this looks like a class-clean / residual NOTE, which has NO home in the reconvergence inbox "
+            "(the inbox is for new SIGNALS + testable SURFACE only). Record it on the coverage ledger instead:\n"
+            f"  - a class-clean with depth evidence:  python scripts/coverage.py --mark {cat} --status attempted "
+            f"--count 0 --depth-note \"<what the depth work observed>\" --engagement <dir>\n"
+            f"  - a residual / deferred lead:          python scripts/coverage.py --mark {cat} --status skipped "
+            f"--note \"<why deferred / not demonstrable here>\" --engagement <dir>\n"
+            "  Do NOT put prose into `signals` or use a note-shaped surface kind.")
+
+
+def append_observation(eng: Path, source: str, signals, surfaces) -> tuple:
+    """Validate ONE record at WRITE time and, only if all-clean, append it to reconvergence/inbox.jsonl.
+    Returns (rc, lines). rc 0 = appended; rc 2 = refused (nothing written) -- lines then carry the closed
+    vocab / kind enum, the offending token(s), and (for a note/residual) the coverage redirect."""
+    record = build_record(source, signals, surfaces)
+    vocab, kinds = _signal_vocab(), _surface_kinds()
+    res = classify_append(record, vocab, kinds)
+    if res["ok"]:
+        inbox = eng / INBOX
+        inbox.parent.mkdir(parents=True, exist_ok=True)
+        with open(inbox, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+        return 0, [f"[reconverge] appended 1 observation from {record['source']} to {INBOX} "
+                   f"(signals={record['signals']}, surface={[s['value'] for s in record['surface']]})"]
+    lines = ["[reconverge] REFUSED to append — the record is not clean; NOTHING was written."]
+    if not res["has_payload"]:
+        lines.append("  reason: empty record (pass at least one --signal or --surface)")
+    for s in res["prose_signals"]:
+        lines.append(f"  reason: signal {s!r} is PROSE, not a `token:token` vocab tag")
+    for r in res["rejections"]:
+        for reason in r.get("reasons", []):
+            lines.append(f"  reason: {reason}")
+    if res["note_kinds"]:
+        lines.append(f"  reason: note-shaped surface kind(s) {res['note_kinds']} are not testable surface")
+    # always show the closed vocabularies so the caller can self-correct
+    if vocab:
+        lines.append(f"  allowed signal vocab ({len(vocab)}): {', '.join(sorted(vocab))}")
+    if kinds:
+        lines.append(f"  allowed surface kinds: {', '.join(sorted(kinds))}")
+    # redirect a note/residual to its real home (the coverage ledger)
+    if res["prose_signals"] or res["note_kinds"] or any(
+            w in (s or "").lower() for s in (record.get("signals") or []) for w in _RESIDUAL_WORDS):
+        lines.append("  -> " + _coverage_redirect(record["source"]))
+    return 2, lines
+
+
 def load_observations(eng: Path) -> list:
     """Read + VALIDATE the inbox: returns observations with ONLY in-vocab signals and valid-kind surface,
     so an invalid token (a typo signal, an unknown surface kind) is never folded into the ledgers. The read
@@ -513,6 +611,26 @@ def selftest() -> None:
     cb, rb2, _fb = split_observations(only_bad, vocab, kinds, froutes)
     assert cb == [] and rb2 and "totally:made-up" in rb2[0]["rejected_signals"]
 
+    # 9) --append write-time classifier (QW-2): a clean record is appendable; prose signals + note-shaped
+    #    surface kinds are refused (they belong on a coverage mark, not the inbox).
+    clean_rec = build_record("ssrf", ["param:url-fetching"], [("endpoint", "http://10.0.0.5/")])
+    r_ok = classify_append(clean_rec, vocab, kinds, froutes)
+    assert r_ok["ok"] and not r_ok["rejections"] and not r_ok["prose_signals"], r_ok
+    # a PROSE signal is caught structurally even when the vocab can't be read (fail-open must NOT keep it).
+    prose_rec = build_record("websocket", ["websocket class CLEAN []"], [])
+    r_prose = classify_append(prose_rec, set(), set(), froutes)
+    assert not r_prose["ok"] and r_prose["prose_signals"], r_prose
+    # a note-shaped surface kind is refused.
+    note_rec = build_record("auth", [], [("note", "RESIDUAL — not demonstrable here")])
+    r_note = classify_append(note_rec, vocab, kinds, froutes)
+    assert not r_note["ok"] and "note" in r_note["note_kinds"], r_note
+    # an out-of-vocab (non-prose) signal is refused via split_observations.
+    typo_rec = build_record("x", ["param:injectible"], [])
+    r_typo = classify_append(typo_rec, vocab, kinds, froutes)
+    assert not r_typo["ok"] and r_typo["rejections"], r_typo
+    # an empty record has no payload -> not appendable.
+    assert not classify_append(build_record("x", [], []), vocab, kinds, froutes)["ok"]
+
     print("reconverge selftest: OK")
 
 
@@ -521,6 +639,16 @@ def main() -> int:
     ap.add_argument("--plan", action="store_true", help="compute a re-convergence pass from the inbox + ledgers")
     ap.add_argument("--apply", action="store_true", help="plan, then fold the delta back into the ledgers")
     ap.add_argument("--validate", action="store_true", help="exit non-zero if the inbox hasn't re-converged")
+    ap.add_argument("--append", action="store_true",
+                    help="WRITE-TIME inbox validator: build one observation from --source/--signal/--surface, "
+                         "validate it against the signal vocab + surface-kind enum, and append it to "
+                         "reconvergence/inbox.jsonl ONLY if clean (else write nothing, exit non-zero). "
+                         "A prose signal / note-shaped surface is refused + redirected to a coverage mark.")
+    ap.add_argument("--source", help="--append: the emitting skill/class (the record's `source`)")
+    ap.add_argument("--signal", action="append", dest="signals", default=[],
+                    help="--append: a `token:token` signal from the routing vocab (repeatable)")
+    ap.add_argument("--surface", action="append", dest="surfaces", default=[],
+                    help="--append: a testable surface element as kind=value (repeatable), e.g. endpoint=https://api.x/y")
     ap.add_argument("--engagement", help="engagement dir")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--json", action="store_true", dest="as_json")
@@ -530,8 +658,23 @@ def main() -> int:
         selftest()
         return 0
     if not args.engagement:
-        ap.error("choose --plan/--apply/--validate with --engagement, or --selftest")
+        ap.error("choose --plan/--apply/--validate/--append with --engagement, or --selftest")
     eng = Path(args.engagement)
+
+    if args.append:
+        surfaces = []
+        for tok in args.surfaces or []:
+            if "=" not in tok:
+                ap.error(f"--surface must be kind=value, got {tok!r}")
+            k, v = tok.split("=", 1)
+            surfaces.append((k.strip(), v.strip()))
+        rc, lines = append_observation(eng, args.source, args.signals, surfaces)
+        if args.as_json:
+            print(json.dumps({"engagement": str(eng), "appended": rc == 0, "messages": lines}, indent=2))
+        else:
+            for l in lines:
+                print(l)
+        return rc
 
     if args.plan or args.apply:
         ingest_inbox(eng)  # quarantine invalid inbox records (loud) BEFORE routing anything

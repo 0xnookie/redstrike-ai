@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://redstrike/contract/approvals.schema.json",
+  "title": "Approval grant ledger (RoE §2 human-in-the-loop record)",
+  "description": "The AUDIT record of operator approvals for gated (exploitation / post-exploitation / prod-touch / destructive) actions, written to <engagement>/runtime/approvals.json BEFORE the first gated action (see roe-gate.md §2). This is the human grant trail the reviewers read — distinct from the launcher's autonomous-deferral store (approvals.py's {approved, resume_queue} fingerprint list), which may share the same file; the root is left open so both can coexist. Each grant carries the reversibility contract: a write-to-prove is only approvable as a reversible-self-write WITH a recorded delete_path (see write-vs-probe.md).",
+  "type": "object",
+  "required": ["grants"],
+  "properties": {
+    "version": { "type": "string", "description": "Schema version of this ledger." },
+    "engagement": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "grants": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/grant" }
+    }
+  },
+  "$defs": {
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "scope_granted", "granted_by", "granted_at"],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "description": "The gated phase this grant authorizes, e.g. exploitation / post-exploitation."
+        },
+        "scope_granted": {
+          "type": "string",
+          "description": "Exactly what was authorized (target + action), in the operator's words."
+        },
+        "granted_by": {
+          "type": "string",
+          "description": "The authorizing human (name + contact)."
+        },
+        "method": {
+          "type": "string",
+          "description": "How the grant was obtained (chat / email / ticket / signed-RoE ref)."
+        },
+        "granted_at": {
+          "type": "string",
+          "description": "ISO-8601 timestamp — MUST pre-date the first gated action."
+        },
+        "covers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Finding ids this grant covers."
+        },
+        "intent": {
+          "type": "string",
+          "enum": ["probe", "write"],
+          "description": "probe = cannot persist state (see write-vs-probe.md); write = a real production write."
+        },
+        "write_class": {
+          "type": "string",
+          "enum": ["probe", "reversible-self-write", "production-write", "destructive"],
+          "description": "The persistence class of the approved action. 'reversible-self-write' is INVALID without a recorded delete_path."
+        },
+        "reversible": {
+          "type": "boolean",
+          "description": "Whether the approved action's state change is reversible. If true, a delete_path OR cleanup_method MUST be recorded."
+        },
+        "delete_path": {
+          "type": "string",
+          "description": "The EXACT route/command/id that reverses the write (probed + recorded BEFORE the write, executed right after). Required for a reversible-self-write."
+        },
+        "cleanup_method": {
+          "type": "string",
+          "description": "A human-readable cleanup route when delete_path is not a single call (e.g. 'operator deletes the test record via the admin UI')."
+        },
+        "justification": {
+          "type": "string",
+          "description": "Why this action is needed and why a lower-persistence probe (readback / validation-failing body) does NOT already suffice."
+        },
+        "note": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "write_class": { "const": "reversible-self-write" } },
+            "required": ["write_class"]
+          },
+          "then": {
+            "required": ["delete_path"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "reversible": { "const": true } },
+            "required": ["reversible"]
+          },
+          "then": {
+            "anyOf": [
+              { "required": ["delete_path"] },
+              { "required": ["cleanup_method"] }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

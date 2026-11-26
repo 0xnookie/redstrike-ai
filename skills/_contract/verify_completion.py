@@ -967,7 +967,7 @@ def _try_import_recall_audit():
 # (skipped-but-signalled), or a routed class that never ran (pending-at-close / never-run). `untested-surface`
 # is already a hard gate (surface) and `weak-skip-reason`/`no-ledger` are covered elsewhere, so they stay
 # advisory here to avoid double-failing.
-_RECALL_GATED_TYPES = {"shallow-clear", "skipped-but-signalled", "pending-at-close", "never-run"}
+_RECALL_GATED_TYPES = {"shallow-clear", "skipped-but-signalled", "pending-at-close", "never-run", "blocked-unverified"}
 
 
 def _recall_accepts(eng: Path) -> dict:
