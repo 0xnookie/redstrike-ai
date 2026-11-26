@@ -38,7 +38,7 @@ The problem with LLM-driven offensive tooling is two failure modes: it **halluci
 
 - **Methodology-grounded** — PTES engagement lifecycle · OWASP WSTG / Top 10 · MITRE ATT&CK tags.
 - **Evidence-first, measured** — no finding ships without a reproducible artifact; the reviewer rejects anything it can't verify, and a quantified **evidence-sufficiency score** (reliability + chain-depth) is the hard floor on whether a finding may be accepted or must be down-rated.
-- **Coverage you can't rubber-stamp** — a **depth-substance bar** means a category counts as tested only when the mark proves depth, and a **cross-model exhaustion adversary** must fail to find a gap before an engagement is report-ready.
+- **Coverage you can't rubber-stamp** — a **depth-substance bar** means a category counts as tested only when the mark proves depth, a category that is merely **blocked** by the environment can't silently pass as covered (it surfaces as a `blocked-unverified` recall gap, not a tick), and a **cross-model exhaustion adversary** must fail to find a gap before an engagement is report-ready.
 - **Authorization-gated** — scope allowlist, approval gates for exploitation, audit logging, benign-PoC + cleanup rules baked in.
 - **Substrate-agnostic** — runs as native **Claude Code** skills + subagents, on the Claude Agent SDK, or under its own orchestrator.
 
@@ -62,7 +62,7 @@ graph TD
         CTX[&lt;class&gt;-context feeders]:::t2
         VAR[variant / category agents<br/>xss-* · sqli-* · ssrf-* · …]:::t2
     end
-    subgraph T3["Tier 3 — Red Team (roadmap)"]
+    subgraph T3["Tier 3 — Red Team (mission + capability)"]
         MIS[mission: Bug Bounty · CTF Solver · class Hunters]:::t3
         CAP[capability: CVE Intel · Exploit Gen · Attack Chain · Param Opt]:::t3
     end
@@ -114,13 +114,15 @@ Every skill is a self-contained **quad** (findings-producing skills add a 5th fi
 
 Build order and the full spec live in [`skills/_contract/README.md`](skills/_contract/README.md). The checklist semantics are **load-bearing**: `- [ ]` is an instruction to re-run, not a note — the checklist *is* the control loop.
 
+Findings are **written through a single gated emitter** — [`scripts/finding_emit.py`](scripts/finding_emit.py) allocates the `RS-YYYY-NNN` id and runs the *exact* schema validator the completion gate uses at **write time** (`--validate`), so a malformed finding is refused before hand-off instead of churning through gate rounds; the re-convergence inbox is held to the same shift-left standard (`scripts/reconverge.py --append`). The line between a safe probe and a state-changing production write — what may be sent to *prove* a finding — is drawn once in [`skills/_contract/write-vs-probe.md`](skills/_contract/write-vs-probe.md), and every gated (exploitation / destructive) action is recorded against [`approvals.schema.json`](skills/_contract/approvals.schema.json).
+
 ---
 
 ## 🤖 Agents & Skills
 
 **119 skills** — **90 findings-producing executors**, each a full quint with its **own independent reviewer subagent** (90 `*-verify` agents), plus **29 review-only** recon feeders, services and mission agents. Full statuses in [`vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 
-Above the per-class reviewers sit two **cross-cutting review agents** — `adversarial-verify` (cross-model second opinion on accepted High/Critical findings + chains) and `exhaustion-adversary` (cross-model challenge to the completion claim) — plus three deterministic **guard hooks** that catch report-integrity slips before they ship: a dangling-evidence-reference guard (never cite an artifact that doesn't exist), a chain-pressure hook (a feeder-class finding isn't done until chained or ruled out), and a bug-bounty-scoped never-submit guard.
+Above the per-class reviewers sit two **cross-cutting review agents** — `adversarial-verify` (cross-model second opinion on accepted High/Critical findings + chains) and `exhaustion-adversary` (cross-model challenge to the completion claim) — plus three deterministic **guard hooks** that catch report-integrity slips before they ship: a dangling-evidence-reference guard (never cite an artifact that doesn't exist), a chain-pressure hook (a feeder-class finding isn't done until chained or ruled out), and a bug-bounty-scoped never-submit guard. For bug-bounty packaging a **pinned vulnerability-rating taxonomy** ([`skills/bug-bounty/refs/vrt/`](skills/bug-bounty/refs/vrt/)) is the offline source of truth for valid severity categories, so a submission can never ship a fabricated category or an inflated priority — `scripts/validate.py` enforces it.
 
 **Recon** (Tier 1) — `osint` (passive intel + wordlist terms) · `host-discovery` (subdomains / live hosts / ports) · `content-discovery` (crawl + brute-force + **custom wordlists**) · `js-analysis` *(gold standard)* · `source-audit` *(white-box: cross-language dangerous-sink grep → routes candidates to the vuln executors)*
 
@@ -231,6 +233,8 @@ redstrike run  acme-corp-<date> --autonomous --max-turns 200 --max-budget-usd 20
                --allow 'Bash(nmap *)'        # headless recon; un-allowed shell defers for approval
 redstrike approve acme-corp-<date>           # review/approve deferred commands, then run … --resume
 redstrike status acme-corp-<date>            # findings by severity/status + scope
+redstrike session status acme-corp-<date>    # offline JWT-exp liveness of the stored auth session(s)
+redstrike session import acme-corp-<date> '<paste>'   # ingest a browser 'Copy as cURL' auth session
 redstrike verify acme-corp-<date>            # the deterministic completion gate
 redstrike console                            # open the web console over ALL engagements (idempotent)
 ```
@@ -337,20 +341,6 @@ scripts/install.sh         # core set; or --all for every domain; or name catego
 
 The roster (168 tools across 19 categories) is defined once in
 [`scripts/tools.manifest`](scripts/tools.manifest) and shared by `doctor.sh` + `install.sh`.
-
----
-
-## 🗺️ Roadmap
-
-- ✅ **Web complete** — 9 families (XSS, SSRF, SQLi, access-control, injection, XXE, file/path, auth, API) + the atomic agents (incl. `forbidden-bypass`, `parameter-pollution`, `crypto-attacks`, `tls-attacks`, `supply-chain`) + the `reporting` aggregator
-- ✅ **Framework-specific exploitation** — `framework-base` + `wordpress` / `nextjs` (clone per stack), specializing `cve-intelligence`
-- ✅ **Beyond web** — AI/LLM (OWASP LLM Top 10), Web3 / smart contract (Foundry-fork-proven), Active Directory (assumed-breach), cloud & containers (`cloud` / `container-escape` / `k8s-attacks` / `sccm-exploitation`), mobile / IoT / wireless, and binary (`fuzzing` / `exploit-dev`)
-- ✅ **Post-exploitation** — `linux-privesc` · `windows-privesc` · `credential-access` · `persistence`
-- ✅ **Tier-3 red team** — Bug Bounty · CTF Solver · CVE Intelligence · Exploit Generator · Attack Chain Discovery · Parameter Optimization + the `<class>-hunter` pattern (`hunter-base` + `xss-hunter`)
-- ✅ **Recon + tooling** — `osint` / `host-discovery` / `content-discovery` (custom wordlists) / `js-analysis` / `source-audit`; `scripts/doctor.sh` + `scripts/install.sh` (168 tools / 19 categories) — see [`INSTALL.md`](INSTALL.md)
-- ✅ **Web console** + the **`redstrike` CLI** (Claude Code as the engine)
-- ✅ **Trust & engine hardening** — measured **evidence-sufficiency scoring** + a **depth-substance coverage bar**, a **cross-model exhaustion adversary** gating report-readiness, report-integrity **guard hooks**, a concurrent multi-model **worker-pool** (`--shard-models`), and an offline **bug-bounty program-intel** feeder (scope / policy / duplicate-check)
-- ✅ **Agentic / MCP exploitation** — OWASP Agentic Top 10 (ASI): `agent-goal-hijack` · `agent-tool-abuse` · `agent-memory-poisoning` · `a2a-exploitation` (fed by `agent-recon`)
 
 ---
 
