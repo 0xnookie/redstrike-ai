@@ -47,6 +47,18 @@ rules:
   finding / a boolean-or-timing differential / a validation-failing response) already proves it, **no write
   is needed at all** (the field incident: a GET readback had already confirmed the finding, yet an
   un-deletable production write was fired "to prove" it — it proved nothing and left permanent state).
+- **The write-gate is MECHANICAL, not just a rule.** `scripts/rs_http.py` — the single chokepoint all
+  bespoke engagement HTTP funnels through — enforces this at the wire: a mutating method
+  (POST/PUT/PATCH/DELETE) is refused (hard stop, like the scope refusal) unless a grant in
+  `runtime/approvals.json` COVERS the exact target (host + endpoint + method) and is reversibility-valid
+  (a `reversible`/`reversible-self-write` grant with **no recorded `delete_path`** is refused — it is a
+  production write). A genuinely-benign probe declares `probe=True` + a `probe_basis`
+  (safe-method / validation-failing-body / reversed-via-delete_path) and is allowed + logged, since a
+  probe cannot persist state. Reads (GET/HEAD/OPTIONS) are never gated. The autonomous scope gate
+  (`hooks/scope_gate.py`) mirrors the same refusal for a mutating `curl`/`wget`/`http` command. Set
+  `RS_WRITE_GATE=0` only to disable the gate if it misfires. This makes the two field incidents —
+  a grant stretched to an endpoint it never named, and a benign no-artifact probe wrongly blocked —
+  mechanically impossible rather than merely discouraged.
 - **Scanners can cross this gate by accident.** Automated scanners (nuclei, metasploit aux, sqlmap `--os-*`, etc.) ship *active-exploit* templates/modules that execute RCE/DoS, not just detect. In any recon/corroboration/CVE-intel phase run them **detection-only** — exclude active-exploit classes (nuclei: `-etags rce,intrusive,dos,oast`; never `-tags <product>`, which pulls that product's exploit templates). Firing an exploit template IS exploitation and needs the approval gate above first, regardless of which skill launches it.
 
 ## 3. Blast-radius controls

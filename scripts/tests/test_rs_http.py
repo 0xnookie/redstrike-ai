@@ -317,6 +317,154 @@ class TestRedaction(unittest.TestCase):
         self.assertIn("q=1", rs_http.redact_url("https://app.example.com/c?api_key=SECR3T&q=1"))
 
 
+class TestWriteGate(unittest.TestCase):
+    """The mechanical write-gate (RoE §2 / write-vs-probe.md): a MUTATING method needs a covering
+    approval grant in runtime/approvals.json, OR a declared probe that cannot persist state. Reads are
+    never gated; with no engagement context the gate is not applied; RS_WRITE_GATE=0 disables it."""
+
+    URL = "https://app.example.com/api/comments"
+
+    def _ctx_eng(self, grants=None):
+        """A tempdir engagement WITH a runtime/ dir (so write-gate context is 'present'), optionally
+        seeding runtime/approvals.json with a grants ledger."""
+        tmp, eng = _eng()
+        self.addCleanup(tmp.cleanup)
+        (eng / "runtime").mkdir()
+        if grants is not None:
+            (eng / "runtime" / rs_http.APPROVALS_NAME).write_text(
+                json.dumps({"grants": grants}), encoding="utf-8")
+        return eng
+
+    def test_mutating_no_approval_refused(self):
+        eng = self._ctx_eng(grants=[])          # context present, empty ledger
+        op = _FakeOpener()
+        with self.assertRaises(rs_http.WriteGateError):
+            rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=op)
+        self.assertEqual(op.calls, [], "a refused mutating request must not reach the opener")
+
+    def test_mutating_no_approvals_file_refused(self):
+        # context present (runtime/ exists) but NO approvals.json at all → still refused (fail-closed
+        # inside an engagement: a write with no recorded grant is refused).
+        eng = self._ctx_eng(grants=None)
+        with self.assertRaises(rs_http.WriteGateError):
+            rs_http.request("DELETE", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+
+    def test_covering_grant_allows(self):
+        eng = self._ctx_eng(grants=[{
+            "scope_granted": "POST a benign marker to app.example.com/api/comments",
+            "granted_by": "Op <op@x>", "granted_at": "2026-01-01T00:00:00Z",
+            "write_class": "production-write"}])
+        op = _FakeOpener(_FakeResp(status=201, body=b"created"))
+        r = rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=op)
+        self.assertEqual(r.status, 201)
+        self.assertEqual(len(op.calls), 1)
+        rec = json.loads((eng / "runtime" / rs_http.LOG_NAME).read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(rec["write_gate"], "approved")
+
+    def test_grant_for_other_endpoint_does_not_cover(self):
+        # incident #1: a grant must not be stretched to an endpoint it never names.
+        eng = self._ctx_eng(grants=[{
+            "scope_granted": "POST to app.example.com/api/profile",
+            "granted_by": "Op", "granted_at": "2026-01-01T00:00:00Z",
+            "write_class": "production-write"}])
+        with self.assertRaises(rs_http.WriteGateError):
+            rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+
+    def test_parent_grant_covers_subresource(self):
+        # a grant for the collection endpoint covers a dynamic sub-resource; a sibling tree does not.
+        eng = self._ctx_eng(grants=[{
+            "scope_granted": "DELETE a test record under app.example.com/api/comments",
+            "granted_by": "Op", "granted_at": "2026-01-01T00:00:00Z", "write_class": "production-write"}])
+        r = rs_http.request("DELETE", "https://app.example.com/api/comments/42",
+                            engagement=eng, scope=SCOPE, opener=_FakeOpener())
+        self.assertEqual(r.status, 200)
+        with self.assertRaises(rs_http.WriteGateError):
+            rs_http.request("DELETE", "https://app.example.com/api/profiles/42",
+                            engagement=eng, scope=SCOPE, opener=_FakeOpener())
+
+    def test_reversible_grant_without_delete_path_refused(self):
+        eng = self._ctx_eng(grants=[{
+            "scope_granted": "POST to app.example.com/api/comments",
+            "granted_by": "Op", "granted_at": "2026-01-01T00:00:00Z",
+            "write_class": "reversible-self-write"}])     # no delete_path
+        with self.assertRaises(rs_http.WriteGateError):
+            rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+
+    def test_reversible_grant_with_delete_path_allows(self):
+        eng = self._ctx_eng(grants=[{
+            "scope_granted": "POST to app.example.com/api/comments",
+            "granted_by": "Op", "granted_at": "2026-01-01T00:00:00Z",
+            "write_class": "reversible-self-write",
+            "delete_path": "DELETE /api/comments/{id}"}])
+        r = rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+        self.assertEqual(r.status, 200)
+
+    def test_probe_with_basis_allowed_and_logged(self):
+        eng = self._ctx_eng(grants=[])
+        op = _FakeOpener()
+        r = rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=op,
+                            probe=True, probe_basis="validation-failing-body")
+        self.assertEqual(r.status, 200)
+        self.assertEqual(len(op.calls), 1, "a declared probe reaches the wire")
+        rec = json.loads((eng / "runtime" / rs_http.LOG_NAME).read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(rec["write_gate"], "probe")
+        self.assertTrue(rec["probe"])
+        self.assertEqual(rec["probe_basis"], "validation-failing-body")
+
+    def test_probe_without_valid_basis_refused(self):
+        eng = self._ctx_eng(grants=[])
+        with self.assertRaises(rs_http.WriteGateError):
+            rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener(),
+                            probe=True, probe_basis="not-a-real-basis")
+
+    def test_get_never_gated_in_engagement_context(self):
+        eng = self._ctx_eng(grants=[])          # context present, no grants — a GET still passes
+        r = rs_http.request("GET", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+        self.assertEqual(r.status, 200)
+
+    def test_no_context_mutating_not_gated(self):
+        # bare tempdir, NO runtime/ dir → no engagement/approvals context → mutating not gated
+        # (never break the read-heavy existing call sites / unit tests that carry no grant ledger).
+        tmp, eng = _eng()
+        self.addCleanup(tmp.cleanup)
+        r = rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+        self.assertEqual(r.status, 200)
+
+    def test_env_switch_disables_gate(self):
+        import os
+        eng = self._ctx_eng(grants=[])
+        os.environ[rs_http.WRITE_GATE_ENV] = "0"
+        try:
+            r = rs_http.request("POST", self.URL, engagement=eng, scope=SCOPE, opener=_FakeOpener())
+            self.assertEqual(r.status, 200)
+        finally:
+            os.environ.pop(rs_http.WRITE_GATE_ENV, None)
+
+    def _seed_scope(self, eng):
+        (eng / "runtime" / "scope.json").write_text(json.dumps(SCOPE), encoding="utf-8")
+
+    def test_cli_mutating_refused_exit_2(self):
+        # end-to-end via the CLI: a POST with no covering grant exits 2 (refusal), opener untouched.
+        eng = self._ctx_eng(grants=[])
+        self._seed_scope(eng)
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS / "rs_http.py"), "--engagement", str(eng),
+             "POST", self.URL, "--data", "x=1"],
+            capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no covering approval", r.stderr)
+
+    def test_cli_probe_requires_basis(self):
+        eng = self._ctx_eng(grants=[])
+        self._seed_scope(eng)
+        r = subprocess.run(
+            [sys.executable, str(SCRIPTS / "rs_http.py"), "--engagement", str(eng),
+             "POST", self.URL, "--probe"],
+            capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("--probe-basis", r.stderr)
+
+
 class TestScopeLoading(unittest.TestCase):
     """load_scope reads the engagement's scope.yaml (stdlib mini-reader) and runtime/scope.json."""
 

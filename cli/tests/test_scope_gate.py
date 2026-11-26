@@ -313,6 +313,110 @@ class TestEmitDeferMessage(unittest.TestCase):
         self.assertNotIn("stop", out)  # no "stop" wording at all
 
 
+class TestWriteGate(unittest.TestCase):
+    """The autonomous/headless mirror of rs_http's write-gate (RoE §2): in DEFER mode a mutating HTTP
+    command (curl/wget/httpie POST/PUT/PATCH/DELETE) to an in-scope host needs a covering approval
+    grant, else DENY — even under a broad `*` pre-allow. rs_http.py commands self-enforce (not gated
+    here). GET is never gated; interactive (non-defer) is untouched; RS_WRITE_GATE=0 disables it."""
+
+    POST_URL = "https://app.acme.com/api/comments"
+    COVER = [{"scope_granted": "POST a benign marker to app.acme.com/api/comments",
+              "granted_by": "Op", "granted_at": "2026-01-01T00:00:00Z",
+              "write_class": "production-write"}]
+
+    def _d(self, cmd, **kw):
+        kw.setdefault("defer", True)
+        kw.setdefault("bash_allow", ["*"])    # broad allow — the write-gate must still bite
+        return sg.evaluate("Bash", {"command": cmd}, SCOPE, PROT, CWD, **kw)
+
+    def test_detect_mutating_http(self):
+        self.assertEqual(sg.detect_mutating_http("curl -X POST https://app.acme.com/api/comments -d x=1"),
+                         ("POST", "app.acme.com", "/api/comments"))
+        self.assertEqual(sg.detect_mutating_http("curl --request=DELETE https://api.acme.com/o/5"),
+                         ("DELETE", "api.acme.com", "/o/5"))
+        self.assertEqual(sg.detect_mutating_http("http PUT https://app.acme.com/x")[0], "PUT")
+        self.assertIsNone(sg.detect_mutating_http("curl https://app.acme.com/x"))         # GET
+        self.assertIsNone(sg.detect_mutating_http("curl -X GET https://app.acme.com/x"))  # safe method
+        self.assertIsNone(sg.detect_mutating_http(
+            "python scripts/rs_http.py --engagement e POST https://app.acme.com/x"))       # rs_http skipped
+
+    def test_mutating_no_grant_denied_even_under_blanket_allow(self):
+        out = self._d(f"curl -X POST {self.POST_URL} -d x=1")
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("no covering approval", out["reason"])
+
+    def test_mutating_with_covering_grant_passes(self):
+        self.assertEqual(self._d(f"curl -X POST {self.POST_URL} -d x=1", grants=self.COVER)["decision"],
+                         "pass")
+
+    def test_grant_for_other_endpoint_does_not_cover(self):
+        other = [{"scope_granted": "POST to app.acme.com/api/profile", "granted_by": "Op",
+                  "granted_at": "2026-01-01T00:00:00Z", "write_class": "production-write"}]
+        self.assertEqual(self._d(f"curl -X POST {self.POST_URL}", grants=other)["decision"], "deny")
+
+    def test_parent_grant_covers_subresource(self):
+        cover = [{"scope_granted": "DELETE a test record under app.acme.com/api/comments",
+                  "granted_by": "Op", "granted_at": "2026-01-01T00:00:00Z",
+                  "write_class": "production-write"}]
+        self.assertEqual(
+            self._d("curl -X DELETE https://app.acme.com/api/comments/42", grants=cover)["decision"], "pass")
+        self.assertEqual(
+            self._d("curl -X DELETE https://app.acme.com/api/profiles/42", grants=cover)["decision"], "deny")
+
+    def test_reversible_grant_without_delete_path_denied(self):
+        norev = [{"scope_granted": "POST to app.acme.com/api/comments", "granted_by": "Op",
+                  "granted_at": "2026-01-01T00:00:00Z", "write_class": "reversible-self-write"}]
+        out = self._d(f"curl -X POST {self.POST_URL}", grants=norev)
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("delete_path", out["reason"])
+
+    def test_reversible_grant_with_delete_path_passes(self):
+        rev = [{"scope_granted": "POST to app.acme.com/api/comments", "granted_by": "Op",
+                "granted_at": "2026-01-01T00:00:00Z", "write_class": "reversible-self-write",
+                "delete_path": "DELETE /api/comments/{id}"}]
+        self.assertEqual(self._d(f"curl -X POST {self.POST_URL}", grants=rev)["decision"], "pass")
+
+    def test_rs_http_command_not_gated_here(self):
+        # rs_http.py self-enforces; the hook must not double-gate it (passes under the broad allow).
+        self.assertEqual(
+            self._d(f"python scripts/rs_http.py --engagement e POST {self.POST_URL}")["decision"], "pass")
+
+    def test_get_curl_never_gated(self):
+        self.assertEqual(self._d(f"curl {self.POST_URL}")["decision"], "pass")
+        self.assertEqual(self._d(f"curl -X GET {self.POST_URL}")["decision"], "pass")
+
+    def test_interactive_path_not_gated(self):
+        # non-defer (interactive) → the human is in the loop via the native prompt; no write-gate deny
+        self.assertEqual(
+            sg.evaluate("Bash", {"command": f"curl -X POST {self.POST_URL}"}, SCOPE, PROT, CWD)["decision"],
+            "pass")
+
+    def test_out_of_scope_mutation_denied_by_scope_first(self):
+        out = self._d("curl -X POST https://admin.acme.com/api/x")
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("OUT-of-scope", out["reason"])
+
+    def test_exact_command_approval_bypasses_write_gate(self):
+        cmd = f"curl -X POST {self.POST_URL}"
+        fp = sg.fingerprint("Bash", {"command": cmd})
+        self.assertEqual(self._d(cmd, approvals=frozenset([fp]))["decision"], "pass")
+
+    def test_env_switch_disables_write_gate(self):
+        import os
+        os.environ[sg._WRITE_GATE_ENV] = "0"
+        try:
+            self.assertEqual(self._d(f"curl -X POST {self.POST_URL}")["decision"], "pass")
+        finally:
+            os.environ.pop(sg._WRITE_GATE_ENV, None)
+
+    def test_load_grants(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "approvals.json"
+            p.write_text('{"approved": ["abc"], "grants": [{"scope_granted": "x"}]}', encoding="utf-8")
+            self.assertEqual(sg._load_grants(str(p)), [{"scope_granted": "x"}])
+            self.assertEqual(sg._load_grants(""), [])
+
+
 class TestPortScopedDomain(unittest.TestCase):
     """A scope authored as "host:port" must still match the (always port-less) target host —
     otherwise the whole host is silently out of scope and every active command is denied."""
