@@ -190,6 +190,7 @@
   "categories": [
     {
       "id": "xss",
+      "session_dependence": "mixed",
       "name": "Cross-site scripting",
       "owasp": "A03",
       "phase": "web",
@@ -211,6 +212,7 @@
     },
     {
       "id": "sqli",
+      "session_dependence": "mixed",
       "name": "SQL injection",
       "owasp": "A03",
       "phase": "web",
@@ -229,6 +231,7 @@
     },
     {
       "id": "injection",
+      "session_dependence": "mixed",
       "name": "Command / code / template injection",
       "owasp": "A03",
       "phase": "web",
@@ -249,6 +252,7 @@
     },
     {
       "id": "ssrf",
+      "session_dependence": "mixed",
       "name": "Server-side request forgery",
       "owasp": "A10",
       "phase": "web",
@@ -267,6 +271,7 @@
     },
     {
       "id": "authz",
+      "session_dependence": "dependent",
       "name": "Broken access control / IDOR",
       "owasp": "A01",
       "phase": "web",
@@ -285,6 +290,7 @@
     },
     {
       "id": "xxe",
+      "session_dependence": "mixed",
       "name": "XML external entity",
       "owasp": "A05",
       "phase": "web",
@@ -302,6 +308,7 @@
     },
     {
       "id": "file",
+      "session_dependence": "dependent",
       "name": "File / path (traversal, LFI, upload-RCE)",
       "owasp": "A01/A05",
       "phase": "web",
@@ -320,6 +327,7 @@
     },
     {
       "id": "auth",
+      "session_dependence": "independent",
       "name": "Authentication & session",
       "owasp": "A07",
       "phase": "web",
@@ -338,6 +346,7 @@
     },
     {
       "id": "api",
+      "session_dependence": "dependent",
       "name": "API object/function-level authz",
       "owasp": "API",
       "phase": "web",
@@ -357,6 +366,7 @@
     },
     {
       "id": "open-redirect",
+      "session_dependence": "independent",
       "name": "Open redirect",
       "owasp": "-",
       "phase": "web",
@@ -373,6 +383,7 @@
     },
     {
       "id": "csrf",
+      "session_dependence": "mixed",
       "name": "Cross-site request forgery",
       "owasp": "-",
       "phase": "web",
@@ -389,6 +400,7 @@
     },
     {
       "id": "cors",
+      "session_dependence": "independent",
       "name": "CORS misconfiguration",
       "owasp": "A05",
       "phase": "web",
@@ -404,6 +416,7 @@
     },
     {
       "id": "clickjacking",
+      "session_dependence": "independent",
       "name": "Clickjacking",
       "owasp": "-",
       "phase": "web",
@@ -419,6 +432,7 @@
     },
     {
       "id": "host-header",
+      "session_dependence": "independent",
       "name": "Host-header injection",
       "owasp": "-",
       "phase": "web",
@@ -436,6 +450,7 @@
     },
     {
       "id": "cache-poisoning",
+      "session_dependence": "independent",
       "name": "Web cache poisoning/deception",
       "owasp": "-",
       "phase": "web",
@@ -452,6 +467,7 @@
     },
     {
       "id": "request-smuggling",
+      "session_dependence": "independent",
       "name": "HTTP request smuggling",
       "owasp": "-",
       "phase": "web",
@@ -470,6 +486,7 @@
     },
     {
       "id": "subdomain-takeover",
+      "session_dependence": "independent",
       "name": "Subdomain takeover",
       "owasp": "-",
       "phase": "web",
@@ -486,6 +503,7 @@
     },
     {
       "id": "security-headers",
+      "session_dependence": "independent",
       "name": "Security misconfiguration / headers",
       "owasp": "A05",
       "phase": "web",
@@ -501,6 +519,7 @@
     },
     {
       "id": "secrets",
+      "session_dependence": "independent",
       "name": "Secrets / sensitive data",
       "owasp": "A02",
       "phase": "web",
@@ -516,6 +535,7 @@
     },
     {
       "id": "exposed-surface",
+      "session_dependence": "independent",
       "name": "Exposed surface / sensitive files",
       "owasp": "A05/A01",
       "phase": "web",
@@ -531,6 +551,7 @@
     },
     {
       "id": "forbidden-bypass",
+      "session_dependence": "independent",
       "name": "Forbidden / 403 access-restriction bypass",
       "owasp": "A01/A05",
       "phase": "web",
@@ -546,6 +567,7 @@
     },
     {
       "id": "business-logic",
+      "session_dependence": "dependent",
       "name": "Business logic",
       "owasp": "-",
       "phase": "web",
@@ -564,6 +586,7 @@
     },
     {
       "id": "nosql-injection",
+      "session_dependence": "mixed",
       "name": "NoSQL injection",
       "owasp": "A03",
       "phase": "web",
@@ -584,6 +607,7 @@
     },
     {
       "id": "ldap-injection",
+      "session_dependence": "mixed",
       "name": "LDAP injection",
       "owasp": "A03",
       "phase": "web",
@@ -603,6 +627,7 @@
     },
     {
       "id": "prototype-pollution",
+      "session_dependence": "mixed",
       "name": "Prototype pollution",
       "owasp": "A03/A08",
       "phase": "web",
@@ -621,6 +646,7 @@
     },
     {
       "id": "race-condition",
+      "session_dependence": "dependent",
       "name": "Race condition",
       "owasp": "-",
       "phase": "web",
@@ -638,6 +664,7 @@
     },
     {
       "id": "email-injection",
+      "session_dependence": "mixed",
       "name": "Email / SMTP header injection",
       "owasp": "A03",
       "phase": "web",
@@ -657,6 +684,7 @@
     },
     {
       "id": "crlf-injection",
+      "session_dependence": "independent",
       "name": "CRLF injection (HTTP response splitting / header injection)",
       "owasp": "A03",
       "phase": "web",
@@ -675,6 +703,7 @@
     },
     {
       "id": "websocket",
+      "session_dependence": "mixed",
       "name": "WebSocket security (CSWSH / message-layer / socket authz)",
       "owasp": "-",
       "phase": "web",
@@ -692,6 +721,7 @@
     },
     {
       "id": "parameter-pollution",
+      "session_dependence": "mixed",
       "name": "HTTP parameter pollution",
       "owasp": "A03/A05",
       "phase": "web",
@@ -709,6 +739,7 @@
     },
     {
       "id": "crypto-attacks",
+      "session_dependence": "mixed",
       "name": "Cryptographic attacks (non-JWT)",
       "owasp": "A02",
       "phase": "web",
@@ -726,6 +757,7 @@
     },
     {
       "id": "tls-attacks",
+      "session_dependence": "independent",
       "name": "TLS / cipher attacks",
       "owasp": "A02",
       "phase": "web",
@@ -743,6 +775,7 @@
     },
     {
       "id": "supply-chain",
+      "session_dependence": "independent",
       "name": "Software supply chain",
       "owasp": "A06",
       "phase": "web",
@@ -762,6 +795,7 @@
     },
     {
       "id": "code-audit",
+      "session_dependence": "independent",
       "name": "White-box code audit",
       "owasp": "-",
       "phase": "web",
@@ -779,6 +813,7 @@
     },
     {
       "id": "cve-intelligence",
+      "session_dependence": "independent",
       "name": "Component -> CVE mapping",
       "owasp": "A06",
       "phase": "web",
@@ -794,6 +829,7 @@
     },
     {
       "id": "framework-wordpress",
+      "session_dependence": "independent",
       "name": "Framework: WordPress",
       "owasp": "A06",
       "phase": "web",
@@ -811,6 +847,7 @@
     },
     {
       "id": "framework-nextjs",
+      "session_dependence": "independent",
       "name": "Framework: Next.js",
       "owasp": "A06",
       "phase": "web",
@@ -828,6 +865,7 @@
     },
     {
       "id": "framework-shopware",
+      "session_dependence": "independent",
       "name": "Framework: Shopware",
       "owasp": "A06",
       "phase": "web",
@@ -1229,6 +1267,7 @@
     },
     {
       "id": "attack-chain-discovery",
+      "session_dependence": "independent",
       "name": "Attack-chain discovery",
       "owasp": "-",
       "phase": "capability",
@@ -1246,6 +1285,7 @@
     },
     {
       "id": "exploit-generator",
+      "session_dependence": "mixed",
       "name": "Exploit generation (benign PoC)",
       "owasp": "-",
       "phase": "capability",
@@ -1264,6 +1304,7 @@
     },
     {
       "id": "browser-exploit",
+      "session_dependence": "dependent",
       "name": "Browser-driven stateful exploitation",
       "owasp": "-",
       "phase": "capability",

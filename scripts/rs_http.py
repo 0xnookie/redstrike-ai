@@ -89,9 +89,32 @@ _SECRET_PARAM = re.compile(
 
 _IGNORABLE_TLDS = (".localhost", ".test", ".example", ".invalid")
 
+# --------------------------------------------------------------------------- write-gate (RoE §2)
+# A mutating request needs a covering approval grant, OR a declared probe that cannot persist state.
+# This is the mechanical twin of roe-gate.md §2 + write-vs-probe.md: rs_http is the single HTTP
+# chokepoint, so it is the place to ENFORCE write-discipline, not just scope + rate. Two real field
+# incidents motivate it: (1) a non-reversible production comment created under a "reversible self-write"
+# grant that did NOT actually cover the endpoint; (2) a genuinely-benign no-artifact probe blocked
+# because nothing distinguished probe from write.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})      # reads — NEVER gated
+MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})   # the gated verbs
+# A declared probe cannot persist state (write-vs-probe.md); these are its allowed bases. Both the
+# task's `reversed-via-delete_path` spelling and the contract's `reversible-self-write` are accepted.
+PROBE_BASES = frozenset({"safe-method", "validation-failing-body",
+                         "reversed-via-delete_path", "reversible-self-write"})
+APPROVALS_NAME = "approvals.json"                 # the RoE grant ledger lives here (shares the file
+                                                  # with the launcher's {approved, resume_queue})
+WRITE_GATE_ENV = "RS_WRITE_GATE"                  # set to 0/off/false/no to DISABLE the write-gate
+_HTTP_METHOD_WORDS = ("get", "head", "post", "put", "patch", "delete", "options", "trace", "connect")
+
 
 class ScopeError(RuntimeError):
     """Raised when a request target is out-of-scope / not in scope — the hard stop."""
+
+
+class WriteGateError(RuntimeError):
+    """Raised when a MUTATING request has no covering approval grant (and is not a declared probe) —
+    the write-discipline hard stop, the same altitude as ScopeError (RoE §2 / write-vs-probe.md)."""
 
 
 # --------------------------------------------------------------------------- scope matching
@@ -345,6 +368,146 @@ def _mini_yaml(text: str) -> dict:
     return data
 
 
+# --------------------------------------------------------------------------- write-gate
+def write_gate_enabled() -> bool:
+    """The write-gate is ON by default; RS_WRITE_GATE=0/off/false/no/disabled turns it OFF (the
+    operator kill-switch for a misfire — the gate is the component MOST able to over-block)."""
+    v = os.environ.get(WRITE_GATE_ENV)
+    if v is None:
+        return True
+    return v.strip().lower() not in ("0", "off", "false", "no", "disable", "disabled")
+
+
+def load_grants(engagement) -> list:
+    """The RoE approval-grant ledger (`grants[]`) from <engagement>/runtime/approvals.json (roe-gate.md
+    §2 / approvals.schema.json). The SAME file may also carry the launcher's autonomous-deferral store
+    ({approved, resume_queue}); we read ONLY `grants`. Missing / unreadable / wrong-shape ⇒ []
+    (best-effort load; the caller decides whether a missing ledger means refuse or no-context)."""
+    try:
+        p = Path(engagement) / "runtime" / APPROVALS_NAME
+        if p.is_file():
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and isinstance(d.get("grants"), list):
+                return d["grants"]
+    except Exception:
+        pass
+    return []
+
+
+def _req_path(url: str) -> str:
+    """The request path, normalised for matching: no query/fragment, no trailing slash ('' for root)."""
+    try:
+        return (urlsplit(url).path or "").rstrip("/")
+    except Exception:
+        return ""
+
+
+def _grant_text(grant: dict) -> str:
+    """The free-text fields of a grant that can NAME the authorized target/action, lower-cased. The
+    schema's `scope_granted` is operator prose ('POST a test comment to app.acme.com/api/comments'),
+    so matching scans it (+ note / justification / delete_path) for the host, endpoint and method."""
+    return " ".join(str(grant.get(k, "") or "")
+                    for k in ("scope_granted", "note", "justification", "delete_path")).lower()
+
+
+def _grant_names_method(text: str, method: str) -> bool:
+    """A grant that NAMES one or more HTTP methods covers only those; a grant that names none is
+    method-unrestricted (covers any mutating verb for the endpoint it authorizes)."""
+    method = method.lower()
+    named = [m for m in _HTTP_METHOD_WORDS if re.search(r"\b" + m + r"\b", text)]
+    return (method in named) if named else True
+
+
+_PATH_TOKEN = re.compile(r"/[0-9a-z._~%\-/{}]*", re.I)   # a path-like token inside grant prose
+
+
+def _path_covered(text: str, path: str) -> bool:
+    """Does the grant text authorize this request PATH? A root/empty path is host-level (host match
+    suffices). Otherwise the endpoint must appear verbatim in the grant, OR the grant must name a
+    PARENT path of it (so a grant for `/api/comments` also covers `/api/comments/123`). Crucially it
+    will NOT treat a sibling (`/api/profile`) as covering `/api/comments` — that is incident #1."""
+    req = (path or "").lower()
+    if not req:
+        return True
+    if req in text:                            # the endpoint appears verbatim in the grant
+        return True
+    for t in _PATH_TOKEN.findall(text):        # a grant-named parent path covers a sub-resource
+        p = t.rstrip("/.,);:'\"").lower()
+        if p and p != "/" and req.startswith(p + "/"):
+            return True
+    return False
+
+
+def _grant_covers(grant: dict, method: str, host: str, path: str) -> bool:
+    """True iff this grant authorizes a mutating `method` to `host``path`. The host MUST be named, and
+    the SPECIFIC endpoint path must be covered (verbatim or via a named parent path) — this is exactly
+    what stops a grant from being stretched to an endpoint it never mentioned (incident #1)."""
+    text = _grant_text(grant)
+    host = (host or "").lower()
+    if host and host not in text:
+        return False
+    if not _path_covered(text, path):
+        return False
+    return _grant_names_method(text, method)
+
+
+def _grant_reversibility_ok(grant: dict) -> bool:
+    """A grant whose basis is reversible is INVALID without a recorded undo route (roe-gate.md §2):
+    a `reversible-self-write` write_class REQUIRES a `delete_path`; `reversible: true` requires a
+    `delete_path` OR a `cleanup_method` (approvals.schema.json). Any other class (production-write /
+    destructive / probe) does not claim reversibility here, so it is not refused on this ground."""
+    wc = str(grant.get("write_class", "") or "").lower()
+    if wc == "reversible-self-write":
+        return bool(grant.get("delete_path"))
+    if grant.get("reversible") is True:
+        return bool(grant.get("delete_path") or grant.get("cleanup_method"))
+    return True
+
+
+def write_gate_verdict(method: str, url: str, grants, *, probe: bool = False,
+                       probe_basis: str | None = None, context_present: bool = True):
+    """Decide the write-gate for one request. Returns (allowed: bool, basis_or_reason: str, kind: str)
+    where kind ∈ {read, disabled, no-context, probe, approved, refuse}.
+
+    Contract (write-vs-probe.md + roe-gate.md §2):
+      * a SAFE method (GET/HEAD/OPTIONS/TRACE) is a read — NEVER gated;
+      * RS_WRITE_GATE off ⇒ allow (operator kill-switch);
+      * no engagement/approvals context (no runtime dir) ⇒ allow — never break the read-heavy call
+        sites / unit tests that carry no grant ledger;
+      * a declared `probe=True` with a valid `probe_basis` ⇒ allow + LOG (a probe cannot persist
+        state, so it bypasses the approval requirement but is recorded for audit);
+      * otherwise a mutating method needs a grant that COVERS the target (host+endpoint+method) AND is
+        reversibility-valid (a reversible basis without a delete_path is refused); no covering/valid
+        grant ⇒ REFUSE (hard stop)."""
+    method = method.upper()
+    if method in SAFE_METHODS:
+        return True, "read (safe method — never gated)", "read"
+    if not write_gate_enabled():
+        return True, f"write-gate disabled via {WRITE_GATE_ENV}", "disabled"
+    if not context_present:
+        return True, "no engagement/approvals context — write-gate not applied", "no-context"
+    if probe:
+        pb = (probe_basis or "").strip().lower()
+        if pb not in PROBE_BASES:
+            return (False,
+                    f"probe=True requires a valid probe_basis ({'/'.join(sorted(PROBE_BASES))}) "
+                    f"— got {probe_basis!r}; a probe MUST declare why it cannot persist state", "refuse")
+        return True, f"probe:{pb}", "probe"
+    host = host_of_url(url)
+    path = _req_path(url)
+    covering = [g for g in (grants or []) if _grant_covers(g, method, host, path)]
+    if not covering:
+        return (False,
+                f"no covering approval in runtime/{APPROVALS_NAME} for mutating {method} "
+                f"{host}{path or '/'} — record a grant (roe-gate.md §2) or declare a probe", "refuse")
+    if not any(_grant_reversibility_ok(g) for g in covering):
+        return (False,
+                f"the covering approval for {method} {host}{path or '/'} claims a reversible basis "
+                f"but records no delete_path — a reversible-self-write is INVALID without one "
+                f"(roe-gate.md §2); it is a production write and needs the full gate", "refuse")
+    return True, "covered by a recorded approval grant", "approved"
+
+
 # --------------------------------------------------------------------------- rate throttle
 def _prune_reservations(reservations, now: float, window: float) -> list:
     """Drop send-slots that can no longer constrain a future one (older than one window before `now`),
@@ -548,12 +711,20 @@ def _build_opener(proxy=None, insecure=True, jar=None):
 def request(method: str, url: str, *, engagement, headers=None, data=None, cookies=None,
             proxy=None, insecure=True, timeout: float = 30.0, rung: str = "direct",
             max_rps: float | None = None, scope: dict | None = None,
-            opener=None, log: bool = True, clock=None, sleeper=None) -> Response:
-    """Make ONE engagement-aware HTTP request. Enforces scope (raises ScopeError), throttles to the
-    scope rps, routes through the proxy, persists the cookie jar, and appends a redacted JSONL log line.
+            opener=None, log: bool = True, clock=None, sleeper=None,
+            probe: bool = False, probe_basis: str | None = None, grants=None) -> Response:
+    """Make ONE engagement-aware HTTP request. Enforces scope (raises ScopeError) + write-discipline
+    (raises WriteGateError), throttles to the scope rps, routes through the proxy, persists the cookie
+    jar, and appends a redacted JSONL log line.
 
-    Importable: `from rs_http import request`. `scope`/`opener`/`clock`/`sleeper` are injection points
-    (unit tests stub the opener + clock so nothing touches the network)."""
+    A MUTATING method (POST/PUT/PATCH/DELETE) is refused unless a covering approval grant exists in
+    runtime/approvals.json OR the caller declares `probe=True` with a `probe_basis` (safe-method /
+    validation-failing-body / reversed-via-delete_path) — a probe cannot persist state, so it bypasses
+    the approval requirement but is LOGGED. Reads (GET/HEAD/OPTIONS) are never gated. See
+    write_gate_verdict / write-vs-probe.md. RS_WRITE_GATE=0 disables the gate.
+
+    Importable: `from rs_http import request`. `scope`/`opener`/`clock`/`sleeper`/`grants` are injection
+    points (unit tests stub the opener + clock so nothing touches the network)."""
     clock = clock or time.time
     sleeper = sleeper or time.sleep
     eng = Path(engagement)
@@ -565,6 +736,19 @@ def request(method: str, url: str, *, engagement, headers=None, data=None, cooki
     if not allowed:
         raise ScopeError(f"refusing {method} {url}: {reason}")
     host = host_of_url(url)
+
+    # 1.5 WRITE-DISCIPLINE — a mutating method needs a covering approval grant (or a declared probe).
+    # Reads are never gated. Fail-OPEN only in a clearly-safe way: with NO engagement/approvals context
+    # present (no runtime dir — a bare call / unit test), mutating methods are NOT gated, so the
+    # read-heavy existing call sites are untouched. RS_WRITE_GATE=0 disables it. This runs BEFORE the
+    # rate step (which creates runtime/) so the no-context detection is not self-defeated.
+    context_present = (eng / "runtime").is_dir()
+    gate_grants = grants if grants is not None else (load_grants(eng) if context_present else [])
+    w_allowed, w_basis, w_kind = write_gate_verdict(
+        method, url, gate_grants, probe=probe, probe_basis=probe_basis,
+        context_present=context_present)
+    if not w_allowed:
+        raise WriteGateError(f"refusing {method} {url}: {w_basis}")
 
     # 2. RATE — reserve a send-slot in the GLOBAL shared window, then sleep until it. The read-modify-
     # write runs under a cross-process file lock and the reservation is persisted BEFORE the sleep, so
@@ -645,6 +829,9 @@ def request(method: str, url: str, *, engagement, headers=None, data=None, cooki
             "resp_bytes": len(body or b""),
             "rung": rung,
             "proxied": bool(proxy or env_proxy()),
+            "write_gate": w_kind,          # read / probe / approved / disabled / no-context
+            "probe": bool(probe),
+            "probe_basis": (probe_basis if probe else None),
             "request_headers": redact_headers(hdrs),
             "error": err,
         })
@@ -690,7 +877,44 @@ def selftest() -> int:
     assert rh["Authorization"] == REDACTED and rh["Accept"] == "application/json"
     assert "SECR3T" not in redact_url("https://app.example.com/cb?token=SECR3T&page=2")
     assert "page=2" in redact_url("https://app.example.com/cb?token=SECR3T&page=2")
-    print("rs_http.py selftest: OK (scope matching, global rps slot-reservation, redaction)")
+    # write-gate (pure verdict logic — no network)
+    url = "https://app.example.com/api/comments"
+    assert write_gate_verdict("GET", url, [])[0] is True, "a read is never gated"
+    assert write_gate_verdict("HEAD", url, [])[0] is True
+    assert write_gate_verdict("POST", url, [])[0] is False, "a mutating request with no grant is refused"
+    # a covering production-write grant allows it
+    cover = {"scope_granted": "POST a benign marker to app.example.com/api/comments",
+             "write_class": "production-write"}
+    assert write_gate_verdict("POST", url, [cover])[0] is True, "a covering grant allows the write"
+    # a grant that names a DIFFERENT endpoint must NOT be stretched to this one (incident #1)
+    other = {"scope_granted": "POST to app.example.com/api/profile", "write_class": "production-write"}
+    assert write_gate_verdict("POST", url, [other])[0] is False, "a grant can't be stretched to an uncovered endpoint"
+    # a grant for the collection endpoint DOES cover a sub-resource under it (dynamic id)
+    assert write_gate_verdict("POST", "https://app.example.com/api/comments/42", [cover])[0] is True, \
+        "a parent-endpoint grant covers its sub-resource"
+    assert write_gate_verdict("POST", "https://app.example.com/api/profiles/42", [cover])[0] is False, \
+        "but not a different endpoint tree"
+    # a reversible-self-write grant WITHOUT a delete_path is invalid → refused
+    norev = {"scope_granted": "POST to app.example.com/api/comments", "write_class": "reversible-self-write"}
+    assert write_gate_verdict("POST", url, [norev])[0] is False, "reversible-self-write with no delete_path is refused"
+    rev = dict(norev, delete_path="DELETE /api/comments/{id}")
+    assert write_gate_verdict("POST", url, [rev])[0] is True, "reversible-self-write WITH delete_path is allowed"
+    # a declared probe + valid basis bypasses the approval requirement (and is logged)
+    ok, basis, kind = write_gate_verdict("POST", url, [], probe=True, probe_basis="validation-failing-body")
+    assert ok is True and kind == "probe" and "validation-failing-body" in basis
+    assert write_gate_verdict("POST", url, [], probe=True, probe_basis="bogus")[0] is False, "an invalid probe_basis is refused"
+    assert write_gate_verdict("POST", url, [], context_present=False)[0] is True, "no-context reads/writes are not gated"
+    import os as _os
+    _prev = _os.environ.get(WRITE_GATE_ENV)
+    _os.environ[WRITE_GATE_ENV] = "0"
+    try:
+        assert write_gate_verdict("POST", url, [])[0] is True, "RS_WRITE_GATE=0 disables the gate"
+    finally:
+        if _prev is None:
+            _os.environ.pop(WRITE_GATE_ENV, None)
+        else:
+            _os.environ[WRITE_GATE_ENV] = _prev
+    print("rs_http.py selftest: OK (scope matching, global rps slot-reservation, redaction, write-gate)")
     return 0
 
 
@@ -734,6 +958,11 @@ def main(argv=None) -> int:
     ap.add_argument("--rung", default="direct", help="anti-automation ladder rung this request used "
                     "(recorded in the log; default 'direct')")
     ap.add_argument("--max-rps", type=float, help="clamp the throttle below the scope's rate_limit_rps")
+    ap.add_argument("--probe", action="store_true",
+                    help="declare this mutating request a PROBE that cannot persist state (write-vs-probe.md) "
+                         "— bypasses the approval requirement but is logged; requires --probe-basis")
+    ap.add_argument("--probe-basis", choices=sorted(PROBE_BASES),
+                    help="why the probe cannot persist state (required with --probe)")
     ap.add_argument("-i", "--include", action="store_true", help="print response headers before the body")
     ap.add_argument("--selftest", action="store_true", help="run the no-network self-test (CI)")
     args = ap.parse_args(argv)
@@ -750,13 +979,25 @@ def main(argv=None) -> int:
     if args.data_file:
         data = Path(args.data_file).read_bytes()
 
+    if args.probe and not args.probe_basis:
+        ap.error("--probe requires --probe-basis (safe-method / validation-failing-body / reversed-via-delete_path)")
+
     try:
         r = request(args.method, args.url, engagement=eng,
                     headers=_parse_headers(args.header), data=data, cookies=args.cookies,
                     proxy=args.proxy, insecure=(not args.verify), timeout=args.timeout,
-                    rung=args.rung, max_rps=args.max_rps)
+                    rung=args.rung, max_rps=args.max_rps,
+                    probe=args.probe, probe_basis=args.probe_basis)
     except ScopeError as e:
         print(f"[!] {e}", file=sys.stderr)
+        return 2
+    except WriteGateError as e:
+        # Same altitude as a scope refusal: framed as engagement/RoE policy so the agent re-plans
+        # (record a covering grant, or declare a probe) instead of trying to bypass it.
+        print(f"[!] {e}", file=sys.stderr)
+        print("[i] write-discipline (NOT a target defense): record a covering approval grant in "
+              "runtime/approvals.json (roe-gate.md §2), or re-run with --probe --probe-basis if it "
+              "genuinely cannot persist state.", file=sys.stderr)
         return 2
 
     summary = (f"{r.status if r.status is not None else 'ERR'} {args.method} {args.url}  "

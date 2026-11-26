@@ -59,6 +59,116 @@ _WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 _PATH_KEYS = ("file_path", "notebook_path", "path")
 _SHELL_TOOLS = ("Bash", "PowerShell")
 
+# --- write-gate (RoE §2 parity with scripts/rs_http.py) --------------------
+# The autonomous/headless mirror of rs_http's write-gate: a MUTATING HTTP request (curl/wget/httpie)
+# to an in-scope host needs a covering approval grant in runtime/approvals.json, else it is DENIED.
+# A SAFETY NET, not a boundary (same honesty as the host regex above): an obfuscated mutation can slip
+# it, and the authoritative chokepoint for bespoke HTTP is rs_http.py — so rs_http.py commands are
+# skipped here (they self-enforce) to avoid double-gating. Disabled by RS_WRITE_GATE=0.
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_HTTP_METHOD_WORDS = ("get", "head", "post", "put", "patch", "delete", "options", "trace", "connect")
+_WRITE_GATE_ENV = "RS_WRITE_GATE"
+_APPROVALS_NAME = "approvals.json"
+# curl/wget explicit method flag (`-X POST`, `--request=PUT`, `--method=DELETE`), or httpie `http POST url`.
+_HTTP_METHOD_FLAG = re.compile(
+    r"""(?:-X|--request|--method)\s*=?\s*['"]?(get|head|post|put|patch|delete|options)\b"""
+    r"""|\bhttps?\s+(get|head|post|put|patch|delete|options)\b""", re.IGNORECASE)
+
+
+def write_gate_enabled() -> bool:
+    """ON by default; RS_WRITE_GATE=0/off/false/no/disabled turns the write-gate OFF (operator
+    kill-switch — kept identical to scripts/rs_http.py.write_gate_enabled)."""
+    v = os.environ.get(_WRITE_GATE_ENV)
+    if v is None:
+        return True
+    return v.strip().lower() not in ("0", "off", "false", "no", "disable", "disabled")
+
+
+def detect_mutating_http(cmd: str):
+    """Best-effort: is this shell command a MUTATING HTTP request to a URL? Returns (method, host,
+    path) or None. rs_http.py commands return None (rs_http self-enforces the write-gate, so the hook
+    does not double-gate them). A probe declared on an rs_http command (`--probe`) is likewise rs_http's
+    to allow. Safety net, not a boundary."""
+    low = cmd.lower()
+    if "rs_http" in low:
+        return None
+    m = _HTTP_METHOD_FLAG.search(cmd)
+    if not m:
+        return None
+    method = (m.group(1) or m.group(2) or "").upper()
+    if method not in _MUTATING_METHODS:
+        return None
+    um = _URL.search(cmd)
+    if um:
+        url = um.group(0)
+        host = _host_of_url(url)
+        from urllib.parse import urlsplit
+        try:
+            path = (urlsplit(url).path or "").rstrip("/")
+        except Exception:
+            path = ""
+    else:                                   # schemeless target (e.g. httpie 'http POST example.com/x')
+        hosts = extract_targets(cmd)
+        host, path = (hosts[0] if hosts else ""), ""
+    if not host:
+        return None
+    return method, host, path
+
+
+def _grant_text(grant: dict) -> str:
+    return " ".join(str(grant.get(k, "") or "")
+                    for k in ("scope_granted", "note", "justification", "delete_path")).lower()
+
+
+def _grant_names_method(text: str, method: str) -> bool:
+    method = method.lower()
+    named = [m for m in _HTTP_METHOD_WORDS if re.search(r"\b" + m + r"\b", text)]
+    return (method in named) if named else True
+
+
+_PATH_TOKEN = re.compile(r"/[0-9a-z._~%\-/{}]*", re.I)   # a path-like token inside grant prose
+
+
+def _path_covered(text: str, path: str) -> bool:
+    """Does the grant text authorize this request PATH? Root/empty is host-level; otherwise the
+    endpoint must appear verbatim OR the grant must name a PARENT path of it (so `/api/comments`
+    covers `/api/comments/123`) — but a sibling (`/api/profile`) never covers it. Identical to
+    rs_http._path_covered."""
+    req = (path or "").lower()
+    if not req:
+        return True
+    if req in text:
+        return True
+    for t in _PATH_TOKEN.findall(text):
+        p = t.rstrip("/.,);:'\"").lower()
+        if p and p != "/" and req.startswith(p + "/"):
+            return True
+    return False
+
+
+def grant_covers(grant: dict, method: str, host: str, path: str) -> bool:
+    """True iff this grant authorizes `method` to `host``path`. Host MUST be named; the SPECIFIC
+    endpoint path must be covered (verbatim or via a named parent path) — this is what stops a grant
+    being stretched to an endpoint it never mentioned. Identical semantics to rs_http._grant_covers."""
+    text = _grant_text(grant)
+    host = (host or "").lower()
+    if host and host not in text:
+        return False
+    if not _path_covered(text, path):
+        return False
+    return _grant_names_method(text, method)
+
+
+def grant_reversibility_ok(grant: dict) -> bool:
+    """A reversible-self-write is INVALID without a delete_path; reversible:true needs delete_path OR
+    cleanup_method (roe-gate.md §2 / approvals.schema.json). Identical to rs_http._grant_reversibility_ok."""
+    wc = str(grant.get("write_class", "") or "").lower()
+    if wc == "reversible-self-write":
+        return bool(grant.get("delete_path"))
+    if grant.get("reversible") is True:
+        return bool(grant.get("delete_path") or grant.get("cleanup_method"))
+    return True
+
 
 def fingerprint(tool_name: str, tool_input: dict) -> str:
     """Stable id for an approval. Keyed on the semantic payload (command/url) so it
@@ -302,12 +412,18 @@ def evaluate(
     bash_allow=(),
     approvals=frozenset(),
     always_defer=frozenset(),
+    grants=(),
     now: _dt.datetime | None = None,
 ) -> dict:
     """Return {'decision': 'deny'|'defer'|'pass', 'reason': str, ['fingerprint': str]}.
 
     In `defer` mode (autonomous runs) an in-scope shell command that the operator has
     not pre-allowed (`--allow`) or approved is DEFERRED for sign-off instead of run.
+
+    WRITE-DISCIPLINE (defer mode): a MUTATING HTTP command (curl/wget/httpie POST/PUT/PATCH/DELETE)
+    to an in-scope host with NO covering approval grant in `grants` is DENIED — the autonomous mirror
+    of rs_http's write-gate (RoE §2). rs_http.py commands self-enforce and are skipped. An exact-command
+    approval still passes; RS_WRITE_GATE=0 disables it.
 
     `always_defer` is the set of active-exploit leading tokens (e.g. sqlmap, msfconsole) that
     DEFER even under a broad `Bash`/`*` pre-allow — so RCE / active-exploit class steps always
@@ -372,7 +488,26 @@ def evaluate(
         if defer:
             fp = fingerprint(tool_name, tool_input)
             if fp in approvals:
-                return _pass()  # operator approved this exact command earlier
+                return _pass()  # operator approved this exact command earlier (human sign-off)
+            # WRITE-DISCIPLINE (RoE §2 parity with rs_http): a mutating HTTP request to an in-scope
+            # host needs a covering approval grant — else DENY (hard stop). rs_http.py commands
+            # self-enforce + are skipped; RS_WRITE_GATE=0 disables this.
+            if write_gate_enabled():
+                mut = detect_mutating_http(cmd)
+                if mut:
+                    w_method, w_host, w_path = mut
+                    if classify(w_host, scope) == "in":
+                        covering = [g for g in (grants or []) if grant_covers(g, w_method, w_host, w_path)]
+                        if not covering:
+                            return _deny(
+                                f"mutating {w_method} {w_host}{w_path or '/'} has no covering approval "
+                                f"grant in runtime/{_APPROVALS_NAME} — record a grant (roe-gate.md §2), "
+                                f"or route the write through scripts/rs_http.py, which gates + logs it")
+                        if not any(grant_reversibility_ok(g) for g in covering):
+                            return _deny(
+                                f"the covering approval for {w_method} {w_host}{w_path or '/'} claims a "
+                                f"reversible basis but records no delete_path — a reversible-self-write "
+                                f"is INVALID without one (roe-gate.md §2); it is a production write")
             head = _leading_token(cmd)
             if head in always_defer and not _narrow_allows(head, cmd, bash_allow):
                 # Active-exploit / RCE class: a broad `Bash` / `*` pre-allow does NOT auto-run it —
@@ -479,6 +614,21 @@ def _load_approvals(approvals_path: str) -> frozenset:
         return frozenset()
 
 
+def _load_grants(approvals_path: str) -> list:
+    """The RoE approval-grant ledger (`grants[]`) from approvals.json — the SAME file that carries the
+    launcher's {approved, resume_queue}; we read only `grants`. Missing/unreadable ⇒ [] (the write-gate
+    then denies un-granted mutations). Mirrors rs_http.load_grants."""
+    if not approvals_path:
+        return []
+    try:
+        d = json.loads(Path(approvals_path).read_text(encoding="utf-8"))
+        if isinstance(d, dict) and isinstance(d.get("grants"), list):
+            return d["grants"]
+    except Exception:
+        pass
+    return []
+
+
 # --- chain-of-custody producer ---------------------------------------------
 # The gate is the one component that sees EVERY target-reaching tool call before it runs, so it is the
 # natural producer of the engagement's immutable audit log (roe-gate.md §4) — the timestamped who/what/
@@ -572,6 +722,7 @@ def main(argv: list[str] | None = None) -> int:
             bash_allow=_load_bash_allow(args.policy),
             approvals=_load_approvals(args.approvals),
             always_defer=frozenset(_load_always_defer(args.policy)),
+            grants=_load_grants(args.approvals),
         )
     except Exception as e:  # fail closed on any internal error
         _emit_deny(f"scope-gate internal error ({type(e).__name__}) — failing closed")
