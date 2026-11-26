@@ -24,7 +24,23 @@ DONE = `checklist.md` `- [x]` · `review.md` PASS (scope parsed, plan + accepted
 3. **Hunt** — run the applicable `redstrike-<vuln>` skills, each gated (mechanical → its reviewer subagent). Only `accepted` findings advance.
 4. **Chain** — `redstrike-attack-chain-discovery` for higher-impact composites.
 5. **Triage/de-dupe** — drop duplicates (program's known issues / internal dupes); keep only `accepted`, in-scope, non-dup findings. Mark each notebook lead to its outcome — `notebook.py --mark L-<n> --status promoted --finding RS-…` (became a finding) or `--status dead --verdict <reason>` (killed) — so the notebook records the full investigative trail, not just the wins.
-6. **Package** — `redstrike-reporting` + per-finding submission drafts in `submissions/`, each meeting the submission-quality bar (`refs/report_quality.md`: specific title, complete reproduction, expected-vs-actual, earned impact/severity, proof, signal-only formatting). Program's format: title, severity, steps, impact, remediation.
+6. **Package** — `redstrike-reporting` first (→ `report/findings_consolidated.json`), then auto-emit the
+   per-finding submission drafts in `submissions/`. For a **program-flagged** engagement (`scope.yaml`
+   `program.platform` = bugcrowd / hackerone) run the deterministic generator — it must not be hand-written
+   (a hand-authored submission once shipped a FABRICATED VRT category):
+   ```
+   python scripts/bugcrowd_submission.py --engagement <engagement>
+   ```
+   For each ACCEPTED, in-scope, non-duplicate finding it writes a form-structured `submissions/<id>.md`
+   (Summary/Title · Target · Technical severity · Vulnerability details: description, steps, PoC/evidence
+   refs, impact, remediation) and **STAMPS + VALIDATES the VRT against the pinned taxonomy before writing**
+   — bugcrowd's severity headline IS the VRT path + priority; hackerone's is CWE + CVSS (VRT optional). A
+   finding whose VRT fabricates a path or inflates a priority is **REFUSED** (named error on stderr, nothing
+   written for it; exit 3), so a fabricated/invalid VRT is structurally un-emittable. Secrets are redacted
+   and evidence is referenced by path. It is **idempotent** (re-run overwrites cleanly) and a **no-op** for a
+   non-program engagement (`program.platform` none/absent → nothing emitted). A human then reviews each draft
+   against the submission-quality bar (`refs/report_quality.md`: specific title, complete reproduction,
+   expected-vs-actual, earned impact/severity, proof, signal-only formatting) before sending.
 
 ## Inputs
 - program scope/rules (link/text), `scope.yaml`, `js-analysis` + vuln-agent outputs

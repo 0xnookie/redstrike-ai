@@ -368,6 +368,57 @@ def check_vrt():
         else:
             for e in scope_program_errors(prog, where="engagements/_template/scope.yaml"):
                 err(e)
+    # (d) the CWE/finding-class -> VRT crosswalk: it must parse, carry provenance, and EVERY target path
+    # must resolve to a real node in the pinned taxonomy (a crosswalk entry pointing at a non-existent VRT
+    # node is a HARD failure — the resolver would hand the submission generator a fabricated path).
+    check_vrt_crosswalk(flat)
+
+
+def check_vrt_crosswalk(flat):
+    """Validate skills/bug-bounty/refs/vrt/vrt_crosswalk.json: parse + provenance + every `path` resolves."""
+    xw_path = VRT_DIR / "vrt_crosswalk.json"
+    if not xw_path.is_file():
+        err("skills/bug-bounty/refs/vrt/vrt_crosswalk.json missing (the CWE/class -> VRT crosswalk)")
+        return
+    try:
+        xw = json.loads(xw_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        err(f"vrt_crosswalk.json: invalid JSON: {e}")
+        return
+    if not isinstance(xw, dict):
+        err("vrt_crosswalk.json: top-level must be an object")
+        return
+    if not isinstance(xw.get("_meta"), dict):
+        err("vrt_crosswalk.json: missing provenance `_meta` block")
+    n_targets = 0
+    for section in ("cwe", "class"):
+        entries = xw.get(section)
+        if entries is None:
+            continue
+        if not isinstance(entries, dict):
+            err(f"vrt_crosswalk.json: `{section}` must be an object")
+            continue
+        for key, entry in entries.items():
+            if isinstance(entry, dict) and isinstance(entry.get("candidates"), list):
+                cands = [c for c in entry["candidates"] if isinstance(c, dict)]
+            elif isinstance(entry, dict) and entry.get("path"):
+                cands = [entry]
+            else:
+                err(f"vrt_crosswalk.json: {section}.{key} has no `path` or `candidates`")
+                continue
+            if not cands:
+                err(f"vrt_crosswalk.json: {section}.{key} has an empty candidate list")
+            for cand in cands:
+                n_targets += 1
+                p = cand.get("path")
+                norm = _vrt_norm_path(p) if p else ()
+                if not p or (norm not in flat["id_paths"] and norm not in flat["name_paths"]):
+                    err(f"vrt_crosswalk.json: {section}.{key} target path {p!r} does NOT resolve in the "
+                        f"pinned taxonomy (crosswalk points at a non-existent VRT node)")
+                elif cand.get("id") and str(cand["id"]).strip().lower() != norm[-1]:
+                    err(f"vrt_crosswalk.json: {section}.{key} id {cand['id']!r} is not the leaf of path "
+                        f"{p!r} (expected {norm[-1]!r})")
+    checked["vrt_crosswalk"] = n_targets
 
 
 # 1 + 2 + 3 — skills
@@ -467,6 +518,15 @@ try:
             err(f"cvss: {vec} -> {score} {rating}, expected {want_score} {want_rating}")
 except ImportError as e:
     err(f"cvss: cannot import scripts/cvss.py: {e}")
+
+# 6b — vrt resolver self-check (the deterministic CWE/class -> VRT crosswalk + resolver the bug-bounty
+# submission generator relies on). Wired like the cvss self-test so CI runs it on every push.
+try:
+    import vrt as _vrt
+    checked["vrt_selftest"] = 1
+    _vrt.selftest()
+except BaseException as e:  # noqa: BLE001 — selftest asserts; a data-load failure must surface here too
+    err(f"vrt.py selftest failed: {e}")
 
 # 7 — routing map covers every executor exactly once (so a new class can't silently become an orphan)
 map_path = ROOT / "skills" / "_contract" / "routing-map.json"
