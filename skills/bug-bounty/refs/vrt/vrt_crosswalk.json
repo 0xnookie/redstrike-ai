@@ -1,0 +1,138 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "schema": "{ cwe: {CWE-id -> target}, class: {redstrike-class-slug -> target} }  where target = {path,id} | {candidates:[{path,id}, ...]}",
+    "purpose": "Deterministic CWE/finding-class -> VRT crosswalk. So a bug-bounty finding's VRT is RESOLVED from the pinned taxonomy, not improvised (the fabricated-VRT incident). scripts/vrt.py reads this; resolve_finding_vrt() looks a finding's category.cwe / executor class up here and returns the real VRT path + the taxonomy's own baseline priority.",
+    "authoritative_source": "The PINNED taxonomy skills/bug-bounty/refs/vrt/vulnerability-rating-taxonomy.json is the single source of truth for priorities. This file carries NO priorities of its own on purpose (anti-drift): every `priority`/`baseline` is read back from the taxonomy node at resolve time. EVERY `path` here MUST resolve to a real taxonomy node — scripts/validate.py HARD-FAILS if any crosswalk target does not exist.",
+    "built_against_taxonomy": {
+      "upstream_source": "bugcrowd/vulnerability-rating-taxonomy",
+      "upstream_ref": "20cc155a74c7f9136fed714acc298f281bd793d3",
+      "upstream_version": "2026-07-08T00:00:00+00:00"
+    },
+    "paths_are_id_paths": "Each `path` is the node ids joined by ' > ' (stable identifiers), e.g. 'server_side_injection > sql_injection'. scripts/vrt.py path_exists() also accepts the equivalent display-name path and a bare leaf id.",
+    "defaults_not_verdicts": "A crosswalk hit is a DEFAULT SEED, not a final rating. The returned priority is the taxonomy baseline; a submission may deviate ONLY via finding.vrt.priority_basis='argued-elevation'/'argued-reduction' with a non-empty priority_rationale (anti-inflation, enforced by elevation_errors()). Where a class has no single VRT home, a `candidates` list is given and resolve_finding_vrt() returns the first that resolves (the primary); operators pick among the alternatives.",
+    "coverage": "A CWE/class absent here is a LEGITIMATE state (resolve returns None) — business-logic, race-condition-only, memory-safety and other classes with no distinct VRT node are intentionally left for the operator/generator to place. Unmapped != invalid."
+  },
+
+  "cwe": {
+    "CWE-79":  { "candidates": [ { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" }, { "path": "cross_site_scripting_xss > stored > non_admin_to_anyone", "id": "non_admin_to_anyone" } ] },
+    "CWE-80":  { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" },
+    "CWE-89":  { "path": "server_side_injection > sql_injection", "id": "sql_injection" },
+    "CWE-90":  { "path": "server_side_injection > ldap_injection", "id": "ldap_injection" },
+    "CWE-943": { "candidates": [ { "path": "server_side_injection > sql_injection", "id": "sql_injection" }, { "path": "broken_authentication_and_session_management > authentication_bypass", "id": "authentication_bypass" } ] },
+    "CWE-77":  { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" },
+    "CWE-78":  { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" },
+    "CWE-94":  { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" },
+    "CWE-1336":{ "candidates": [ { "path": "server_side_injection > ssti > basic", "id": "basic" }, { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" } ] },
+    "CWE-502": { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" },
+    "CWE-611": { "path": "server_side_injection > xml_external_entity_injection_xxe", "id": "xml_external_entity_injection_xxe" },
+    "CWE-918": { "candidates": [ { "path": "server_security_misconfiguration > server_side_request_forgery_ssrf > internal_data_exposure", "id": "internal_data_exposure" }, { "path": "server_security_misconfiguration > server_side_request_forgery_ssrf > internal_secrets_exposure", "id": "internal_secrets_exposure" }, { "path": "server_security_misconfiguration > server_side_request_forgery_ssrf > external_dns_query_only", "id": "external_dns_query_only" } ] },
+    "CWE-22":  { "candidates": [ { "path": "server_security_misconfiguration > path_traversal", "id": "path_traversal" }, { "path": "server_side_injection > file_inclusion > local", "id": "local" } ] },
+    "CWE-98":  { "path": "server_side_injection > file_inclusion > local", "id": "local" },
+    "CWE-434": { "candidates": [ { "path": "server_security_misconfiguration > unsafe_file_upload > file_extension_filter_bypass", "id": "file_extension_filter_bypass" }, { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" } ] },
+    "CWE-113": { "path": "server_side_injection > http_response_manipulation > response_splitting_crlf", "id": "response_splitting_crlf" },
+    "CWE-644": { "path": "server_side_injection > http_response_manipulation > response_splitting_crlf", "id": "response_splitting_crlf" },
+    "CWE-1321":{ "candidates": [ { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" }, { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" } ] },
+
+    "CWE-639": { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" },
+    "CWE-284": { "candidates": [ { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" }, { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" } ] },
+    "CWE-285": { "candidates": [ { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" }, { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" } ] },
+    "CWE-862": { "candidates": [ { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" }, { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" } ] },
+    "CWE-269": { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" },
+    "CWE-915": { "path": "broken_access_control > idor > modify_sensitive_information_iterable_object_identifiers", "id": "modify_sensitive_information_iterable_object_identifiers" },
+    "CWE-425": { "candidates": [ { "path": "server_security_misconfiguration > exposed_portal > admin_portal", "id": "admin_portal" }, { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" } ] },
+
+    "CWE-601": { "path": "unvalidated_redirects_and_forwards > open_redirect > get_based", "id": "get_based" },
+    "CWE-352": { "candidates": [ { "path": "cross_site_request_forgery_csrf > action_specific > authenticated_action", "id": "authenticated_action" }, { "path": "cross_site_request_forgery_csrf > application_wide", "id": "application_wide" } ] },
+    "CWE-942": { "path": "server_security_misconfiguration > unsafe_cross_origin_resource_sharing", "id": "unsafe_cross_origin_resource_sharing" },
+    "CWE-1021":{ "path": "server_security_misconfiguration > clickjacking > sensitive_action", "id": "sensitive_action" },
+    "CWE-444": { "path": "server_security_misconfiguration > request_smuggling", "id": "request_smuggling" },
+
+    "CWE-287": { "path": "broken_authentication_and_session_management > authentication_bypass", "id": "authentication_bypass" },
+    "CWE-620": { "path": "server_security_misconfiguration > lack_of_password_confirmation > change_password", "id": "change_password" },
+    "CWE-347": { "candidates": [ { "path": "broken_authentication_and_session_management > authentication_bypass", "id": "authentication_bypass" }, { "path": "insufficient_security_configurability > weak_jwt_hashing_algorithm", "id": "weak_jwt_hashing_algorithm" } ] },
+    "CWE-345": { "path": "cryptographic_weakness > insufficient_verification_of_data_authenticity > cryptographic_signature", "id": "cryptographic_signature" },
+
+    "CWE-200": { "candidates": [ { "path": "sensitive_data_exposure > internal_ip_disclosure", "id": "internal_ip_disclosure" }, { "path": "sensitive_data_exposure > disclosure_of_secrets > for_internal_asset", "id": "for_internal_asset" }, { "path": "sensitive_data_exposure > visible_detailed_error_page > descriptive_stack_trace", "id": "descriptive_stack_trace" } ] },
+    "CWE-538": { "path": "server_security_misconfiguration > directory_listing_enabled > sensitive_data_exposure", "id": "sensitive_data_exposure" },
+    "CWE-548": { "path": "server_security_misconfiguration > directory_listing_enabled > non_sensitive_data_exposure", "id": "non_sensitive_data_exposure" },
+    "CWE-798": { "candidates": [ { "path": "sensitive_data_exposure > disclosure_of_secrets > for_internal_asset", "id": "for_internal_asset" }, { "path": "sensitive_data_exposure > disclosure_of_secrets > for_publicly_accessible_asset", "id": "for_publicly_accessible_asset" } ] },
+    "CWE-312": { "path": "insecure_data_storage > sensitive_application_data_stored_unencrypted > on_internal_storage", "id": "on_internal_storage" },
+    "CWE-319": { "path": "insecure_data_transport > cleartext_transmission_of_sensitive_data", "id": "cleartext_transmission_of_sensitive_data" },
+
+    "CWE-327": { "path": "cryptographic_weakness > broken_cryptography > use_of_broken_cryptographic_primitive", "id": "use_of_broken_cryptographic_primitive" },
+    "CWE-326": { "path": "cryptographic_weakness > broken_cryptography > use_of_vulnerable_cryptographic_library", "id": "use_of_vulnerable_cryptographic_library" },
+    "CWE-330": { "path": "cryptographic_weakness > insufficient_entropy > predictable_prng_seed", "id": "predictable_prng_seed" },
+
+    "CWE-16":  { "path": "server_security_misconfiguration > fingerprinting_banner_disclosure", "id": "fingerprinting_banner_disclosure" },
+    "CWE-693": { "path": "server_security_misconfiguration > lack_of_security_headers > content_security_policy", "id": "content_security_policy" },
+    "CWE-1104":{ "path": "using_components_with_known_vulnerabilities > outdated_software_version", "id": "outdated_software_version" },
+    "CWE-937": { "path": "using_components_with_known_vulnerabilities > outdated_software_version", "id": "outdated_software_version" },
+    "CWE-494": { "path": "insecure_data_transport > executable_download > no_secure_integrity_check", "id": "no_secure_integrity_check" },
+
+    "CWE-362": { "path": "server_security_misconfiguration > race_condition", "id": "race_condition" },
+    "CWE-367": { "path": "server_security_misconfiguration > race_condition", "id": "race_condition" }
+  },
+
+  "class": {
+    "xss-reflected": { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" },
+    "xss-stored":    { "path": "cross_site_scripting_xss > stored > non_admin_to_anyone", "id": "non_admin_to_anyone" },
+    "xss-dom":       { "candidates": [ { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" }, { "path": "cross_site_scripting_xss > stored > non_admin_to_anyone", "id": "non_admin_to_anyone" } ] },
+    "xss-blind":     { "path": "cross_site_scripting_xss > stored > non_admin_to_anyone", "id": "non_admin_to_anyone" },
+    "xss-hunter":    { "candidates": [ { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" }, { "path": "cross_site_scripting_xss > stored > non_admin_to_anyone", "id": "non_admin_to_anyone" } ] },
+
+    "sqli-inband":   { "path": "server_side_injection > sql_injection", "id": "sql_injection" },
+    "sqli-blind":    { "path": "server_side_injection > sql_injection", "id": "sql_injection" },
+    "nosql-injection": { "candidates": [ { "path": "server_side_injection > sql_injection", "id": "sql_injection" }, { "path": "broken_authentication_and_session_management > authentication_bypass", "id": "authentication_bypass" } ] },
+    "ldap-injection": { "path": "server_side_injection > ldap_injection", "id": "ldap_injection" },
+
+    "command-injection": { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" },
+    "ssti":          { "candidates": [ { "path": "server_side_injection > ssti > basic", "id": "basic" }, { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" } ] },
+    "deserialization": { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" },
+    "xxe-inband":    { "path": "server_side_injection > xml_external_entity_injection_xxe", "id": "xml_external_entity_injection_xxe" },
+    "xxe-blind":     { "path": "server_side_injection > xml_external_entity_injection_xxe", "id": "xml_external_entity_injection_xxe" },
+    "crlf-injection": { "path": "server_side_injection > http_response_manipulation > response_splitting_crlf", "id": "response_splitting_crlf" },
+    "parameter-pollution": { "path": "server_side_injection > parameter_pollution", "id": "parameter_pollution" },
+    "prototype-pollution": { "candidates": [ { "path": "cross_site_scripting_xss > reflected > non_self", "id": "non_self" }, { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" } ] },
+
+    "idor":          { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" },
+    "bola-bfla":     { "candidates": [ { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" }, { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" } ] },
+    "privesc":       { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" },
+    "forbidden-bypass": { "candidates": [ { "path": "broken_access_control > privilege_escalation", "id": "privilege_escalation" }, { "path": "server_security_misconfiguration > exposed_portal > admin_portal", "id": "admin_portal" } ] },
+    "auth-bypass":   { "path": "broken_authentication_and_session_management > authentication_bypass", "id": "authentication_bypass" },
+    "jwt":           { "candidates": [ { "path": "broken_authentication_and_session_management > authentication_bypass", "id": "authentication_bypass" }, { "path": "insufficient_security_configurability > weak_jwt_hashing_algorithm", "id": "weak_jwt_hashing_algorithm" } ] },
+    "oauth":         { "candidates": [ { "path": "server_security_misconfiguration > oauth_misconfiguration > insecure_redirect_uri", "id": "insecure_redirect_uri" }, { "path": "server_security_misconfiguration > oauth_misconfiguration > account_takeover", "id": "account_takeover" } ] },
+
+    "ssrf-inband":   { "path": "server_security_misconfiguration > server_side_request_forgery_ssrf > internal_data_exposure", "id": "internal_data_exposure" },
+    "ssrf-blind":    { "path": "server_security_misconfiguration > server_side_request_forgery_ssrf > external_dns_query_only", "id": "external_dns_query_only" },
+    "ssrf-cloud":    { "path": "server_security_misconfiguration > server_side_request_forgery_ssrf > internal_secrets_exposure", "id": "internal_secrets_exposure" },
+
+    "open-redirect": { "path": "unvalidated_redirects_and_forwards > open_redirect > get_based", "id": "get_based" },
+    "csrf":          { "candidates": [ { "path": "cross_site_request_forgery_csrf > action_specific > authenticated_action", "id": "authenticated_action" }, { "path": "cross_site_request_forgery_csrf > application_wide", "id": "application_wide" } ] },
+    "cors":          { "path": "server_security_misconfiguration > unsafe_cross_origin_resource_sharing", "id": "unsafe_cross_origin_resource_sharing" },
+    "clickjacking":  { "path": "server_security_misconfiguration > clickjacking > sensitive_action", "id": "sensitive_action" },
+    "host-header":   { "path": "sensitive_data_exposure > weak_password_reset_implementation > token_leakage_via_host_header_poisoning", "id": "token_leakage_via_host_header_poisoning" },
+    "cache-poisoning": { "path": "server_security_misconfiguration > cache_poisoning", "id": "cache_poisoning" },
+    "request-smuggling": { "path": "server_security_misconfiguration > request_smuggling", "id": "request_smuggling" },
+    "websocket":     { "candidates": [ { "path": "cross_site_request_forgery_csrf > application_wide", "id": "application_wide" }, { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" } ] },
+
+    "upload-rce":    { "candidates": [ { "path": "server_side_injection > remote_code_execution_rce", "id": "remote_code_execution_rce" }, { "path": "server_security_misconfiguration > unsafe_file_upload > file_extension_filter_bypass", "id": "file_extension_filter_bypass" } ] },
+    "path-traversal-lfi": { "candidates": [ { "path": "server_security_misconfiguration > path_traversal", "id": "path_traversal" }, { "path": "server_side_injection > file_inclusion > local", "id": "local" } ] },
+
+    "subdomain-takeover": { "path": "server_security_misconfiguration > misconfigured_dns > subdomain_takeover", "id": "subdomain_takeover" },
+    "exposed-surface": { "candidates": [ { "path": "server_security_misconfiguration > directory_listing_enabled > sensitive_data_exposure", "id": "sensitive_data_exposure" }, { "path": "sensitive_data_exposure > disclosure_of_secrets > for_internal_asset", "id": "for_internal_asset" } ] },
+    "secrets":       { "candidates": [ { "path": "sensitive_data_exposure > disclosure_of_secrets > for_internal_asset", "id": "for_internal_asset" }, { "path": "sensitive_data_exposure > disclosure_of_secrets > for_publicly_accessible_asset", "id": "for_publicly_accessible_asset" } ] },
+    "sensitive-disclosure": { "path": "sensitive_data_exposure > internal_ip_disclosure", "id": "internal_ip_disclosure" },
+    "security-headers": { "path": "server_security_misconfiguration > lack_of_security_headers > content_security_policy", "id": "content_security_policy" },
+
+    "graphql":       { "candidates": [ { "path": "sensitive_data_exposure > graphql_introspection_enabled", "id": "graphql_introspection_enabled" }, { "path": "broken_access_control > idor > view_sensitive_information_iterable_object_identifiers", "id": "view_sensitive_information_iterable_object_identifiers" } ] },
+    "email-injection": { "path": "server_side_injection > content_spoofing > email_html_injection", "id": "email_html_injection" },
+    "content-spoofing": { "path": "server_side_injection > content_spoofing > text_injection", "id": "text_injection" },
+    "author-spoofing": { "candidates": [ { "path": "server_side_injection > content_spoofing > impersonation_via_broken_link_hijacking", "id": "impersonation_via_broken_link_hijacking" }, { "path": "server_side_injection > content_spoofing > iframe_injection", "id": "iframe_injection" } ] },
+
+    "tls-attacks":   { "candidates": [ { "path": "server_security_misconfiguration > insecure_ssl > insecure_cipher_suite", "id": "insecure_cipher_suite" }, { "path": "server_security_misconfiguration > ssl_attack_breach_poodle_etc", "id": "ssl_attack_breach_poodle_etc" } ] },
+    "crypto-attacks": { "path": "cryptographic_weakness > broken_cryptography > use_of_broken_cryptographic_primitive", "id": "use_of_broken_cryptographic_primitive" },
+
+    "cve-intelligence": { "path": "using_components_with_known_vulnerabilities > outdated_software_version", "id": "outdated_software_version" }
+  }
+}

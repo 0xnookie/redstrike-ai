@@ -280,9 +280,51 @@ def _try_import_cvss():
         return None
 
 
+def _try_import_vrt():
+    """Import scripts/vrt.py (the deterministic VRT resolver) by path. None when unavailable —
+    the VRT governance gate then no-ops rather than crashing an engagement."""
+    try:
+        sys.path.insert(0, str(_repo_root() / "scripts"))
+        import vrt  # type: ignore
+        return vrt
+    except Exception:
+        return None
+
+
 def _scope_text(eng: Path) -> str:
     sp = eng / "scope.yaml"
     return sp.read_text(encoding="utf-8", errors="replace") if sp.is_file() else ""
+
+
+def _scope_program(eng: Path) -> dict:
+    """Parse the OPTIONAL `program:` block from scope.yaml into {platform, taxonomy, name}.
+    Absent / platform:none => an ordinary pentest (the VRT gate no-ops). Stdlib-only: reads
+    the direct keys of the top-level `program:` mapping (mirrors validate.py's block parser)."""
+    txt = _scope_text(eng)
+    out = {}
+    in_block = False
+    indent = None
+    for ln in txt.splitlines():
+        if re.match(r"^program\s*:\s*(#.*)?$", ln):
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        if not ln.startswith((" ", "\t")):
+            break  # a non-indented line ends the block
+        m = re.match(r"^(\s+)([A-Za-z0-9_]+)\s*:\s*(.*)$", ln)
+        if not m:
+            continue
+        sp, k, v = m.groups()
+        if indent is None:
+            indent = len(sp)
+        if len(sp) != indent:
+            continue  # only the block's own direct keys
+        v = v.split("#", 1)[0].strip().strip('"').strip("'")
+        out[k] = v
+    return out
 
 
 def _try_import_coverage():
@@ -1437,6 +1479,72 @@ def _cvss_drift_check(eng: Path, findings: list, cvss_mod) -> tuple:
     return hard, warns
 
 
+# --- VRT-governance HARD gate (L-B) ------------------------------------------------------------- #
+# A FABRICATED VRT category once shipped in a bug-bounty submission (an operator caught it). On a
+# program-flagged bug-bounty engagement — scope.yaml program.platform != none AND program.taxonomy ==
+# vrt — every ACCEPTED, in-scope, reportable finding MUST carry a structured `vrt{}` block whose `path`
+# RESOLVES in the pinned taxonomy (scripts/vrt.py path_exists) and whose priority passes
+# elevation_errors (anti-fabrication + anti-inflation). Same escalation shape as the cvss-drift gate: a
+# soft warning while hunting, a HARD fail once a report exists / the run is terminal. A NON-program
+# engagement (program.platform none / absent, or taxonomy != vrt) is COMPLETELY unaffected — the gate
+# no-ops, so an ordinary pentest is byte-identical to before. Composite/kill-chain findings are skipped
+# (they re-state component findings, which each carry their own VRT).
+def _vrt_governance_check(eng: Path, findings: list, vrt_mod) -> tuple:
+    """(hard_errors, warnings) for the VRT-governance gate. ([],[]) when the engagement is not a
+    VRT-governed bug-bounty program."""
+    prog = _scope_program(eng)
+    platform = (prog.get("platform") or "none").strip().lower()
+    taxonomy = (prog.get("taxonomy") or "none").strip().lower()
+    if platform in ("", "none") or taxonomy != "vrt":
+        return [], []  # not a VRT-governed bug-bounty engagement -> no-op (ordinary pentest)
+    if not vrt_mod:
+        return [], ["VRT governance: scripts/vrt.py not importable — a bug-bounty finding's VRT "
+                    "path/priority could not be validated (restore scripts/vrt.py)"]
+    armed = _gates_armed(eng, findings)
+    scope_text = _scope_text(eng)
+    hard, warns = [], []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        verdict, _ = _review_of(f, eng)
+        if verdict not in ("accepted", "blocked"):
+            continue  # only reportable findings are in scope for the gate
+        if f.get("composite"):
+            continue  # a composite re-states component findings; those carry the VRT
+        # in-scope filter: an out-of-scope asset would be dropped by verify check #6 anyway
+        if scope_text:
+            host = _asset_host(f.get("asset", ""))
+            root = ".".join(host.split(".")[-2:]) if host.count(".") >= 1 else host
+            if host and host not in scope_text and root not in scope_text:
+                continue
+        fid = f.get("id", "<no-id>")
+        vrt = f.get("vrt")
+        if not isinstance(vrt, dict) or not vrt:
+            msg = (f"{fid}: bug-bounty finding (program.taxonomy=vrt) carries NO `vrt{{}}` block — stamp "
+                   f"its Vulnerability Rating Taxonomy path + priority (resolve it with "
+                   f"`python scripts/vrt.py --resolve --cwe <CWE> / --category <class>`); a submission "
+                   f"must not go out without a VRT")
+        else:
+            path = vrt.get("path")
+            problems = []
+            if not (isinstance(path, str) and vrt_mod.path_exists(path)):
+                problems.append(f"vrt.path {path!r} does NOT resolve in the pinned taxonomy "
+                                f"(fabricated VRT category)")
+            else:
+                problems += vrt_mod.elevation_errors(path, vrt.get("priority"),
+                                                     vrt.get("priority_basis"),
+                                                     vrt.get("priority_rationale"))
+            if not problems:
+                continue
+            msg = f"{fid}: " + "; ".join(problems)
+        if armed:
+            hard.append("VRT-governance gate (report present → every accepted in-scope bug-bounty "
+                        f"finding needs a valid, non-inflated VRT): {msg}")
+        else:
+            warns.append(msg + " [becomes a hard gate once a report exists]")
+    return hard, warns
+
+
 # --- Independent-reproducible-evidence HARD gate (R1) -------------------------------------------- #
 # Today the per-finding gate only checks an evidence ref exists + is non-zero, so a confirmed/Medium+
 # finding passes with its ONLY evidence being the executor's own analysis/log/tool_output (circular
@@ -1753,6 +1861,7 @@ def _deliverable_consistency_errors(eng: Path, findings: list) -> list:
 
 def validate_engagement(eng: Path, as_json: bool) -> bool:
     cvss_mod = _try_import_cvss()
+    vrt_mod = _try_import_vrt()
     scope_text = _scope_text(eng)
     top_warnings = []
     if not scope_text:
@@ -1830,6 +1939,12 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # potential_severity) is drift — a warning while hunting, HARD once a report exists.
     cvss_errors, cvss_warns = _cvss_drift_check(eng, findings, cvss_mod)
     top_warnings.extend(cvss_warns)
+    # VRT-governance gate (L-B): on a bug-bounty engagement (scope program.platform != none AND
+    # program.taxonomy == vrt), every accepted in-scope reportable finding must carry a valid,
+    # non-inflated VRT whose path resolves in the pinned taxonomy. No-op for an ordinary pentest. Warn
+    # while hunting, HARD once a report exists — the gate that keeps a fabricated VRT from shipping.
+    vrt_errors, vrt_warns = _vrt_governance_check(eng, findings, vrt_mod)
+    top_warnings.extend(vrt_warns)
     # Independent-reproducible-evidence gate (R1): a confirmed/Medium+ reportable finding needs >=1
     # independent artifact (request_response/poc_script/screenshot/dom_capture/code_citation), never only
     # its own log/tool_output/analysis (circular). Warn while hunting, HARD once a report exists.
@@ -1894,7 +2009,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                and (not dup_errors) and (not integrity_errors) and (not recall_errors)
                and (not chain_errors) and (not diagnostics_errors)
                and (not whitebox_errors) and (not candidate_errors)
-               and (not cvss_errors) and (not evidence_errors)
+               and (not cvss_errors) and (not vrt_errors) and (not evidence_errors)
                and (not secondary_errors) and (not exhaustion_errors)
                and (not deliverable_errors))
 
@@ -1911,6 +2026,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "whitebox_errors": whitebox_errors,
                           "candidate_reconciliation_errors": candidate_errors,
                           "cvss_drift_errors": cvss_errors,
+                          "vrt_governance_errors": vrt_errors,
                           "independent_evidence_errors": evidence_errors,
                           "secondary_review_errors": secondary_errors,
                           "exhaustion_review_errors": exhaustion_errors,
@@ -1968,6 +2084,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "recomputed CVSS rating or be flagged demonstrated-vs-potential):")
             for cde in cvss_errors:
                 print(f"  - {cde}")
+        if vrt_errors:
+            print("\n✗ VRT-governance gate FAILED (a bug-bounty finding carries no VRT, a fabricated VRT "
+                  "path, or an inflated priority):")
+            for vge in vrt_errors:
+                print(f"  - {vge}")
         if evidence_errors:
             print("\n✗ independent-evidence gate FAILED (a confirmed/Medium+ finding cites no reproducible "
                   "independent artifact — circular evidence):")
@@ -2005,6 +2126,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
               f"error(s), {len(chain_errors)} attack-chain error(s), {len(diagnostics_errors)} diagnostics "
               f"error(s), {len(whitebox_errors)} white-box-shape error(s), {len(candidate_errors)} "
               f"candidate-reconciliation error(s), {len(cvss_errors)} cvss-drift error(s), "
+              f"{len(vrt_errors)} VRT-governance error(s), "
               f"{len(evidence_errors)} independent-evidence error(s), {len(secondary_errors)} "
               f"secondary-review error(s), {len(exhaustion_errors)} exhaustion-adversary error(s), "
               f"{len(deliverable_errors)} deliverable-consistency error(s), "
@@ -2046,6 +2168,11 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
             print("A finding's declared severity contradicts its recomputed CVSS vector => fix the "
                   "vector/severity (don't hand-override the score), or set potential_severity "
                   "(demonstrated-vs-potential), before reporting.")
+        if vrt_errors:
+            print("A bug-bounty (program.taxonomy=vrt) finding is missing its VRT, points at a "
+                  "fabricated VRT path, or claims an inflated priority => stamp/repair finding.vrt with a "
+                  "real path (python scripts/vrt.py --resolve ...) and justify any elevation with "
+                  "priority_basis=argued-elevation + a priority_rationale, before reporting.")
         if evidence_errors:
             print("A confirmed/Medium+ finding rests on circular evidence (its own log/tool_output/analysis) "
                   "=> add a reproducible INDEPENDENT artifact (request_response/poc_script/screenshot/"
