@@ -179,6 +179,88 @@ class BlockedBranch(unittest.TestCase):
         self.assertEqual(ra.audit(led, {"flow:state-change"}, MAPC)["summary"]["total"], 0)
 
 
+class LegUncovered(unittest.TestCase):
+    """roadmap L-A: the GENERALIZATION of blocked-unverified to ALL statuses. A high-prior `pattern: family`
+    class whose per-leg sub-surface marks (or the surface ledger) show a routing-map leg that was NEVER
+    tested is a `leg-uncovered` HIGH gap — so an `attempted` family can no longer silently mask an untested
+    in-scope leg (the near-missed-P1). A family with no per-leg detail (uniform) stays silent."""
+
+    def test_attempted_family_with_pending_leg_is_a_gap(self):
+        led = [{"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+                "subsurfaces": [{"agent": "auth-bypass", "status": "attempted"},
+                                {"agent": "jwt", "status": "attempted"},
+                                {"agent": "oauth", "status": "pending"}]}]
+        r = ra.audit(led, {"flow:auth"}, MAPC)
+        g = next(x for x in r["gaps"] if x["type"] == "leg-uncovered")
+        self.assertEqual(g["category"], "auth")
+        self.assertEqual(g["severity"], "high")
+        self.assertIn("oauth", g["detail"])
+
+    def test_partial_detail_missing_leg_is_a_gap(self):
+        # only jwt detailed; auth-bypass + oauth have no status -> uncovered legs.
+        led = [{"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+                "subsurfaces": [{"agent": "jwt", "status": "attempted"}]}]
+        r = ra.audit(led, {"flow:auth"}, MAPC)
+        g = next(x for x in r["gaps"] if x["type"] == "leg-uncovered")
+        self.assertIn("auth-bypass", g["detail"])
+        self.assertIn("oauth", g["detail"])
+
+    def test_all_legs_tested_clears_it(self):
+        led = [{"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+                "subsurfaces": [{"agent": a, "status": "attempted"} for a in ("auth-bypass", "jwt", "oauth")]}]
+        self.assertFalse(any(x["type"] == "leg-uncovered" for x in ra.audit(led, {"flow:auth"}, MAPC)["gaps"]))
+
+    def test_surface_ledger_crosscheck_clears_a_lagging_leg(self):
+        led = [{"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+                "subsurfaces": [{"agent": "auth-bypass", "status": "attempted"},
+                                {"agent": "jwt", "status": "attempted"},
+                                {"agent": "oauth", "status": "pending"}]}]
+        # oauth was consumed per the surface ledger -> no leg-uncovered gap even though the per-leg mark lags.
+        r = ra.audit(led, {"flow:auth"}, MAPC, tested_subsurfaces={"oauth"})
+        self.assertFalse(any(x["type"] == "leg-uncovered" for x in r["gaps"]))
+
+    def test_uniform_family_no_detail_is_silent(self):
+        led = [{"id": "auth", "status": "attempted", "findings_count": 2, "triggers_matched": ["flow:auth"]}]
+        self.assertFalse(any(x["type"] == "leg-uncovered" for x in ra.audit(led, {"flow:auth"}, MAPC)["gaps"]))
+
+    def test_low_prior_family_is_silent(self):
+        led = [{"id": "auth", "status": "attempted", "findings_count": 0,
+                "subsurfaces": [{"agent": "oauth", "status": "pending"}]}]
+        self.assertEqual(ra.audit(led, set(), MAPC)["summary"]["total"], 0)   # no signal -> low prior
+
+    def test_blocked_top_level_uses_blocked_unverified_not_leg_uncovered(self):
+        # a blocked family keeps its dedicated blocked-unverified gap (which already names owed siblings);
+        # it is NOT double-reported as leg-uncovered.
+        led = [{"id": "auth", "status": "blocked", "reason": "session expired",
+                "triggers_matched": ["flow:auth"]}]
+        r = ra.audit(led, {"flow:auth"}, MAPC)
+        types = {g["type"] for g in r["gaps"] if g["category"] == "auth"}
+        self.assertIn("blocked-unverified", types)
+        self.assertNotIn("leg-uncovered", types)
+
+    def test_leg_uncovered_accept_via_write_accept(self):
+        import json as _json
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        eng = pathlib.Path(tmp.name)
+        # load_and_audit uses the REAL routing map (auth is a family there).
+        (eng / "coverage_ledger.json").write_text(_json.dumps({"categories": [
+            {"id": "auth", "status": "attempted", "findings_count": 1, "triggers_matched": ["flow:auth"],
+             "subsurfaces": [{"agent": "auth-bypass", "status": "attempted"},
+                             {"agent": "jwt", "status": "attempted"},
+                             {"agent": "oauth", "status": "pending"}]}]}), encoding="utf-8")
+        res = ra.load_and_audit(eng)
+        self.assertTrue(any(g["type"] == "leg-uncovered" and g["category"] == "auth" for g in res["gaps"]))
+        # an honest accept routes through the SAME mechanism as every other gap (named blocker, no ladder).
+        ok, msg = ra.write_accept(eng, "leg-uncovered:auth", blockers=["oauth-leg-oos"], ladder_run=[],
+                                  reason="oauth IdP host auth.example.com is out of scope")
+        self.assertTrue(ok, msg)
+        data = json.loads((eng / "reviews" / "recall_audit_accepts.json").read_text(encoding="utf-8"))
+        self.assertEqual(data[0]["id"], "leg-uncovered:auth")
+        self.assertEqual(data[0]["blocker"], ["oauth-leg-oos"])
+
+
 class BlockedAccept(unittest.TestCase):
     """An honest block that genuinely can't be closed in-scope is routed through the SAME accept mechanism
     as a shallow-clear (write_accept + a named _BLOCKER_VOCAB blocker) — no new escape hatch. The new

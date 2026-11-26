@@ -17,6 +17,9 @@ Two jobs, one source of truth (skills/_contract/routing-map.json):
   --mark      Flip ONE ledger category after running it, in place, instead of hand-editing JSON:
               `--mark <id> --status attempted --count N [--note "..."]`. Enforces the status enum
               and the skipped/n-a/blocked-needs-a-reason rule. (Needs --engagement.)
+              For a `pattern: family` category, `--mark <family> --subsurface <agent> --status …`
+              sets ONE leg's (sub-surface) status; the family's top-level status is then a derived
+              ROLL-UP (worst-case / least-covered) so no family status can mask an untested leg.
 
 The point of Phase 1: make "not attempted" a first-class, visible state. A category that never ran
 and a category that ran-and-found-nothing must look different.
@@ -107,6 +110,15 @@ LEDGER_NAME = "coverage_ledger.json"
 _OPEN_STATUSES = {"pending"}
 _NEED_REASON = {"skipped", "n/a", "blocked"}
 _MARK_STATUSES = {"pending", "attempted", "blocked", "skipped", "n/a", "pipeline"}
+# A sub-surface (family leg) can hold any category status EXCEPT `pipeline` (that is a capability-phase
+# roll-up over findings, never a per-leg state). The task's leg-status enum: attempted|blocked|skipped|
+# pending|n/a.
+_SUBSURFACE_STATUSES = {"attempted", "blocked", "skipped", "pending", "n/a"}
+# FAMILY ROLL-UP precedence (roadmap L-A). The family top-level `status` is a roll-up over its sub-surface
+# legs: the WORST-CASE / LEAST-COVERED leg wins, so a family can never read more-covered than any one leg
+# (no masking). Ordered most-concerning (dominant) -> most-covered: a single `pending` (un-run) leg keeps
+# the whole family `pending` (an open gap); only when every leg is attempted/terminal does it roll up clean.
+_ROLLUP_ORDER = ["pending", "blocked", "attempted", "skipped", "n/a"]
 
 # --- DEPTH-SUBSTANCE BAR (Trust: no rubber-stamped recall) ------------------------------------------ #
 # META-LESSON: "a step/gate the workflow can route around is not real." A bare `--mark <id> --status
@@ -158,6 +170,116 @@ def family_agents(m: dict, cat_id: str) -> list:
             if len(agents) > 1:
                 return agents
     return []
+
+
+def rollup_status(statuses):
+    """The family top-level roll-up over its sub-surface leg statuses: the worst-case / least-covered
+    status present (``_ROLLUP_ORDER``: pending > blocked > attempted > skipped > n/a). None when there are
+    no legs. An UNRECOGNIZED status is treated as the most concerning (ranked above pending) so a bad leg
+    status can never inflate the family's coverage. Pure."""
+    present = [str(s) for s in statuses if s]
+    if not present:
+        return None
+    best = None
+    for s in present:
+        rank = _ROLLUP_ORDER.index(s) if s in _ROLLUP_ORDER else -1
+        if best is None or rank < best[0]:
+            best = (rank, s)
+    return best[1]
+
+
+def subsurface_map(entry: dict, fam=None) -> dict:
+    """{leg_agent_id: status} for a family entry, read from the AUTHORITATIVE ``subsurfaces[]`` first, then
+    filled from the #128 compat fields (``blocked_subsurfaces`` -> 'blocked', ``pending_subsurfaces`` ->
+    'pending') for any leg not already covered. When ``fam`` (the routing-map agents[]) is given the result
+    is restricted to those legs (a named host that is not a leg is dropped — it's not a sub-surface). {} when
+    the entry carries NO per-leg detail (the uniform, backward-compatible case). Pure."""
+    out = {}
+    for ss in (entry.get("subsurfaces") or []):
+        if not isinstance(ss, dict):
+            continue
+        leg = str(ss.get("agent") or ss.get("id") or "").strip()
+        st = str(ss.get("status") or "").strip()
+        if leg and st:
+            out.setdefault(leg, st)
+    for leg in (entry.get("blocked_subsurfaces") or []):
+        leg = str(leg).strip()
+        if leg and leg not in out:
+            out[leg] = "blocked"
+    for leg in (entry.get("pending_subsurfaces") or []):
+        leg = str(leg).strip()
+        if leg and leg not in out:
+            out[leg] = "pending"
+    if fam is not None:
+        fam_set = set(fam)
+        out = {k: v for k, v in out.items() if k in fam_set}
+    return out
+
+
+def _rollup_reason(roll, leg_status, fam) -> str:
+    """A derived family reason that NAMES each leg group — so a rolled-up `blocked`/`skipped`/`n/a` family
+    satisfies the needs-a-reason rule AND the family-block enumeration check (the blocked legs are named)."""
+    buckets = [("attempted", [l for l in fam if leg_status.get(l) == "attempted"]),
+               ("blocked", [l for l in fam if leg_status.get(l) == "blocked"]),
+               ("pending", [l for l in fam if leg_status.get(l) == "pending"]),
+               ("skipped/na", [l for l in fam if leg_status.get(l) in ("skipped", "n/a")])]
+    parts = [f"{label}: {', '.join(legs)}" for label, legs in buckets if legs]
+    return "family roll-up over sub-surfaces [" + "; ".join(parts) + "]"
+
+
+def _apply_subsurface(hit: dict, fam: list, agent: str, status: str, reason, count):
+    """Set ONE family leg's (sub-surface) status inside ``hit['subsurfaces']``, materializing every other
+    routing-map leg as 'pending' the first time (so an un-marked leg is VISIBLE, never silently covered),
+    then DERIVE the family roll-up: top-level ``status`` (``rollup_status``), ``reason`` (names the legs),
+    ``findings_count`` (sum of the legs'), and the #128 ``blocked_subsurfaces``/``pending_subsurfaces``
+    mirror so the existing gate checks keep working. Mutates ``hit`` in place. Pure w.r.t. I/O."""
+    existing = {}
+    order = list(fam)
+    for ss in (hit.get("subsurfaces") or []):
+        if not isinstance(ss, dict):
+            continue
+        leg = str(ss.get("agent") or ss.get("id") or "").strip()
+        if not leg:
+            continue
+        rec = {k: v for k, v in ss.items() if k != "id"}
+        rec["agent"] = leg
+        existing[leg] = rec
+        if leg not in order:
+            order.append(leg)
+    for leg in fam:
+        existing.setdefault(leg, {"agent": leg, "status": "pending"})
+    tgt = existing[agent]
+    tgt["status"] = status
+    if reason is not None:
+        tgt["reason"] = reason
+    if count is not None:
+        tgt["findings_count"] = count
+    hit["subsurfaces"] = [existing[leg] for leg in order if leg in existing]
+    leg_status = {leg: str(existing[leg].get("status") or "") for leg in existing}
+    roll = rollup_status(leg_status.values())
+    hit["status"] = roll
+    total = 0
+    for ss in hit["subsurfaces"]:
+        try:
+            total += int(ss.get("findings_count") or 0)
+        except (TypeError, ValueError):
+            pass
+    hit["findings_count"] = total
+    blocked_legs = [leg for leg in fam if leg_status.get(leg) == "blocked"]
+    pending_legs = [leg for leg in fam if leg_status.get(leg) == "pending"]
+    if blocked_legs:
+        hit["blocked_subsurfaces"] = blocked_legs
+    else:
+        hit.pop("blocked_subsurfaces", None)
+    if pending_legs:
+        hit["pending_subsurfaces"] = pending_legs
+    else:
+        hit.pop("pending_subsurfaces", None)
+    hit["reason"] = _rollup_reason(roll, leg_status, fam)
+    if roll == "attempted":
+        hit["depth_substantiated"] = attempted_substance_gap(
+            hit, depth_thresholds(_safe_map(), str(hit.get("id") or ""))) is None
+    return roll
 
 
 def depth_thresholds(m: dict, cat_id: str) -> dict:
@@ -431,12 +553,38 @@ def validate(eng: Path, m: dict, strict: bool = False):
             fam = family_agents(m, cid)
             if fam:
                 named = [str(a) for a in (c.get("blocked_subsurfaces") or []) if str(a).strip()]
+                # a subsurfaces[] leg recorded 'blocked' is an enumeration too (the authoritative form).
+                sub_blocked = [k for k, v in subsurface_map(c, fam).items() if v == "blocked"]
                 reason_names = any(a.lower() in (c.get("reason") or "").lower() for a in fam)
-                if not named and not reason_names:
+                if not named and not sub_blocked and not reason_names:
                     errors.append(f"'{cid}' is a family (agents: {', '.join(fam)}) marked 'blocked' without "
                                   f"naming the blocked sub-surface(s) — a family block can mask an untested "
                                   f"in-scope sibling; record blocked_subsurfaces (coverage.py --mark {cid} "
                                   f"--status blocked --blocked-subsurfaces <agent/host> --note ...)")
+        # SUB-SURFACE / PER-LEG ACCOUNTING (roadmap L-A): generalize the blocked-only rule above to ALL
+        # statuses. Once a family records ANY per-leg detail (subsurfaces[] / blocked_/pending_subsurfaces)
+        # it must account for EVERY routing-map leg (an un-named leg can hide a silent untested surface), and
+        # a family claiming `attempted` must not carry a leg that is still pending/blocked — an `attempted`
+        # family with an untested leg is a GAP, not a silent pass (the near-missed-P1 root cause). A family
+        # with NO per-leg detail is the uniform, backward-compatible case (handled exactly as before).
+        # Recomputed from the entry's own fields so a hand-edited roll-up can't slip through.
+        if st not in ("pipeline",) and not _is_whole_surface_block(c):
+            fam2 = family_agents(m, cid)
+            leg_map = subsurface_map(c, fam2) if fam2 else {}
+            if fam2 and leg_map:
+                unaccounted = [a for a in fam2 if a not in leg_map]
+                if unaccounted:
+                    errors.append(f"'{cid}' is a family (agents: {', '.join(fam2)}) that records sub-surface "
+                                  f"status for some legs but NOT {', '.join(unaccounted)} — an un-accounted leg "
+                                  f"can hide an untested surface; mark it (coverage.py --mark {cid} "
+                                  f"--subsurface <agent> --status ...)")
+                if st == "attempted":
+                    uncovered = [a for a in fam2 if leg_map.get(a) in ("pending", "blocked")]
+                    if uncovered:
+                        errors.append(f"'{cid}' is 'attempted' but sub-surface leg(s) {', '.join(uncovered)} "
+                                      f"are not covered (pending/blocked) — a family 'attempted' must not mask "
+                                      f"an untested/under-covered leg; mark each leg (coverage.py --mark {cid} "
+                                      f"--subsurface <agent> --status ...) or roll the family down")
         # DEPTH-SUBSTANCE BAR: a zero-finding `attempted` clear that does not PROVE depth is a rubber-stamp.
         # Reject it (re-computing substance from the entry's own fields, so a hand-edited status can't slip
         # through) so the gate re-routes it instead of counting a shallow pass as covered.
@@ -536,6 +684,22 @@ def selftest() -> int:
     _led2 = {"categories": [{"id": "idor", "status": "pending", "findings_count": 0}]}
     reconcile_counts(_led2, [{"id": "RS-3", "_rs_source_skill": "idor"}])
     assert _led2["categories"][0]["status"] == "attempted" and _led2["categories"][0]["findings_count"] == 1
+    # SUB-SURFACE / PER-LEG ROLL-UP (roadmap L-A): the family top-level status is the worst-case / least-
+    # covered leg — a single un-run leg keeps the family open, so no family status masks an untested leg.
+    assert rollup_status(["attempted", "attempted", "attempted"]) == "attempted"
+    assert rollup_status(["attempted", "pending", "attempted"]) == "pending"   # one un-run leg dominates
+    assert rollup_status(["attempted", "skipped", "n/a"]) == "attempted"
+    assert rollup_status(["blocked", "attempted"]) == "blocked"
+    assert rollup_status([]) is None
+    _fam = family_agents(m, "auth")                       # ["auth-bypass", "jwt", "oauth"]
+    _e = {"id": "auth", "status": "pending"}
+    _apply_subsurface(_e, _fam, "jwt", "attempted", "jwt forge battery ran, all rejected", 0)
+    assert _e["status"] == "pending", _e                  # auth-bypass + oauth still pending -> family pending
+    assert {s["agent"]: s["status"] for s in _e["subsurfaces"]}["jwt"] == "attempted"
+    assert sorted(_e["pending_subsurfaces"]) == ["auth-bypass", "oauth"]
+    for _leg in _fam:                                      # cover every leg -> family rolls up attempted
+        _apply_subsurface(_e, _fam, _leg, "attempted", "ran", 0)
+    assert _e["status"] == "attempted" and not _e.get("pending_subsurfaces"), _e
     print("coverage.py selftest: OK "
           f"({len(ids)} categories, {len(set(agents))} executors, orphans wired, phases auto-activate)")
     return 0
@@ -555,7 +719,7 @@ def _merge_list(current, incoming) -> list:
 
 def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=False,
          escalations=None, attempts=None, variants=None, depth_note=None, evidence=None,
-         require_depth=False, blocked_subsurfaces=None) -> int:
+         require_depth=False, blocked_subsurfaces=None, subsurface=None) -> int:
     """Update one ledger category in place (status / findings_count / reason / escalations + depth payload).
 
     This is the first-class way an orchestrator flips an entry after running a
@@ -577,6 +741,14 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
     `depth_substantiated:false` with a loud warning, and the completion gate rejects/re-drives it — so a
     shallow clear can never pass SILENTLY. Backward compatible: a mark that supplies the fields (or carries
     real findings) is unaffected.
+
+    SUB-SURFACE / PER-LEG GRANULARITY (roadmap L-A). `subsurface` (a family sub-agent / leg id) sets THAT
+    leg's status (``status`` is then the LEG status: attempted|blocked|skipped|pending|n/a) in the entry's
+    authoritative ``subsurfaces[]`` list, materializing every other routing-map leg as 'pending' the first
+    time, and DERIVES the family top-level status as a worst-case / least-covered ROLL-UP — so no family
+    status can mask an untested leg. Any depth payload (--attempts/--variants/--depth-note/--evidence) passed
+    with it applies at the family level (for the roll-up's depth-substance check). Only valid on a
+    `pattern: family` category; single-agent categories reject it.
 
     FAMILY-BLOCK SUB-SURFACE GRANULARITY (QW2). `blocked_subsurfaces` (a list of sub-agent ids / hosts)
     names which leg(s) of a `pattern: family` category (auth/sqli/ssrf/… — >1 sub-agents) are blocked, so
@@ -606,6 +778,55 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
             ids = ", ".join(sorted(str(c.get("id")) for c in cats))
             print(f"[!] no category {cat_id!r} in ledger. known ids: {ids}")
             return 2
+        # SUB-SURFACE / PER-LEG MARK (roadmap L-A): `--subsurface <agent> --status <leg-status>` sets ONE
+        # family leg's status and derives the family roll-up. A separate, self-contained path (returns from
+        # inside the lock, releasing it): the family top-level status/reason/findings_count become a DERIVED
+        # roll-up, never hand-set, so the family can't read more-covered than its least-covered leg.
+        if subsurface:
+            fam = family_agents(_safe_map(), cat_id)
+            if not fam:
+                print(f"[!] --subsurface is only valid on a `pattern: family` category (>1 sub-agents); "
+                      f"{cat_id!r} is not one")
+                return 2
+            if subsurface not in fam:
+                print(f"[!] {subsurface!r} is not a sub-agent of family {cat_id!r} (legs: {', '.join(fam)})")
+                return 2
+            if status not in _SUBSURFACE_STATUSES:
+                print(f"[!] sub-surface status {status!r} invalid; choose one of "
+                      f"{sorted(_SUBSURFACE_STATUSES)}")
+                return 2
+            if status in _NEED_REASON and not (note or "").strip():
+                print(f"[!] sub-surface status {status!r} on leg {subsurface!r} requires a reason — "
+                      f"pass --note \"...\"")
+                return 2
+            # family-level depth payload supplied alongside the leg mark (used by the roll-up's depth check)
+            if escalations:
+                hit["escalations"] = _merge_list(hit.get("escalations"), escalations)
+            if attempts is not None:
+                try:
+                    hit["attempts"] = max(0, int(attempts))
+                except (TypeError, ValueError):
+                    pass
+            if variants:
+                hit["variants_tried"] = _merge_list(hit.get("variants_tried"), variants)
+            if depth_note is not None:
+                hit["depth_note"] = depth_note
+            if evidence is not None:
+                hit["evidence"] = evidence
+            roll = _apply_subsurface(hit, fam, subsurface, status, note, count)
+            atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+            owed = hit.get("pending_subsurfaces") or []
+            if as_json:
+                print(json.dumps({"id": cat_id, "subsurface": subsurface, "subsurface_status": status,
+                                  "status": roll, "findings_count": hit.get("findings_count"),
+                                  "subsurfaces": hit.get("subsurfaces", []),
+                                  "pending_subsurfaces": owed,
+                                  "blocked_subsurfaces": hit.get("blocked_subsurfaces", []),
+                                  "depth_substantiated": hit.get("depth_substantiated")}, indent=2))
+            else:
+                tail = f"  owed={','.join(owed)}" if owed else ""
+                print(f"ok: {cat_id} subsurface {subsurface} -> {status}; family roll-up -> {roll}{tail}")
+            return 0
         if status in _NEED_REASON and not (note or (hit.get("reason") or "").strip()):
             print(f"[!] status {status!r} requires a reason — pass --note \"...\"")
             return 2
@@ -838,6 +1059,11 @@ def main() -> int:
                     help="--mark --status blocked: comma-separated sub-agent id(s)/host(s) that are blocked "
                     "on a `pattern: family` category (e.g. oauth, or auth.example.com). REQUIRED to block a "
                     "family — un-named siblings stay pending so a block can't absorb an untested sibling")
+    ap.add_argument("--subsurface", dest="subsurface",
+                    help="--mark: set ONE sub-surface (family leg / sub-agent) status on a `pattern: family` "
+                    "category — `--mark <family> --subsurface <agent> --status <attempted|blocked|skipped|"
+                    "pending|n/a>`. The family's top-level status becomes a derived worst-case roll-up so no "
+                    "family status can mask an untested leg")
     ap.add_argument("--close", action="store_true",
                     help="reconcile the ledger's findings_count+status from the engagement's findings at "
                          "close (needs --engagement); use --source-category for a white-box run")
@@ -907,7 +1133,7 @@ def main() -> int:
                     args.count, args.note, args.as_json, escalations=esc,
                     attempts=args.attempts, variants=var, depth_note=args.depth_note,
                     evidence=args.evidence, require_depth=args.require_depth,
-                    blocked_subsurfaces=bsub)
+                    blocked_subsurfaces=bsub, subsurface=args.subsurface)
 
     if args.validate:
         if not args.engagement:
