@@ -1172,6 +1172,63 @@ def check_exhaustion_adversary():
 
 check_exhaustion_adversary()
 
+
+# 22b — cross-model dispatch ledger (roadmap L-H): the `model_ledger.json` schema that MEASURES what the
+# `model:` pin ASSERTS. A closed, versioned coordination artifact scripts/model_ledger.py writes and the
+# completion gate reads back for its diversity-visibility warning. Registered here so a drift (a dropped root
+# `version`, an opened-up root/entry, or a drifted role enum) fails the suite — mirrors the diagnostics /
+# exhaustion-adversary schema checks.
+def check_model_ledger():
+    checked["model_ledger_schema"] = 1
+    scm = skills_dir / "_contract" / "model_ledger.schema.json"
+    if not scm.is_file():
+        err("skills/_contract/model_ledger.schema.json missing (the cross-model dispatch ledger schema)")
+    else:
+        try:
+            ml = json.loads(scm.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            ml = None
+            err(f"model_ledger.schema.json: invalid JSON: {e}")
+        if ml is not None:
+            mprops = ml.get("properties") or {}
+            if "version" not in mprops:
+                err("model_ledger.schema.json: must declare a root 'version' property (schema-versioning drift)")
+            if ml.get("additionalProperties") is not False:
+                err("model_ledger.schema.json: root must be additionalProperties:false (closed artifact)")
+            for req in ("engagement", "entries"):
+                if req not in mprops:
+                    err(f"model_ledger.schema.json: root must declare an '{req}' property")
+            entry_def = ((ml.get("$defs") or {}).get("entry") or {})
+            if entry_def.get("additionalProperties") is not False:
+                err("model_ledger.schema.json: $defs/entry must be additionalProperties:false (closed record)")
+            role_enum = set(((entry_def.get("properties") or {}).get("role") or {}).get("enum") or [])
+            if role_enum != {"executor", "reviewer", "exhaustion-adversary", "secondary-review", "other"}:
+                err("model_ledger.schema.json: $defs/entry/role enum must be exactly "
+                    f"['executor','reviewer','exhaustion-adversary','secondary-review','other'] (got {sorted(role_enum)})")
+            for req in ("role", "model", "ts"):
+                if req not in (entry_def.get("required") or []):
+                    err(f"model_ledger.schema.json: $defs/entry must require '{req}'")
+    # the producer self-test must pass (family-normalize + record/read round-trip + diversity True/False)
+    mlp = ROOT / "scripts" / "model_ledger.py"
+    if not mlp.is_file():
+        err("scripts/model_ledger.py missing (the cross-model dispatch-ledger producer)")
+        return
+    try:
+        import importlib.util
+        _mlspec = importlib.util.spec_from_file_location("rs_model_ledger_lint", mlp)
+        _ml = importlib.util.module_from_spec(_mlspec)
+        _mlspec.loader.exec_module(_ml)
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _ml.selftest()
+        checked["model_ledger"] = 1
+    except BaseException as e:  # noqa: BLE001
+        err(f"model_ledger.py selftest failed: {e}")
+
+
+check_model_ledger()
+
 check_vrt()
 
 # report — guarded so the module can be imported (e.g. by scripts/tests/test_vrt.py) to exercise its
