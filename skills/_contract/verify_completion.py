@@ -342,6 +342,21 @@ def _try_import_coverage():
         return None
 
 
+def _try_import_model_ledger():
+    # import scripts/model_ledger.py by PATH so nothing on sys.path can shadow it (mirrors _try_import_coverage)
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "model_ledger.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_model_ledger", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
 def _report_present(eng: Path) -> bool:
     """A consolidated report means the engagement is claiming DONE (reporting ran)."""
     return (eng / "report" / "findings_consolidated.json").is_file()
@@ -1754,6 +1769,88 @@ def _exhaustion_review_hard_errors(eng: Path, findings: list) -> list:
     return _exhaustion_review_check(eng, findings)[0]
 
 
+# --- Cross-model DIVERSITY-VISIBILITY check (roadmap L-H): MEASURE what the `model:` pin ASSERTS ----- #
+# The exhaustion-adversary gate above REQUIRES the cross-model verdict artifact, but it can only check the
+# artifact EXISTS with verdict=no_gaps_found — never which model actually PRODUCED it. The framework ASSERTS
+# cross-model diversity via a frontmatter `model:` pin (the adversary is pinned to a DIFFERENT model than the
+# executors + their `*-verify` reviewers), but the ACTUALLY DISPATCHED model is otherwise recorded nowhere, so
+# when a safeguard terminates every subagent of one model and they all silently fall back to the SAME model,
+# cross-model collapses to same-model and this gate still passes. runtime/model_ledger.json records the model
+# each agent ACTUALLY ran on; this check MEASURES whether the adversary/reviewers genuinely ran on a different
+# model family than the executors, and surfaces "diversity unavailable" as a VISIBLE WARNING + a recorded
+# deliverable fact. It is a WARNING, NOT a hard fail: a safeguard-blocked alternate model is a documented
+# limitation, not a defect — the point is to surface it, never a silent same-model pass. It does NOT touch the
+# exhaustion hard-gate (no_gaps_found stays the pass condition).
+def _model_diversity_check(eng: Path, findings: list) -> tuple:
+    """(warnings, summary) for the cross-model diversity-visibility check. NEVER returns a hard error.
+
+    Once the gates arm (a report exists / the run is terminal) it WARNS — never fails — when:
+      * runtime/model_ledger.json is ABSENT while a report exists (the actual dispatched model was never
+        recorded, so diversity could not be MEASURED — it may have silently collapsed to same-model); or
+      * the model ledger shows the exhaustion-adversary ran on the SAME model family as the executors (the
+        same-model collapse) — a documented limitation, surfaced, not a silent pass; AND
+      * (a stronger warning, independent of the above) the exhaustion_review's self-reported `model` field
+        DISAGREES with the adversary's family in the model ledger — the asserted cross-model claim ≠ what ran.
+
+    Before the gates arm the check is silent (a non-report engagement is unaffected). `summary` is the recorded
+    deliverable fact (the diversity assessment + whether a warning fired), surfaced in the JSON + a summary
+    line regardless of arming."""
+    ml = _try_import_model_ledger()
+    if not ml:
+        return [], {"available": None, "warned": False,
+                    "reason": "scripts/model_ledger.py not importable — cross-model diversity not measured"}
+    try:
+        assessment = ml.diversity_assessment(eng)
+    except Exception:  # noqa: BLE001 — a diversity read must never crash the completion gate
+        return [], {"available": None, "warned": False,
+                    "reason": "model ledger unreadable — cross-model diversity not measured"}
+
+    summary = dict(assessment)
+    summary["available"] = assessment.get("cross_model_available")
+    summary["warned"] = False
+    summary["self_report_mismatch"] = False
+
+    armed = _gates_armed(eng, findings)
+    if not armed:
+        # Mid-hunt: diversity is legitimately not yet decided — stay silent (a non-report engagement is
+        # unaffected). Still surface the assessment as a recorded fact.
+        return [], summary
+
+    warnings = []
+    ledger_present = (eng / "runtime" / "model_ledger.json").is_file()
+    if not ledger_present:
+        warnings.append(
+            "cross-model diversity (model-ledger): no runtime/model_ledger.json while a report exists — the "
+            "ACTUAL dispatched model per agent was never recorded, so the `model:` pin's cross-model diversity "
+            "could NOT be MEASURED (it may have silently collapsed to same-model, e.g. a safeguard terminating "
+            "one model's subagents). Record each dispatch with scripts/model_ledger.py so this is a measured "
+            "fact, not an assertion. [warning — a documented limitation, never a hard fail]")
+        summary["warned"] = True
+    elif not assessment.get("cross_model_available"):
+        warnings.append(
+            "cross-model diversity (model-ledger): UNAVAILABLE — " + str(assessment.get("reason"))
+            + ". Surfaced as a recorded deliverable fact, NOT a silent same-model pass. [warning — a documented "
+            "limitation, never a hard fail: the exhaustion gate's no_gaps_found pass condition is unchanged]")
+        summary["warned"] = True
+
+    # Stronger cross-check: the exhaustion_review SELF-REPORTS a `model` free-text field. If it disagrees with
+    # what the ledger recorded the adversary actually ran on, the asserted cross-model claim ≠ measured reality.
+    review = _load_exhaustion_review(eng)
+    if review is not None and ledger_present:
+        self_fam = ml.model_family(review.get("model"))
+        adv_fam = assessment.get("adversary_model")
+        if self_fam and adv_fam and self_fam != adv_fam:
+            warnings.append(
+                f"cross-model diversity (model-ledger): exhaustion_review.json SELF-REPORTS model family "
+                f"'{self_fam}' but runtime/model_ledger.json recorded the adversary actually dispatched on "
+                f"'{adv_fam}' — the self-reported cross-model claim DISAGREES with what ran (asserted ≠ "
+                f"measured). Trust the ledger (the measured fact) and record the real adversary model. "
+                f"[warning — never a hard fail]")
+            summary["self_report_mismatch"] = True
+            summary["warned"] = True
+    return warnings, summary
+
+
 # --- Deliverable-consistency HARD gate (R4): attestation bound to measured recall ---------------- #
 # A report/attestation must not NARRATE a clean/hardened posture while the measured signals contradict it:
 # the recall reviewer flagged unadjudicated gaps (reviews/recall_audit.verdict.json), or the run itself was
@@ -1959,6 +2056,13 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
     # (runtime/exhaustion_review.json) with every gap it raised closed. Warn while hunting, HARD at close.
     exhaustion_errors, exhaustion_warns = _exhaustion_review_check(eng, findings)
     top_warnings.extend(exhaustion_warns)
+    # Cross-model DIVERSITY-VISIBILITY (roadmap L-H): MEASURE what the `model:` pin asserts. The exhaustion
+    # gate above only checks the verdict artifact EXISTS, never which model produced it — so record the ACTUAL
+    # dispatched model per agent (runtime/model_ledger.json) and WARN (never fail) when cross-model collapsed to
+    # same-model, or the ledger is absent while a report exists. A WARNING + a recorded deliverable fact, never
+    # a silent same-model pass; the exhaustion hard-gate's no_gaps_found pass condition is untouched.
+    diversity_warns, diversity_summary = _model_diversity_check(eng, findings)
+    top_warnings.extend(diversity_warns)
     # Deliverable-consistency gate (R4): a report/attestation must not assert a clean/hardened posture
     # while recall gaps are unadjudicated or the run was degraded/failed. HARD once a report exists.
     deliverable_errors = _deliverable_consistency_errors(eng, findings)
@@ -2031,6 +2135,7 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                           "secondary_review_errors": secondary_errors,
                           "exhaustion_review_errors": exhaustion_errors,
                           "deliverable_consistency_errors": deliverable_errors,
+                          "diversity": diversity_summary,
                           "results": results, "warnings": all_warnings,
                           "unreferenced_evidence": orphans, "cvss_available": bool(cvss_mod)}, indent=2))
     else:
@@ -2109,6 +2214,10 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "the measured recall / run health contradicts):")
             for dle in deliverable_errors:
                 print(f"  - {dle}")
+        # Cross-model diversity (roadmap L-H) — a recorded, VISIBLE deliverable fact (never a hard gate):
+        # was the `model:` pin's cross-model diversity actually achieved, or did it collapse to same-model?
+        _div_mark = "✓" if diversity_summary.get("available") else ("⚠" if diversity_summary.get("warned") else "ℹ")
+        print(f"\n{_div_mark} cross-model diversity: {diversity_summary.get('reason', '(not measured)')}")
         if all_warnings:
             print("\n⚠ warnings (non-failing):")
             for w in all_warnings:

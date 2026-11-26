@@ -25,8 +25,10 @@ HERE = pathlib.Path(__file__).resolve()
 CONTRACT = HERE.parents[1]                 # skills/_contract
 REPO = HERE.parents[3]                     # repo root
 sys.path.insert(0, str(CONTRACT))
+sys.path.insert(0, str(REPO / "scripts"))
 
 import verify_completion as vc  # noqa: E402
+import model_ledger as ml  # noqa: E402 — the cross-model dispatch ledger the diversity check reads
 
 
 # --------------------------------------------------------------------------- #
@@ -92,15 +94,16 @@ def substantiate_attempted(led: dict) -> dict:
     return led
 
 
-def write_exhaustion_review(eng: pathlib.Path, *, verdict="no_gaps_found", gaps=None) -> None:
+def write_exhaustion_review(eng: pathlib.Path, *, verdict="no_gaps_found", gaps=None, model="sonnet") -> None:
     """Write a passing cross-model exhaustion-adversary verdict to runtime/exhaustion_review.json so a
     report-present fixture satisfies the exhaustion-adversary HARD gate WITHOUT weakening it. A complete,
     report-ready engagement must carry this artifact exactly as it must carry a per-finding secondary_review
     — the cross-model adversary ran and could not disprove 'engagement complete'. Mirrors how the executor
     records its own depth (substantiate_attempted): the fixtures model a real complete engagement, not a
-    gate dodge. Pass verdict='found_gaps' / explicit gaps to build the NEGATIVE cases."""
+    gate dodge. Pass verdict='found_gaps' / explicit gaps to build the NEGATIVE cases; pass `model=` to drive
+    the model-diversity self-report cross-check (the SELF-REPORTED model vs the model ledger)."""
     (eng / "runtime").mkdir(parents=True, exist_ok=True)
-    doc = {"version": 1, "verdict": verdict, "model": "sonnet", "reviewer": "exhaustion-adversary",
+    doc = {"version": 1, "verdict": verdict, "model": model, "reviewer": "exhaustion-adversary",
            "reviewed_at": "2026-01-01T02:00:00Z",
            "checked": ["coverage_ledger", "surface_ledger", "findings", "recall_audit", "audit_trail"],
            "gaps": gaps if gaps is not None else []}
@@ -1894,6 +1897,146 @@ class TestExhaustionAdversaryGate(unittest.TestCase):
             self.assertTrue(payload["pass"], payload)
             self.assertEqual(payload["exhaustion_review_errors"], [])
             self.assertTrue(any("exhaustion" in w.lower() for w in payload["warnings"]))
+
+
+# --------------------------------------------------------------------------- #
+# Cross-model DIVERSITY-VISIBILITY (roadmap L-H): MEASURE what the `model:` pin
+# ASSERTS. A WARNING (never a hard fail) + a recorded deliverable fact when the
+# ACTUAL dispatched model collapsed to same-model — never a silent same-model pass.
+# --------------------------------------------------------------------------- #
+class TestModelDiversityVisibility(unittest.TestCase):
+    def _complete_report_eng(self, d, *, exhaustion_model="sonnet"):
+        """A report-present engagement that passes EVERY hard gate, so the diversity WARNING is the only thing
+        that varies. Mirrors TestCoverageGateReportPresent._write_report + a complete coverage/surface ledger."""
+        eng = pathlib.Path(d)
+        cov = vc._try_import_coverage()
+        sf = vc._try_import_surface()
+        self.assertIsNotNone(cov)
+        self.assertIsNotNone(sf)
+        f = valid_finding()
+        for item in f.get("evidence", []):
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        write_exhaustion_review(eng, model=exhaustion_model)
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"] = "attempted"
+                c["findings_count"] = 0
+        substantiate_attempted(led)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sled = sf.plan_from_items("acme-2026", [
+            {"kind": "endpoint", "value": "/api/login", "discovered_by": "recon"},
+            {"kind": "param", "value": "id", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue()), buf
+
+    def _diversity_warns(self, payload):
+        return [w for w in payload["warnings"] if "cross-model diversity" in w.lower()]
+
+    def test_missing_ledger_with_report_warns(self):
+        """A report exists but no model_ledger.json — the actual dispatched model was never recorded, so
+        diversity could not be MEASURED => a WARNING (non-failing), never a silent pass."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._complete_report_eng(d)  # no model ledger written
+            payload, _ = self._run(eng)
+            self.assertTrue(payload["pass"], payload)                 # gate still PASSES (warning, not fail)
+            self.assertEqual(payload["exhaustion_review_errors"], [])  # the hard gate is untouched
+            self.assertTrue(self._diversity_warns(payload), payload["warnings"])
+            self.assertTrue(payload["diversity"]["warned"])
+            # the warning must NOT be in any hard-error list
+            self.assertFalse(any("diversity" in e.lower() for e in payload["exhaustion_review_errors"]))
+
+    def test_all_same_model_warns(self):
+        """Executors + reviewer + adversary ALL ran on opus (the real incident: a safeguard forced one model)
+        => cross-model collapsed to same-model => a WARNING + cross_model_available False, gate still passes."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._complete_report_eng(d, exhaustion_model="opus")  # self-report matches the ledger
+            ml.record(eng, "executor", "xss", "opus")
+            ml.record(eng, "reviewer", "xss", "opus", agent_id="xss-reflected-verify")
+            ml.record(eng, "exhaustion-adversary", None, "claude-opus-4-8")  # STILL opus
+            payload, _ = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertFalse(payload["diversity"]["available"])
+            self.assertTrue(payload["diversity"]["warned"])
+            self.assertFalse(payload["diversity"]["self_report_mismatch"])  # self-report agrees, just same-model
+            self.assertTrue(self._diversity_warns(payload), payload["warnings"])
+
+    def test_cross_model_is_silent(self):
+        """The adversary genuinely ran on a DIFFERENT family than the executors => NO diversity warning."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._complete_report_eng(d, exhaustion_model="sonnet")
+            ml.record(eng, "executor", "xss", "opus")
+            ml.record(eng, "executor", "sqli", "claude-opus-4-8")
+            ml.record(eng, "exhaustion-adversary", None, "sonnet")  # different family — real cross-model
+            payload, _ = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertTrue(payload["diversity"]["available"])
+            self.assertFalse(payload["diversity"]["warned"])
+            self.assertEqual(self._diversity_warns(payload), [], payload["warnings"])
+
+    def test_self_report_mismatch_is_a_stronger_warning(self):
+        """exhaustion_review SELF-REPORTS sonnet, but the ledger shows the adversary actually ran on opus —
+        the asserted cross-model claim DISAGREES with what ran => a stronger (mismatch) WARNING, gate passes."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._complete_report_eng(d, exhaustion_model="sonnet")  # claims sonnet
+            ml.record(eng, "executor", "xss", "opus")
+            ml.record(eng, "exhaustion-adversary", None, "opus")  # but ACTUALLY ran on opus
+            payload, _ = self._run(eng)
+            self.assertTrue(payload["pass"], payload)
+            self.assertTrue(payload["diversity"]["self_report_mismatch"])
+            self.assertTrue(any("disagrees with what ran" in w.lower() or "asserted" in w.lower()
+                                for w in self._diversity_warns(payload)), payload["warnings"])
+
+    def test_non_report_engagement_unaffected(self):
+        """Mid-hunt (no consolidated report): even a same-model ledger must NOT raise a diversity warning."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            f = valid_finding()
+            write_evidence(eng, f)
+            (eng / "findings.json").write_text(json.dumps([f]), encoding="utf-8")
+            ml.record(eng, "executor", "xss", "opus")
+            ml.record(eng, "exhaustion-adversary", None, "opus")  # same model, but no report => silent
+            payload, _ = self._run(eng)
+            self.assertEqual(self._diversity_warns(payload), [], payload["warnings"])
+            self.assertFalse(payload["diversity"]["warned"])
+
+    def test_exhaustion_hard_gate_pass_condition_unchanged(self):
+        """The diversity work must NOT convert the exhaustion gate into a model-equality hard-fail: a
+        same-model engagement with a no_gaps_found verdict still PASSES the hard gate (only a warning fires),
+        and a found_gaps verdict still HARD-fails — regardless of the model ledger."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._complete_report_eng(d, exhaustion_model="opus")
+            ml.record(eng, "executor", "xss", "opus")
+            ml.record(eng, "exhaustion-adversary", None, "opus")  # same model (would 'fail' if diversity were hard)
+            payload, _ = self._run(eng)
+            self.assertTrue(payload["pass"], payload)                 # no_gaps_found still PASSES
+            self.assertEqual(payload["exhaustion_review_errors"], [])  # diversity added NO hard error
+        with tempfile.TemporaryDirectory() as d:
+            eng = self._complete_report_eng(d, exhaustion_model="sonnet")
+            write_exhaustion_review(eng, verdict="found_gaps",
+                                    gaps=[{"category": "sqli", "gap": "never ran", "remediation": "run it",
+                                           "status": "open"}], model="sonnet")
+            ml.record(eng, "executor", "xss", "opus")
+            ml.record(eng, "exhaustion-adversary", None, "sonnet")  # genuine cross-model, but a found_gap
+            payload, _ = self._run(eng)
+            self.assertFalse(payload["pass"], payload)                # found_gaps still HARD-fails
+            self.assertTrue(payload["exhaustion_review_errors"])
 
 
 if __name__ == "__main__":

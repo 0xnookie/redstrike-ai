@@ -24,6 +24,17 @@
       "type": "array",
       "items": { "$ref": "#/$defs/gap" },
       "description": "every exhaustion gap the adversary raised. For a no_gaps_found verdict this is normally empty; a genuinely-unclosable gap may remain here ONLY with status=closed/resolved/redriven AND a named blocker (an honest 'couldn't, because X', never a silent drop)."
+    },
+    "diversity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OPTIONAL — the MEASURED cross-model diversity state (roadmap L-H), recorded by the adversary/orchestrator from runtime/model_ledger.json so the deliverable states whether the `model:` pin actually yielded a different dispatched model. The free-text `model` field above stays (self-reported); this block is the measured cross-check. Absent on older reviews (backward-compatible). When cross_model is false, name the blocker — a documented limitation, surfaced, never a silent same-model pass.",
+      "properties": {
+        "cross_model": { "type": "boolean", "description": "true iff the exhaustion-adversary (or a `*-verify` reviewer) actually ran on a DIFFERENT model family than the executors, per the model ledger." },
+        "executor_models": { "type": "array", "items": { "type": "string" }, "description": "the distinct model families the executors actually ran on (from the model ledger)." },
+        "adversary_model": { "type": "string", "description": "the model family the exhaustion-adversary actually ran on (from the model ledger), which may DIFFER from the self-reported `model` field above when a safeguard forced a fallback." },
+        "blocker": { "type": "string", "description": "when cross_model is false, the named reason the alternate model was unavailable (e.g. safeguard-terminated-subagents / single-model-available) — an honest 'same-model, because X', not a silent pass." }
+      }
     }
   },
   "$defs": {

@@ -157,6 +157,15 @@ a parallel multi-model swarm batched by rank, not a single serial pass. This is 
   class whose `hunt_plan.json` `depth_budget.diversity_pass` is true (typical of a `deep` budget), run a
   SECOND pass over the same sinks on a DIFFERENT model. Reviewer (`*-verify`) subagents may run on the
   cheaper model per the routing policy.
+- **Record the ACTUAL dispatched model (cross-model is ASSERTED by the `model:` pin, so MEASURE it).**
+  Whenever you dispatch an executor OR its `<class>-verify` reviewer, record the model it ACTUALLY ran on —
+  not the frontmatter pin — with `python scripts/model_ledger.py record --engagement <dir> --role
+  executor|reviewer --category <class> --model <model-it-ran-on> [--agent-id <id>]` (lock-safe append, like
+  `coverage.py`). This exists because a safeguard can terminate one model's subagents and silently force every
+  agent onto the SAME model — collapsing cross-model to same-model while every gate still passes. The
+  completion gate reads this ledger and emits a VISIBLE "cross-model diversity unavailable" WARNING (never a
+  hard fail) when the adversary ran on the same model family as the executors, so same-model is a surfaced,
+  recorded fact — not a silent pass.
 - **Each executor writes ITS OWN `<skill>/findings.json`** — never a shared file — so concurrent executors
   in a wave never collide on a write.
 - **A FORK/SUBAGENT-RUN EXECUTOR CANNOT SELF-GATE — the PARENT owns the reviewer gate AND `report.md`.**
@@ -367,6 +376,17 @@ deterministic gates can't see — a category `attempted`/`done` with no depth su
 `tested` with no evidence artifact, a `blocked` mark never re-driven, a signalled surface shallow-cleared, a
 feeder finding never chained — then writes **`<engagement>/runtime/exhaustion_review.json`** (schema
 `skills/_contract/exhaustion_review.schema.json`) with a `no_gaps_found` / `found_gaps` verdict.
+
+**Record the adversary's ACTUAL dispatched model.** When you spawn the adversary, record the model it REALLY
+ran on with `python scripts/model_ledger.py record --engagement <dir> --role exhaustion-adversary --model
+<model-it-ran-on> --agent-id exhaustion-adversary` — because the whole value of this gate is that the
+adversary ran on a DIFFERENT model than the executors + their `*-verify` reviewers, and the `model: sonnet`
+pin only ASSERTS that: if a safeguard terminated the pinned model's subagents and it silently fell back to the
+executors' model, cross-model became same-model. The completion gate cross-checks this ledger against the
+review's self-reported `model` and emits a VISIBLE WARNING (never a hard fail) when diversity was unavailable
+or the self-report disagrees with what ran — so "we ran cross-model" is a MEASURED fact, not an assertion.
+Optionally record the measured state in the review's additive `diversity` object (`cross_model`,
+`executor_models`, `adversary_model`, `blocker`).
 
 - **On `found_gaps`:** re-drive EXACTLY the categories/surfaces each gap names (escalate / un-block / chain /
   test the host), then **re-run the adversary** — repeat until it returns `no_gaps_found`.

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/model_ledger.schema.json",
+  "title": "Redstrike Cross-Model Dispatch Ledger",
+  "description": "runtime/model_ledger.json -- the ACTUALLY DISPATCHED model per agent (roadmap L-H: MEASURE what the `model:` pin ASSERTS). The framework ASSERTS cross-model verification diversity via a frontmatter `model:` pin (the exhaustion-adversary is pinned to a DIFFERENT model than the executors + their `*-verify` reviewers), but the model that actually RAN is otherwise recorded nowhere — so when a safeguard terminates every subagent of one model and they silently fall back to the SAME model, cross-model collapses to same-model and every gate still passes. Each dispatched agent appends a record here (scripts/model_ledger.py record); diversity_assessment() then answers whether the adversary / reviewers genuinely ran on a different model FAMILY than the executors, and the completion gate surfaces 'cross-model diversity unavailable' as a VISIBLE warning + a recorded deliverable fact — never a silent same-model pass. A WARNING, not a hard fail: a safeguard-blocked alternate model is a documented limitation, not a defect.",
+  "type": "object",
+  "required": ["version", "engagement", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "description": "model-ledger schema version (drift guard). Current: 1." },
+    "engagement": { "type": "string", "description": "the engagement id/name this ledger belongs to." },
+    "generated_at": { "type": "string", "description": "ISO-8601 timestamp of the last append." },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" },
+      "description": "one record per dispatched agent — the model it ACTUALLY ran on (append-only)."
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "description": "one dispatched agent's actual-model record: its role, the class it worked, and the model it really ran on (not the frontmatter pin).",
+      "required": ["role", "model", "ts"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": ["executor", "reviewer", "exhaustion-adversary", "secondary-review", "other"],
+          "description": "the dispatched agent's role. executor = a vuln-class executor; reviewer = a per-class `*-verify` reviewer; exhaustion-adversary = the model-pinned cross-model adversary; secondary-review = the cross-model adversarial second verifier; other = anything else."
+        },
+        "category": {
+          "type": ["string", "null"],
+          "description": "the vulnerability class/category the agent worked (e.g. 'xss'); null for an engagement-level role (exhaustion-adversary / secondary-review)."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the model the agent ACTUALLY ran on — whatever was really dispatched, NOT the frontmatter pin (that distinction is the whole point of this ledger)."
+        },
+        "model_family": {
+          "type": "string",
+          "description": "the derived family token (opus/sonnet/haiku/...) the diversity check compares — recorded so the console + gate never recompute it."
+        },
+        "agent_id": {
+          "type": ["string", "null"],
+          "description": "the dispatched agent/subagent id when known."
+        },
+        "ts": { "type": "string", "description": "ISO-8601 timestamp of the dispatch record." }
+      }
+    }
+  }
+}
