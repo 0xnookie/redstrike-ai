@@ -103,6 +103,273 @@ def check_depth_substance(rmap):
     return out
 
 
+# --- VRT (Vulnerability Rating Taxonomy) primitives -------------------------------------------------
+# The pinned bug-bounty rating taxonomy (skills/bug-bounty/refs/vrt/) is the offline source of truth for
+# valid VRT paths + baseline priorities. These helpers flatten it and validate a finding's OPTIONAL
+# `vrt{}` block: (a) FABRICATION — the claimed path/id must resolve to a real taxonomy node; (b)
+# INFLATION — the claimed priority may not be MORE severe (a lower P-number) than the node's baseline
+# unless priority_basis=argued-elevation carries a non-empty priority_rationale. This is the QW primitive;
+# the full crosswalk/resolver + a verify_completion HARD gate are larger follow-ups (out of scope here).
+VRT_DIR = ROOT / "skills" / "bug-bounty" / "refs" / "vrt"
+VRT_TAXONOMY_PATH = VRT_DIR / "vulnerability-rating-taxonomy.json"
+# Taxonomy ids a scope.yaml `program.taxonomy` may reference (the pinned sets we ship; `none` = pentest).
+KNOWN_TAXONOMIES = {"vrt", "none"}
+_VRT_PRIO_RE = re.compile(r"^[Pp]?([1-5])$")
+
+
+def _vrt_priority_int(value):
+    """'P3' / '3' / 3 -> 3 ; None / '' / 'varies' -> None. Raises ValueError on anything else."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{value!r} is not a P1-P5 priority")
+    if isinstance(value, int):
+        if 1 <= value <= 5:
+            return value
+        raise ValueError(f"{value!r} is out of the P1-P5 range")
+    s = str(value).strip()
+    if not s or s.lower() == "varies":
+        return None
+    m = _VRT_PRIO_RE.match(s)
+    if not m:
+        raise ValueError(f"{value!r} is not a P1-P5 priority (or 'varies')")
+    return int(m.group(1))
+
+
+def _vrt_norm_path(p):
+    """'A > B > C' -> ('a','b','c') (segment-wise stripped + lowercased; empty segments dropped)."""
+    return tuple(seg.strip().lower() for seg in str(p).split(">") if seg.strip())
+
+
+def flatten_vrt(taxonomy):
+    """Flatten the pinned taxonomy's `content` tree to lookups:
+         id_paths   { ('server_side_injection','content_spoofing','text_injection'): priority|None }
+         name_paths { ('server-side injection','content spoofing','text injection'): priority|None }
+         leaf_ids   { 'text_injection': [ (id_path_tuple, priority), ... ] }
+       Records EVERY node (category/subcategory/variant), since the VRT assigns priorities at category and
+       subcategory level too. `priority` is an int 1-5 or None ('varies')."""
+    id_paths, name_paths, leaf_ids = {}, {}, {}
+
+    def walk(node, idtrail, nametrail):
+        nid = node.get("id")
+        if not isinstance(nid, str) or not nid.strip():
+            return
+        it = idtrail + (nid.strip().lower(),)
+        nm = node.get("name", nid)
+        nt = nametrail + (str(nm).strip().lower(),)
+        prio = node.get("priority", None)
+        id_paths[it] = prio
+        name_paths[nt] = prio
+        leaf_ids.setdefault(it[-1], []).append((it, prio))
+        for c in node.get("children") or []:
+            if isinstance(c, dict):
+                walk(c, it, nt)
+
+    for cat in (taxonomy or {}).get("content", []):
+        if isinstance(cat, dict):
+            walk(cat, (), ())
+    return {"id_paths": id_paths, "name_paths": name_paths, "leaf_ids": leaf_ids}
+
+
+def resolve_vrt(vrt, flat):
+    """Resolve a finding's vrt{} to (node_key, baseline_priority), or (None, None) if it does not exist.
+       Accepts a `>`-joined id-path OR name-path in `path`, optionally disambiguated by a leaf `id`."""
+    path = vrt.get("path")
+    vid = vrt.get("id")
+    if path:
+        key = _vrt_norm_path(path)
+        if key in flat["id_paths"]:
+            return key, flat["id_paths"][key]
+        if key in flat["name_paths"]:
+            return key, flat["name_paths"][key]
+    if isinstance(vid, str) and vid.strip():
+        cands = flat["leaf_ids"].get(vid.strip().lower())
+        if cands:
+            if path:
+                pk = _vrt_norm_path(path)
+                for it, prio in cands:
+                    if it == pk or it[-len(pk):] == pk:
+                        return it, prio
+            return cands[0]  # resolved to a real node (first match if the id is ambiguous)
+    return None, None
+
+
+def vrt_finding_errors(finding, flat, where="finding"):
+    """Validate a single finding's OPTIONAL vrt{} block against the pinned taxonomy. Returns error
+       strings (empty = OK). A finding without a vrt{} block is unaffected (normal pentest finding)."""
+    out = []
+    vrt = finding.get("vrt") if isinstance(finding, dict) else None
+    if not isinstance(vrt, dict):
+        return out
+    key, baseline = resolve_vrt(vrt, flat)
+    if key is None:
+        label = vrt.get("path") or vrt.get("id") or "<empty>"
+        out.append(f"{where}: vrt {label!r} does NOT resolve to a node in the pinned taxonomy "
+                   f"(fabricated VRT category)")
+        return out
+    basis = vrt.get("priority_basis", "baseline")
+    if basis not in ("baseline", "argued-elevation", "argued-reduction"):
+        out.append(f"{where}: vrt.priority_basis {basis!r} must be "
+                   f"baseline/argued-elevation/argued-reduction")
+    rationale = (vrt.get("priority_rationale") or "").strip()
+    claimed = None
+    try:
+        claimed = _vrt_priority_int(vrt.get("priority"))
+    except ValueError as e:
+        out.append(f"{where}: vrt.priority {e}")
+    # lower P-number = MORE severe; stronger-than-baseline means claimed < baseline.
+    inflated = claimed is not None and baseline is not None and claimed < baseline
+    if inflated:
+        if basis != "argued-elevation":
+            out.append(f"{where}: vrt.priority P{claimed} is STRONGER than the taxonomy baseline "
+                       f"P{baseline} but priority_basis is {basis!r} — inflation; require "
+                       f"'argued-elevation' + a priority_rationale")
+        elif not rationale:
+            out.append(f"{where}: vrt.priority P{claimed} elevated above baseline P{baseline} "
+                       f"(argued-elevation) but priority_rationale is empty")
+    elif basis in ("argued-elevation", "argued-reduction") and not rationale:
+        out.append(f"{where}: vrt.priority_basis {basis!r} requires a non-empty priority_rationale")
+    return out
+
+
+def scope_program_errors(program, known=None, where="scope.yaml"):
+    """Validate a scope.yaml `program` mapping (a dict). Returns error strings. Absent program => an
+       ordinary pentest engagement, nothing to check."""
+    known = KNOWN_TAXONOMIES if known is None else known
+    out = []
+    if not isinstance(program, dict):
+        return out
+    plat = program.get("platform", "none")
+    if plat not in ("bugcrowd", "hackerone", "none", None, ""):
+        out.append(f"{where}: program.platform {plat!r} must be bugcrowd/hackerone/none")
+    tax = program.get("taxonomy", "none")
+    if tax not in known:
+        out.append(f"{where}: program.taxonomy {tax!r} is not a known/pinned taxonomy "
+                   f"({sorted(known)})")
+    return out
+
+
+def _parse_simple_block(yaml_text, block):
+    """Stdlib extractor for a one-level mapping under a top-level `block:` key in SIMPLE YAML (our
+       template's program block is flat `key: value` lines). validate.py is stdlib-only (no PyYAML), so
+       this reads just enough to lint the template; the runtime gate parses scope.yaml with real YAML."""
+    out = {}
+    in_block = False
+    indent = None
+    for ln in yaml_text.splitlines():
+        if re.match(rf"^{re.escape(block)}\s*:\s*(#.*)?$", ln):
+            in_block = True
+            continue
+        if not in_block:
+            continue
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        if not ln.startswith((" ", "\t")):
+            break  # a non-indented line ends the block
+        m = re.match(r"^(\s+)([A-Za-z0-9_]+)\s*:\s*(.*)$", ln)
+        if not m:
+            continue
+        sp, k, v = m.groups()
+        if indent is None:
+            indent = len(sp)
+        if len(sp) != indent:
+            continue  # only the block's own direct keys
+        v = v.split("#", 1)[0].strip().strip('"').strip("'")
+        out[k] = v
+    return out
+
+
+def vrt_selftest(flat):
+    """Deterministic VRT-validation self-check against the pinned taxonomy (mirrors the cvss self-test).
+       Returns a list of failure strings; [] = all cases behaved as expected."""
+    fails = []
+
+    def expect(name, errs, want_fail):
+        got_fail = bool(errs)
+        if got_fail != want_fail:
+            fails.append(f"vrt selftest [{name}]: expected {'FAIL' if want_fail else 'PASS'} but got "
+                         + (f"FAIL {errs}" if got_fail else "PASS"))
+
+    ssi_ti = "server_side_injection > content_spoofing > text_injection"   # baseline P5
+    ssi_if = "server_side_injection > content_spoofing > iframe_injection"  # baseline P3
+    # real path at baseline -> PASS (by id-path and by display-name path)
+    expect("real-baseline", vrt_finding_errors(
+        {"vrt": {"path": ssi_ti, "id": "text_injection", "priority": "P5", "priority_basis": "baseline"}}, flat), False)
+    expect("real-name-path", vrt_finding_errors(
+        {"vrt": {"path": "Server-Side Injection > Content Spoofing > Text Injection", "priority": "P5"}}, flat), False)
+    # the real incident: a fabricated (non-existent) VRT category -> FAIL
+    expect("fabricated", vrt_finding_errors(
+        {"vrt": {"path": "Broken Access Control — Improper Authorization / Server-Side", "priority": "P3"}}, flat), True)
+    # inflation: P3 on a P5-baseline class with no argued basis -> FAIL
+    expect("inflation-nobasis", vrt_finding_errors(
+        {"vrt": {"path": ssi_ti, "priority": "P3", "priority_basis": "baseline"}}, flat), True)
+    # inflation declared argued-elevation but NO rationale -> FAIL
+    expect("inflation-norationale", vrt_finding_errors(
+        {"vrt": {"path": ssi_ti, "priority": "P3", "priority_basis": "argued-elevation"}}, flat), True)
+    # inflation argued-elevation WITH rationale -> PASS (the legitimate RS-2026-062 shape)
+    expect("inflation-argued-ok", vrt_finding_errors(
+        {"vrt": {"path": ssi_ti, "priority": "P3", "priority_basis": "argued-elevation",
+                 "priority_rationale": "demonstrated cross-user nickname spoofing, not plain text injection"}}, flat), False)
+    # reduction (weaker than baseline) with argued-reduction + rationale -> PASS
+    expect("reduction-ok", vrt_finding_errors(
+        {"vrt": {"path": ssi_if, "priority": "P5", "priority_basis": "argued-reduction",
+                 "priority_rationale": "no sensitive action is framed"}}, flat), False)
+    # a bad priority token -> FAIL
+    expect("bad-priority", vrt_finding_errors({"vrt": {"path": ssi_ti, "priority": "P9"}}, flat), True)
+    # a normal finding with NO vrt block -> PASS (unaffected)
+    expect("no-vrt", vrt_finding_errors({"id": "RS-2026-001", "severity": "low"}, flat), False)
+    # scope program.taxonomy checks
+    expect("scope-vrt-ok", scope_program_errors({"platform": "bugcrowd", "taxonomy": "vrt"}), False)
+    expect("scope-none-ok", scope_program_errors({"platform": "none", "taxonomy": "none"}), False)
+    expect("scope-bad-tax", scope_program_errors({"platform": "bugcrowd", "taxonomy": "madeup"}), True)
+    expect("scope-bad-platform", scope_program_errors({"platform": "nope", "taxonomy": "none"}), True)
+    return fails
+
+
+def check_vrt():
+    """23 — pinned VRT taxonomy + finding-vrt fabrication/inflation + scope program.taxonomy (the QW
+       reporting-VRT primitives; wired here like the cvss/coverage self-tests)."""
+    checked["vrt"] = 1
+    if not VRT_TAXONOMY_PATH.is_file():
+        err("skills/bug-bounty/refs/vrt/vulnerability-rating-taxonomy.json missing (the pinned VRT taxonomy)")
+        return
+    try:
+        tax = json.loads(VRT_TAXONOMY_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        err(f"vulnerability-rating-taxonomy.json: invalid JSON: {e}")
+        return
+    meta = tax.get("_meta") if isinstance(tax, dict) else None
+    if not isinstance(meta, dict):
+        err("vulnerability-rating-taxonomy.json: missing provenance `_meta` block")
+    else:
+        for req in ("upstream_source", "upstream_ref", "upstream_version", "fetched_at", "refresh_policy"):
+            if not meta.get(req):
+                err(f"vulnerability-rating-taxonomy.json: _meta is missing provenance key '{req}'")
+    flat = flatten_vrt(tax if isinstance(tax, dict) else {})
+    if not flat["id_paths"]:
+        err("vulnerability-rating-taxonomy.json: no paths parsed from `content` (empty/malformed taxonomy)")
+        return
+    if not any(p is not None for p in flat["id_paths"].values()):
+        err("vulnerability-rating-taxonomy.json: no node carries a baseline priority "
+            "(a taxonomy with no priorities cannot gate inflation)")
+    anchor = ("server_side_injection", "content_spoofing", "text_injection")
+    if flat["id_paths"].get(anchor) != 5:
+        err("vulnerability-rating-taxonomy.json: anchor path "
+            "server_side_injection>content_spoofing>text_injection must be baseline P5 "
+            f"(got {flat['id_paths'].get(anchor)!r}) — pinned-taxonomy drift")
+    for f in vrt_selftest(flat):
+        err(f)
+    # (c) the TEMPLATE scope.yaml program.taxonomy must reference a known/pinned taxonomy
+    tmpl = ROOT / "engagements" / "_template" / "scope.yaml"
+    if tmpl.is_file():
+        prog = _parse_simple_block(tmpl.read_text(encoding="utf-8", errors="replace"), "program")
+        if not prog:
+            err("engagements/_template/scope.yaml: missing the structured `program:` block")
+        else:
+            for e in scope_program_errors(prog, where="engagements/_template/scope.yaml"):
+                err(e)
+
+
 # 1 + 2 + 3 — skills
 skills_dir = ROOT / "skills"
 for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_contract"):
@@ -845,13 +1112,17 @@ def check_exhaustion_adversary():
 
 check_exhaustion_adversary()
 
-# report
-print("Redstrike validate.py")
-print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
-if errors:
-    print(f"\nFAIL -- {len(errors)} problem(s):")
-    for e in errors:
-        print(f"  - {e}")
-    sys.exit(1)
-print("\nPASS -- framework is consistent.")
-sys.exit(0)
+check_vrt()
+
+# report — guarded so the module can be imported (e.g. by scripts/tests/test_vrt.py) to exercise its
+# pure helpers without the top-level scan exiting the interpreter. Running it as a script is unchanged.
+if __name__ == "__main__":
+    print("Redstrike validate.py")
+    print("  checked: " + ", ".join(f"{v} {k}" for k, v in checked.items()))
+    if errors:
+        print(f"\nFAIL -- {len(errors)} problem(s):")
+        for e in errors:
+            print(f"  - {e}")
+        sys.exit(1)
+    print("\nPASS -- framework is consistent.")
+    sys.exit(0)

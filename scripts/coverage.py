@@ -138,6 +138,28 @@ def _safe_map() -> dict:
         return {}
 
 
+# A `blocked` row whose reason is sourced from a WHOLE-SURFACE environmental block (the diagnostics
+# transport-block auto-populate writes `reason = "transport: WAF block_rate ... on <host> (...)"`) is NOT
+# the per-leg family mask this granularity rule targets: when the entire host/WAF is down, NO sibling
+# sub-surface was reachable, so a family block there cannot hide an untested-but-reachable sibling. Such a
+# disclosed whole-surface block is exempt from the sub-surface-enumeration requirement.
+def _is_whole_surface_block(entry: dict) -> bool:
+    return str((entry or {}).get("reason") or "").strip().lower().startswith("transport:")
+
+
+def family_agents(m: dict, cat_id: str) -> list:
+    """The sub-agent ids of ``cat_id`` when it is a ``pattern: family`` category with MORE THAN ONE
+    sub-agent (e.g. auth -> [auth-bypass, jwt, oauth]; sqli -> [sqli-inband, sqli-blind]) — else []. These
+    are the categories whose single `blocked` row can silently absorb an untested in-scope sibling
+    sub-surface; a single-agent category can't mask a sibling. Pure; tolerant of a missing/malformed map."""
+    for c in (m or {}).get("categories", []) or []:
+        if c.get("id") == cat_id and c.get("pattern") == "family":
+            agents = [str(a) for a in (c.get("agents") or []) if str(a).strip()]
+            if len(agents) > 1:
+                return agents
+    return []
+
+
 def depth_thresholds(m: dict, cat_id: str) -> dict:
     """The (min_attempts, min_variants) a zero-finding `attempted` clear must prove for ``cat_id``: the map's
     ``depth_substance.default`` overlaid by any ``depth_substance.classes[cat_id]`` override, starting from
@@ -400,6 +422,21 @@ def validate(eng: Path, m: dict, strict: bool = False):
             errors.append(f"'{cid}' is still '{st}' at validation — a routed category that never ran is a gap")
         if st in _NEED_REASON and not (c.get("reason") or "").strip():
             errors.append(f"'{cid}' is '{st}' but has no reason")
+        # FAMILY-BLOCK SUB-SURFACE GRANULARITY (QW2): a `pattern: family` category (>1 sub-agents) marked
+        # `blocked` must ENUMERATE the blocked sub-surface(s) — a `blocked_subsurfaces` list, or at least a
+        # reason that names a family sub-agent — or one leg's block silently absorbs an untested in-scope
+        # sibling (the near-missed-P1). Recomputed from the entry's own fields (un-gameable) so a
+        # hand-edited whole-family `blocked` is rejected and re-driven, not counted.
+        if st == "blocked" and not _is_whole_surface_block(c):
+            fam = family_agents(m, cid)
+            if fam:
+                named = [str(a) for a in (c.get("blocked_subsurfaces") or []) if str(a).strip()]
+                reason_names = any(a.lower() in (c.get("reason") or "").lower() for a in fam)
+                if not named and not reason_names:
+                    errors.append(f"'{cid}' is a family (agents: {', '.join(fam)}) marked 'blocked' without "
+                                  f"naming the blocked sub-surface(s) — a family block can mask an untested "
+                                  f"in-scope sibling; record blocked_subsurfaces (coverage.py --mark {cid} "
+                                  f"--status blocked --blocked-subsurfaces <agent/host> --note ...)")
         # DEPTH-SUBSTANCE BAR: a zero-finding `attempted` clear that does not PROVE depth is a rubber-stamp.
         # Reject it (re-computing substance from the entry's own fields, so a hand-edited status can't slip
         # through) so the gate re-routes it instead of counting a shallow pass as covered.
@@ -518,7 +555,7 @@ def _merge_list(current, incoming) -> list:
 
 def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=False,
          escalations=None, attempts=None, variants=None, depth_note=None, evidence=None,
-         require_depth=False) -> int:
+         require_depth=False, blocked_subsurfaces=None) -> int:
     """Update one ledger category in place (status / findings_count / reason / escalations + depth payload).
 
     This is the first-class way an orchestrator flips an entry after running a
@@ -539,7 +576,15 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
     than being stamped covered. Without it the flip is still recorded but as a VISIBLY weaker
     `depth_substantiated:false` with a loud warning, and the completion gate rejects/re-drives it — so a
     shallow clear can never pass SILENTLY. Backward compatible: a mark that supplies the fields (or carries
-    real findings) is unaffected."""
+    real findings) is unaffected.
+
+    FAMILY-BLOCK SUB-SURFACE GRANULARITY (QW2). `blocked_subsurfaces` (a list of sub-agent ids / hosts)
+    names which leg(s) of a `pattern: family` category (auth/sqli/ssrf/… — >1 sub-agents) are blocked, so
+    one leg's block can't silently absorb an untested in-scope sibling. On a `blocked` flip of a family
+    category the named set (this arg UNION any family sub-agent named in the reason) is recorded as
+    `blocked_subsurfaces` and every un-named sibling as a still-owed `pending_subsurfaces`; a family block
+    that names NOTHING is REFUSED (rc=2, nothing written). A whole-surface transport block (reason
+    `"transport: ..."`) is exempt (nothing was reachable). Single-agent categories are unaffected."""
     ledger_path = eng / LEDGER_NAME
     if not ledger_path.is_file():
         print(f"[!] no {LEDGER_NAME} at {eng} (run: scripts/coverage.py --plan --engagement {eng})")
@@ -584,6 +629,33 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
         if evidence is not None:
             hit["evidence"] = evidence
 
+        # FAMILY-BLOCK SUB-SURFACE GRANULARITY (QW2): a `blocked` row on a `pattern: family` category
+        # (auth/sqli/ssrf/xxe/… — >1 sub-agents) must NAME which sub-agent(s)/host(s) are blocked, or one
+        # leg's block silently absorbs the whole family — the near-missed-P1 where `auth` blocked on its
+        # out-of-scope OAuth leg masked the untested in-scope `jwt` surface. The named set is recorded as
+        # `blocked_subsurfaces`; every UN-named sibling is recorded as a still-owed `pending_subsurfaces`
+        # (re-drivable, NOT silently covered). Reason-named agents count too (back-compat with prose
+        # reasons). A family block that names nothing is REFUSED (rc=2, nothing written) — like the
+        # 'needs-a-reason' rule, the flip simply never lands and the category stays re-drivable.
+        if status == "blocked" and not _is_whole_surface_block(hit):
+            fam = family_agents(_safe_map(), cat_id)
+            if fam:
+                reason_text = (hit.get("reason") or "")
+                from_reason = [a for a in fam if a.lower() in reason_text.lower()]
+                named = _merge_list(from_reason, [s for s in (blocked_subsurfaces or []) if str(s).strip()])
+                if not named:
+                    print(f"[!] status 'blocked' on family category {cat_id!r} (agents: {', '.join(fam)}) "
+                          f"must NAME which sub-agent(s)/host(s) are blocked — pass --blocked-subsurfaces "
+                          f"<agent-or-host>[,...] or name them in --note. Un-named siblings stay pending so a "
+                          f"family block can't silently absorb an untested in-scope sibling surface.")
+                    return 2
+                hit["blocked_subsurfaces"] = named
+                owed = [a for a in fam if a not in named]
+                if owed:
+                    hit["pending_subsurfaces"] = owed
+                else:
+                    hit.pop("pending_subsurfaces", None)
+
         # DEPTH-SUBSTANCE BAR on the `attempted` flip: a zero-finding clear must PROVE depth or it is a
         # rubber-stamp. `gap` is None when substantiated (incl. any entry with >=1 finding).
         depth_gap = None
@@ -605,6 +677,11 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
         print(f"[warn] {cat_id} marked 'attempted' WITHOUT depth evidence — {depth_gap}. Recorded as "
               f"depth_substantiated:false; the completion gate will re-drive it until depth is proven "
               f"or real findings land.")
+    owed_sibs = hit.get("pending_subsurfaces") or []
+    if status == "blocked" and owed_sibs:
+        # Loud: naming only some legs as blocked leaves the rest OWED — they are not covered by this block.
+        print(f"[note] {cat_id} blocked only on {', '.join(hit.get('blocked_subsurfaces') or [])}; "
+              f"sibling sub-surface(s) {', '.join(owed_sibs)} stay re-drivable (still owed, not covered).")
     if as_json:
         print(json.dumps({"id": cat_id, "status": status,
                           "findings_count": hit.get("findings_count"),
@@ -612,11 +689,15 @@ def mark(eng: Path, cat_id: str, status: str, count=None, note=None, as_json=Fal
                           "escalations": hit.get("escalations", []),
                           "variants_tried": hit.get("variants_tried", []),
                           "attempts": hit.get("attempts"),
+                          "blocked_subsurfaces": hit.get("blocked_subsurfaces", []),
+                          "pending_subsurfaces": hit.get("pending_subsurfaces", []),
                           "depth_substantiated": hit.get("depth_substantiated")}, indent=2))
     else:
         tail = (f" findings={count}" if count is not None else "") + (f"  reason={note}" if note else "")
         tail += (f"  escalations+={len(escalations)}" if escalations else "")
         tail += (f"  variants+={len(variants)}" if variants else "")
+        if status == "blocked" and hit.get("blocked_subsurfaces"):
+            tail += f"  blocked_subsurfaces={','.join(hit['blocked_subsurfaces'])}"
         if status == "attempted":
             tail += f"  depth_substantiated={hit.get('depth_substantiated')}"
         print(f"ok: {cat_id} -> status={status}{tail}")
@@ -753,6 +834,10 @@ def main() -> int:
     ap.add_argument("--require-depth", action="store_true", dest="require_depth",
                     help="--mark: REFUSE an 'attempted' flip that fails the depth-substance bar (rc=2, "
                     "nothing written) so the category stays re-drivable instead of a rubber-stamped clear")
+    ap.add_argument("--blocked-subsurfaces", dest="blocked_subsurfaces",
+                    help="--mark --status blocked: comma-separated sub-agent id(s)/host(s) that are blocked "
+                    "on a `pattern: family` category (e.g. oauth, or auth.example.com). REQUIRED to block a "
+                    "family — un-named siblings stay pending so a block can't absorb an untested sibling")
     ap.add_argument("--close", action="store_true",
                     help="reconcile the ledger's findings_count+status from the engagement's findings at "
                          "close (needs --engagement); use --source-category for a white-box run")
@@ -817,10 +902,12 @@ def main() -> int:
             ap.error("--mark needs --status (" + "|".join(sorted(_MARK_STATUSES)) + ")")
         esc = [t.strip() for t in (args.escalations or "").split(",") if t.strip()] or None
         var = [t.strip() for t in (args.variants or "").split(",") if t.strip()] or None
+        bsub = [t.strip() for t in (args.blocked_subsurfaces or "").split(",") if t.strip()] or None
         return mark(Path(args.engagement), args.mark, args.status,
                     args.count, args.note, args.as_json, escalations=esc,
                     attempts=args.attempts, variants=var, depth_note=args.depth_note,
-                    evidence=args.evidence, require_depth=args.require_depth)
+                    evidence=args.evidence, require_depth=args.require_depth,
+                    blocked_subsurfaces=bsub)
 
     if args.validate:
         if not args.engagement:

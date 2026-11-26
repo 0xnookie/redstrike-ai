@@ -8,6 +8,7 @@ despite a matching signal (skipped-but-signalled) — while legitimate clears st
 
 Stdlib only, runnable as `python test_recall_audit.py` (the CI convention).
 """
+import json
 import pathlib
 import sys
 import unittest
@@ -25,6 +26,12 @@ MAPC = [
     {"id": "ssrf", "triggers": ["param:url-fetching"]},
     {"id": "injection", "triggers": ["sink:template", "sink:command", "param:injectable"]},
     {"id": "secrets", "triggers": []},
+    # `auth` is a pattern:family with >1 sub-agents — the near-missed-P1 shape (one leg blocked masks a
+    # sibling). `race-condition` is a single-agent class used to check the non-family blocked path.
+    {"id": "auth", "triggers": ["flow:auth"], "pattern": "family",
+     "agents": ["auth-bypass", "jwt", "oauth"]},
+    {"id": "race-condition", "triggers": ["flow:state-change"], "pattern": "single",
+     "agents": ["race-condition"]},
 ]
 
 
@@ -114,6 +121,104 @@ class SinkClassBlackBox(unittest.TestCase):
     def test_non_sink_class_skip_stays_silent(self):
         led = [{"id": "ssrf", "status": "skipped", "reason": "no URL-fetching parameter surfaced"}]
         self.assertEqual(ra.audit(led, set(), MAPC)["summary"]["total"], 0)
+
+
+class BlockedBranch(unittest.TestCase):
+    """QW1: a `blocked` row was a double blind spot — coverage.py treats only `pending` as open, and this
+    engine had no `blocked` branch, so a family block on an out-of-scope leg masked an untested in-scope
+    sibling (the near-missed-P1). A recon-signalled `blocked` class is a `blocked-unverified` HIGH gap
+    UNLESS it both enumerates the blocked sub-surface(s) AND records that non-destructive detection ran."""
+
+    def test_signalled_blocked_family_unenumerated_is_high_gap(self):
+        led = [{"id": "auth", "status": "blocked", "reason": "session expired",
+                "triggers_matched": ["flow:auth"]}]
+        r = ra.audit(led, {"flow:auth"}, MAPC)
+        g = next(x for x in r["gaps"] if x["category"] == "auth")
+        self.assertEqual(g["type"], "blocked-unverified")
+        self.assertEqual(g["severity"], "high")
+
+    def test_honest_block_named_leg_plus_detection_is_not_a_gap(self):
+        # names the blocked leg (oauth) AND records detection ran (32 forge attempts) -> trustworthy clear.
+        led = [{"id": "auth", "status": "blocked", "triggers_matched": ["flow:auth"],
+                "blocked_subsurfaces": ["oauth"], "attempts": 32,
+                "reason": "oauth leg OOS; jwt + auth-bypass forge battery ran, all 32 rejected"}]
+        self.assertEqual(ra.audit(led, {"flow:auth"}, MAPC)["summary"]["total"], 0)
+
+    def test_named_leg_but_no_detection_is_still_a_gap(self):
+        # enumerates oauth as blocked but shows NO detection on the siblings -> still a gap (the mask).
+        led = [{"id": "auth", "status": "blocked", "triggers_matched": ["flow:auth"],
+                "blocked_subsurfaces": ["oauth"], "reason": "oauth leg OOS"}]
+        r = ra.audit(led, {"flow:auth"}, MAPC)
+        g = next(x for x in r["gaps"] if x["category"] == "auth")
+        self.assertEqual(g["type"], "blocked-unverified")
+        self.assertIn("detection", g["detail"])
+
+    def test_still_owed_siblings_surface_in_detail(self):
+        led = [{"id": "auth", "status": "blocked", "triggers_matched": ["flow:auth"],
+                "blocked_subsurfaces": ["oauth"], "pending_subsurfaces": ["auth-bypass", "jwt"],
+                "reason": "oauth leg OOS"}]
+        r = ra.audit(led, {"flow:auth"}, MAPC)
+        g = next(x for x in r["gaps"] if x["category"] == "auth")
+        self.assertIn("jwt", g["detail"])
+
+    def test_low_prior_blocked_is_silent(self):
+        # no recorded trigger and no matching signal -> recon never flagged it; no false positive.
+        led = [{"id": "auth", "status": "blocked", "reason": "x"}]
+        self.assertEqual(ra.audit(led, set(), MAPC)["summary"]["total"], 0)
+
+    def test_whole_surface_transport_block_is_exempt(self):
+        # a disclosed whole-surface transport block (host/WAF down) can't mask a reachable sibling.
+        led = [{"id": "auth", "status": "blocked", "triggers_matched": ["flow:auth"],
+                "reason": "transport: WAF block_rate 95% on app.acme.com (cloudflare)"}]
+        self.assertEqual(ra.audit(led, {"flow:auth"}, MAPC)["summary"]["total"], 0)
+
+    def test_nonfamily_blocked_with_detection_is_not_a_gap(self):
+        # a single-agent class: a substantive reason enumerates the one surface; detection recorded -> ok.
+        led = [{"id": "race-condition", "status": "blocked", "triggers_matched": ["flow:state-change"],
+                "attempts": 4, "reason": "single-use endpoint; 4 parallel bursts, no over-issue observed"}]
+        self.assertEqual(ra.audit(led, {"flow:state-change"}, MAPC)["summary"]["total"], 0)
+
+
+class BlockedAccept(unittest.TestCase):
+    """An honest block that genuinely can't be closed in-scope is routed through the SAME accept mechanism
+    as a shallow-clear (write_accept + a named _BLOCKER_VOCAB blocker) — no new escape hatch. The new
+    `oauth-leg-oos` / `session-expired` blockers name why a family leg is unclosable."""
+
+    def _blocked_eng(self):
+        import json as _json
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        eng = pathlib.Path(self._tmp.name)
+        # load_and_audit uses the REAL routing map (auth is a family there); triggers_matched makes it
+        # high-prior, so the blocked branch flags blocked-unverified:auth.
+        (eng / "coverage_ledger.json").write_text(_json.dumps(
+            {"categories": [{"id": "auth", "status": "blocked", "reason": "session expired",
+                             "triggers_matched": ["flow:auth"]}]}), encoding="utf-8")
+        return eng
+
+    def test_engine_flags_blocked_unverified_for_real_map(self):
+        eng = self._blocked_eng()
+        res = ra.load_and_audit(eng)
+        self.assertTrue(any(g["type"] == "blocked-unverified" and g["category"] == "auth"
+                            for g in res["gaps"]), res["gaps"])
+
+    def test_accept_blocked_gap_with_named_blocker(self):
+        eng = self._blocked_eng()
+        ok, msg = ra.write_accept(eng, "blocked-unverified:auth", blockers=["oauth-leg-oos"],
+                                  ladder_run=[], reason="oauth delivery host auth.example.com is out of scope")
+        self.assertTrue(ok, msg)
+        data = json.loads((eng / "reviews" / "recall_audit_accepts.json").read_text(encoding="utf-8"))
+        self.assertEqual(data[0]["id"], "blocked-unverified:auth")
+        self.assertEqual(data[0]["blocker"], ["oauth-leg-oos"])
+        # a blocked accept needs NO ladder-run (that's a shallow-clear-only requirement).
+        self.assertNotIn("ladder_run", data[0])
+
+    def test_accept_requires_named_blocker(self):
+        eng = self._blocked_eng()
+        ok, msg = ra.write_accept(eng, "blocked-unverified:auth", blockers=[], ladder_run=[], reason="x")
+        self.assertFalse(ok)
+        self.assertIn("--blocker is required", msg)
 
 
 class AcceptWriter(unittest.TestCase):

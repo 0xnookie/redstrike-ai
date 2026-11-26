@@ -12,7 +12,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, accounts, diagnostics, engagement, gate, launch, preflight, reasoning_trace, runloop, source_audit, ui
+from . import __version__, accounts, curlparse, diagnostics, engagement, gate, launch, preflight, reasoning_trace, runloop, source_audit, ui
 from . import approvals as approvalsmod
 from . import engines as enginesmod
 from . import login_replay as loginmod
@@ -886,6 +886,127 @@ def cmd_accounts(args, repo: Path) -> int:
     return 0
 
 
+def _fmt_duration(seconds) -> str:
+    """Compact h/m/s rendering of a (possibly negative) second count: '1h 23m', '45s', '0s'."""
+    if seconds is None:
+        return "?"
+    sec = abs(int(round(seconds)))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    parts = []
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
+    if s and not h:
+        parts.append(f"{s}s")
+    return " ".join(parts) or "0s"
+
+
+def _session_status(eng_dir: Path) -> int:
+    """Print each stored identity's session liveness using the EXISTING offline JWT-exp preflight
+    (login_replay.session_preflight — zero network: it decodes the session's own `exp` claim). Opaque
+    (non-JWT) sessions report UNKNOWN (liveness can't be decided offline). Returns 1 if any identity
+    needs re-capture (expired/expiring), else 0 — so a caller can gate a refresh on it."""
+    accts = [a for a in accounts.load_creds(eng_dir).get("accounts", []) if isinstance(a, dict) and a.get("id")]
+    if not accts:
+        print(ui.info("no test accounts registered — nothing to check "
+                      f"(add one: redstrike accounts add {eng_dir.name} --id … or session import)"))
+        return 0
+    print(ui.rule(f"session liveness · {eng_dir.name}"))
+    render = {
+        loginmod.LIVE: ui.ok, loginmod.EXPIRING: ui.warn,
+        loginmod.EXPIRED: ui.err, loginmod.UNKNOWN: ui.info,
+    }
+    need = 0
+    for a in accts:
+        pre = loginmod.session_preflight(a)  # offline — no client passed
+        label = {loginmod.LIVE: "LIVE", loginmod.EXPIRING: "EXPIRING",
+                 loginmod.EXPIRED: "EXPIRED", loginmod.UNKNOWN: "UNKNOWN"}.get(pre.status, pre.status.upper())
+        if pre.source == "jwt-exp" and pre.seconds_left is not None:
+            when = ("expired " + _fmt_duration(pre.seconds_left) + " ago") if pre.seconds_left < 0 \
+                else (_fmt_duration(pre.seconds_left) + " left")
+            detail = f"{label} (JWT exp, {when})"
+        elif pre.status == loginmod.UNKNOWN:
+            detail = f"{label} — opaque session; liveness not decidable offline"
+        else:
+            detail = label
+        print(render.get(pre.status, ui.info)(f"{a['id']}: {detail}"))
+        if pre.needs_recapture():
+            need += 1
+    if need:
+        print(ui.warn(f"{need} identit{'y' if need == 1 else 'ies'} need re-capture — "
+                      f"re-import a fresh session: redstrike session import {eng_dir.name} \"<Copy as cURL>\""))
+    return 1 if need else 0
+
+
+def _mask_cookie(cookie: str) -> str:
+    """A non-reversible display hint for a cookie value — never the cookie itself."""
+    n = len((cookie or "").strip())
+    return f"set ({n} chars)" if n else "—"
+
+
+def _session_import(eng_dir: Path, args) -> int:
+    """Import a browser 'Copy as cURL' paste into runtime/creds.json and (re)materialize auth.env.
+    Secrets are redacted in every echo."""
+    if not args.curl:
+        print(ui.err("session import needs the cURL string: "
+                     f"redstrike session import {eng_dir.name} \"<paste Copy as cURL>\""))
+        return 2
+    parsed = curlparse.parse_curl(args.curl)
+    if not parsed.url:
+        print(ui.err("could not find a URL in the pasted cURL — is it a browser 'Copy as cURL' string?"))
+        return 2
+    fields = parsed.account_fields()
+    if not (fields.get("cookie") or fields.get("token") or fields.get("headers") or fields.get("password")):
+        print(ui.err("the cURL carried no session material (no Cookie, Authorization bearer, auth "
+                     "header or basic-auth) — nothing to import"))
+        return 2
+
+    acct_id = args.id or "imported"
+    acct = accounts.build_account(
+        id=acct_id, role=args.role or "", tenant=args.tenant or "",
+        identity=args.identity or fields.get("identity", ""), auth=args.auth or "",
+        status="active", used_for=args.used_for or "imported from browser session (Copy as cURL)",
+        password=fields.get("password", ""), token=fields.get("token", ""),
+        cookie=fields.get("cookie", ""), headers=fields.get("headers") or {},
+    )
+    if fields.get("base_url"):
+        acct["base_url"] = fields["base_url"]
+    accounts.upsert(eng_dir, acct)
+    accounts.materialize(eng_dir)  # keep runtime/auth.env current so the imported identity reaches executors
+
+    print(ui.ok(f"session imported → account '{acct_id}'"))
+    print(ui.kv("base_url", acct.get("base_url") or "—"))
+    print(ui.kv("auth", acct.get("auth_method") or "—"))
+    print(ui.kv("secret", accounts.mask_secret(acct)))  # masked last-4 / 'set' — never the raw secret
+    if fields.get("cookie"):
+        print(ui.kv("cookie", _mask_cookie(fields["cookie"])))
+    if fields.get("token"):
+        tok = fields["token"]
+        print(ui.kv("bearer", f"…{tok[-4:]}" if len(tok) >= 8 else "set"))
+    stored_hdrs = (acct.get("session") or {}).get("headers") or {}
+    extra = [h for h in stored_hdrs if h.lower() != "authorization"]
+    if extra:
+        print(ui.kv("headers", f"{len(extra)} kept: {', '.join(extra)} (values redacted)"))
+    print(ui.kv("creds", str(eng_dir / accounts.CREDS_REL) + "  (gitignored · never served)"))
+    print(ui.kv("auth.env", "materialized for the executors (gitignored · never served)"))
+    print(ui.info("verify it: redstrike session status " + eng_dir.name))
+    return 0
+
+
+def cmd_session(args, repo: Path) -> int:
+    """`session status` — offline JWT-exp liveness of the stored session(s); `session import` — pull a
+    browser 'Copy as cURL' paste into the creds store + auth.env. Both are gitignored / never served."""
+    eng_dir = resolve_engagement(repo, args.engagement)
+    if not eng_dir:
+        print(ui.err(f"engagement '{args.engagement}' not found under {repo / 'engagements'}"))
+        return 1
+    if args.action == "status":
+        return _session_status(eng_dir)
+    return _session_import(eng_dir, args)
+
+
 def cmd_scope(args, repo) -> int:
     """Seed a DRAFT scope.yaml from a natural-language description. The NL text is a convenience seed
     ONLY — it is NEVER the authorization-of-record. The draft's authorized_by is left as an UNSIGNED
@@ -1063,6 +1184,21 @@ def build_parser() -> argparse.ArgumentParser:
     ap_.add_argument("--all", action="store_true", help="approve all pending")
     ap_.add_argument("--id", action="append", metavar="FP", help="approve by fingerprint (prefix ok)")
 
+    se = sub.add_parser("session",
+                        help="session liveness (offline JWT-exp preflight) + browser 'Copy as cURL' import")
+    se.add_argument("action", choices=["status", "import"],
+                    help="status: show stored session liveness · import: ingest a 'Copy as cURL' paste")
+    se.add_argument("engagement", help="engagement id or path")
+    se.add_argument("curl", nargs="?",
+                    help="import: the pasted browser 'Copy as cURL' string (quote the whole thing)")
+    se.add_argument("--id", help="import: account id to store under (default: 'imported')")
+    se.add_argument("--role", help="import: role label (user / admin / attacker / victim)")
+    se.add_argument("--tenant")
+    se.add_argument("--identity",
+                    help="import: identity label — stored RAW in creds.json, REDACTED in the notebook")
+    se.add_argument("--auth", metavar="METHOD", help="import: auth method label (overrides the inferred one)")
+    se.add_argument("--used-for", help="import: what this identity is for")
+
     acc = sub.add_parser("accounts",
                          help="register test-account credentials (secrets stay in runtime/creds.json — never committed or served)")
     acc.add_argument("action", choices=["add", "list", "rm", "materialize", "refresh"])
@@ -1096,6 +1232,7 @@ _DISPATCH = {
     "scope": cmd_scope,
     "approve": cmd_approve,
     "accounts": cmd_accounts,
+    "session": cmd_session,
 }
 
 # Commands that do not require locating the redstrike-ai repo (they operate standalone).

@@ -390,6 +390,137 @@ class ReconcileSubstance(unittest.TestCase):
         self.assertEqual(c.shallow_attempted_ids(led, c.load_map()), [])
 
 
+class FamilyBlockGranularity(unittest.TestCase):
+    """QW2: a `blocked` row on a `pattern: family` category (auth/sqli/…, >1 sub-agents) must NAME which
+    sub-agent(s)/host(s) are blocked. Un-named siblings stay pending (re-drivable), not silently covered —
+    the near-missed-P1 where `auth` blocked on its OAuth leg masked the untested in-scope `jwt` surface.
+    `mark()` refuses an un-named family block; `validate()` fails a hand-edited one."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = c.load_map()
+
+    def _plan_auth_pending(self, eng):
+        # a ledger where auth is routed pending (flow:auth signal), ready to be blocked.
+        led = c.plan(self.m, {"flow:auth"}, {"web"}, eng.name)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def test_family_agents_lookup(self):
+        self.assertEqual(c.family_agents(self.m, "auth"), ["auth-bypass", "jwt", "oauth"])
+        self.assertEqual(c.family_agents(self.m, "secrets"), [])        # single-agent -> not a family
+        self.assertEqual(c.family_agents(self.m, "nonexistent"), [])
+
+    def test_mark_family_blocked_without_naming_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_auth_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "auth", "blocked", note="session expired")   # names no sub-surface
+            self.assertEqual(rc, 2)                                           # refused
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            auth = next(x for x in led["categories"] if x["id"] == "auth")
+            # the flip never landed — auth stays at its prior (re-drivable) status, not silently blocked.
+            self.assertEqual(auth["status"], "pending")
+            self.assertNotIn("blocked_subsurfaces", auth)
+
+    def test_mark_family_blocked_names_leg_and_siblings_stay_pending(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_auth_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "auth", "blocked", note="oauth leg host is out of scope",
+                            blocked_subsurfaces=["oauth"])
+            self.assertEqual(rc, 0)
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            auth = next(x for x in led["categories"] if x["id"] == "auth")
+            self.assertEqual(auth["status"], "blocked")
+            self.assertEqual(auth["blocked_subsurfaces"], ["oauth"])
+            # the un-named siblings stay pending (still owed, NOT folded under the block).
+            self.assertEqual(sorted(auth["pending_subsurfaces"]), ["auth-bypass", "jwt"])
+
+    def test_mark_family_blocked_reason_naming_counts(self):
+        # naming the leg in the prose reason (no --blocked-subsurfaces) also satisfies enumeration.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._plan_auth_pending(eng)
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "auth", "blocked", note="blocked on the oauth delivery leg only")
+            self.assertEqual(rc, 0)
+            led = json.loads((eng / "coverage_ledger.json").read_text())
+            auth = next(x for x in led["categories"] if x["id"] == "auth")
+            self.assertEqual(auth["blocked_subsurfaces"], ["oauth"])
+            self.assertEqual(sorted(auth["pending_subsurfaces"]), ["auth-bypass", "jwt"])
+
+    def test_single_agent_blocked_is_unaffected(self):
+        # a single-agent class (secrets) blocked needs only a reason — no sub-surface enumeration.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            led = c.plan(self.m, None, {"web"}, eng.name)
+            (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                rc = c.mark(eng, "secrets", "blocked", note="needs operator approval to validate")
+            self.assertEqual(rc, 0)
+            auth = next(x for x in json.loads((eng / "coverage_ledger.json").read_text())["categories"]
+                        if x["id"] == "secrets")
+            self.assertEqual(auth["status"], "blocked")
+            self.assertNotIn("blocked_subsurfaces", auth)
+
+    def _terminal_ledger(self, eng):
+        led = c.plan(self.m, set(), {"web"}, eng.name)
+        for cat in led["categories"]:
+            if cat["status"] == "pending":
+                cat["status"] = "skipped"
+                cat["reason"] = "test: forced terminal (not under test)"
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def _flip(self, eng, cid, **fields):
+        led = json.loads((eng / "coverage_ledger.json").read_text())
+        hit = next(x for x in led["categories"] if x["id"] == cid)
+        hit.update(fields)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        return led
+
+    def test_validate_rejects_hand_edited_unenumerated_family_block(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="blocked", reason="session expired")   # no leg named
+            ok, _lines, msgs = c.validate(eng, self.m, strict=False)
+            self.assertFalse(ok)
+            self.assertTrue(any("family" in str(x) and "'auth'" in str(x) and "naming" in str(x)
+                                for x in msgs), msgs)
+
+    def test_validate_accepts_enumerated_family_block(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="blocked", reason="oauth leg OOS",
+                       blocked_subsurfaces=["oauth"], pending_subsurfaces=["auth-bypass", "jwt"])
+            ok, _lines, _msgs = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _msgs)
+
+    def test_validate_accepts_reason_named_family_block(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="blocked", reason="blocked on the oauth delivery leg")
+            ok, _lines, _msgs = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _msgs)
+
+    def test_whole_surface_transport_block_is_exempt(self):
+        # a disclosed WHOLE-surface block (diagnostics transport auto-populate: reason "transport: ...")
+        # means nothing was reachable, so a family block there can't mask a sibling — no enumeration owed.
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            self._terminal_ledger(eng)
+            self._flip(eng, "auth", status="blocked",
+                       reason="transport: WAF block_rate 95% on app.acme.com (cloudflare)")
+            ok, _lines, _msgs = c.validate(eng, self.m, strict=False)
+            self.assertTrue(ok, _msgs)
+
+
 class SelfTest(unittest.TestCase):
     def test_coverage_selftest_passes(self):
         self.assertEqual(c.selftest(), 0)

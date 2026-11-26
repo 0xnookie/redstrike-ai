@@ -10,6 +10,16 @@ window:
   start: 2026-10-16T00:00:00Z
   end:   2026-10-30T23:59:59Z
 
+program:                 # OPTIONAL — present only for a bug-bounty engagement. Absent / platform:none
+                         # => an ordinary pentest, byte-identical to before. This is the deterministic
+                         # flag that later switches on VRT stamping/validation (not a prose guess in
+                         # authorized_by). The bug-bounty skill writes it at scope-parse time.
+  platform: none         # bugcrowd | hackerone | none
+  name: ""               # the program handle, e.g. "twentyminuten"
+  url: ""                # the program page URL
+  taxonomy: none         # vrt | none  — which rating taxonomy governs submissions. Must reference a
+                         # PINNED taxonomy (bugcrowd => vrt, pinned at skills/bug-bounty/refs/vrt/).
+
 in_scope:
   domains:
     - "*.example.com"

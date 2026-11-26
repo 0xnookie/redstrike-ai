@@ -11,6 +11,7 @@ Stdlib only, runnable as `python test_reconverge.py` (the CI convention).
 """
 import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -195,6 +196,76 @@ class IngestValidation(unittest.TestCase):
             self.assertEqual(rec["route_to"], "content-discovery")
             # content was NOT quarantined as garbage
             self.assertFalse((eng / "reconvergence" / "inbox.rejected.jsonl").is_file())
+
+
+class AppendWriteTimeValidator(unittest.TestCase):
+    """QW-2: `--append` validates ONE record at WRITE time. A clean record is appended; a prose signal / a
+    note-shaped surface / an out-of-vocab kind is REFUSED (nothing written) and -- for a note/residual --
+    redirected to its real home, a coverage mark. Vocab/kinds come from the real routing map here."""
+    VOCAB = {"param:url-fetching", "asset:cloud", "identity:multi"}
+    KINDS = {"param", "endpoint", "identity"}
+    FROUTES = {"content": "content-discovery"}
+
+    def test_clean_record_is_appendable(self):
+        rec = rc.build_record("ssrf", ["param:url-fetching"], [("endpoint", "http://10.0.0.5/")])
+        res = rc.classify_append(rec, self.VOCAB, self.KINDS, self.FROUTES)
+        self.assertTrue(res["ok"])
+        self.assertFalse(res["rejections"])
+        self.assertFalse(res["prose_signals"])
+
+    def test_prose_signal_refused_even_fail_open(self):
+        # the exact `kind:note` pollution driver: "websocket class CLEAN []" stuffed into signals. Caught
+        # STRUCTURALLY, so it is refused even with an empty (unreadable) vocab where split_observations
+        # would otherwise fail-open and keep it.
+        rec = rc.build_record("websocket", ["websocket class CLEAN []"], [])
+        res = rc.classify_append(rec, set(), set(), self.FROUTES)
+        self.assertFalse(res["ok"])
+        self.assertIn("websocket class CLEAN []", res["prose_signals"])
+
+    def test_note_shaped_surface_kind_refused(self):
+        rec = rc.build_record("auth", [], [("note", "RESIDUAL - not demonstrable here")])
+        res = rc.classify_append(rec, self.VOCAB, self.KINDS, self.FROUTES)
+        self.assertFalse(res["ok"])
+        self.assertIn("note", res["note_kinds"])
+
+    def test_out_of_vocab_typo_signal_refused(self):
+        rec = rc.build_record("x", ["param:injectible"], [])  # typo of param:injectable
+        res = rc.classify_append(rec, self.VOCAB, self.KINDS, self.FROUTES)
+        self.assertFalse(res["ok"])
+        self.assertTrue(res["rejections"])
+
+    def test_empty_record_not_appendable(self):
+        res = rc.classify_append(rc.build_record("x", [], []), self.VOCAB, self.KINDS, self.FROUTES)
+        self.assertFalse(res["ok"])
+        self.assertFalse(res["has_payload"])
+
+    def test_append_observation_writes_only_when_clean(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            # clean -> rc 0, one inbox line (vocab/kinds read from the real routing map).
+            code, _lines = rc.append_observation(eng, "ssrf", ["param:url-fetching"],
+                                                 [("endpoint", "http://10.0.0.5/")])
+            self.assertEqual(code, 0)
+            inbox = eng / "reconvergence" / "inbox.jsonl"
+            self.assertEqual(len(inbox.read_text(encoding="utf-8").strip().splitlines()), 1)
+            # prose -> rc 2, NOTHING appended (still one line), and the coverage redirect is emitted.
+            code2, lines2 = rc.append_observation(eng, "websocket", ["websocket class CLEAN []"], [])
+            self.assertEqual(code2, 2)
+            self.assertEqual(len(inbox.read_text(encoding="utf-8").strip().splitlines()), 1)
+            self.assertTrue(any("coverage.py --mark" in l for l in lines2))
+
+    def test_append_cli_exit_codes(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            ok = subprocess.run(
+                [sys.executable, str(SCRIPTS / "reconverge.py"), "--append", "--engagement", str(eng),
+                 "--source", "ssrf", "--signal", "param:url-fetching",
+                 "--surface", "endpoint=http://10.0.0.5/"], capture_output=True, text=True)
+            self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+            bad = subprocess.run(
+                [sys.executable, str(SCRIPTS / "reconverge.py"), "--append", "--engagement", str(eng),
+                 "--source", "auth", "--surface", "note=a residual note"], capture_output=True, text=True)
+            self.assertEqual(bad.returncode, 2)
 
 
 class SelfTest(unittest.TestCase):

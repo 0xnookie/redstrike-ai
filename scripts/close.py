@@ -73,6 +73,43 @@ def _discover_findings(eng: Path) -> list:
     return _findings_from(_load_json(eng / "report" / "findings_consolidated.json"))
 
 
+# --- orphan findings-file detection (QW-3) --------------------------------------------------------------- #
+# The real incident (20min-2026-11-25, bola-bfla): an executor wrote `bola-bfla/findings_authed_bfla.json`
+# (a non-default name chosen to avoid clobbering the unauth pass). But close.py / verify_completion / dedup /
+# reporting all discover findings by the EXACT name `findings.json` — so the non-canonical file was invisible
+# and close.py recorded a FALSE `findings=0 / clean-tested`, contradicting the real accepted finding. We do
+# NOT blanket-glob `findings*.json` into the discovery set (that risks double-counting a findings_partial /
+# findings.bak); instead we WARN loudly so a stray is never silently missed — the canonical set stays
+# unambiguous, the miss stays visible.
+
+def orphan_findings_files(eng: Path) -> list:
+    """Non-canonical `findings*.json` files beside the canonical ones (name != `findings.json`), at the
+    engagement root or one level down (the per-skill layout). These are NOT scanned by the pipeline, so a
+    finding living only in one is silently dropped. Returns the stray Paths, sorted."""
+    out = []
+    for p in sorted(eng.glob("findings*.json")) + sorted(eng.glob("*/findings*.json")):
+        if p.is_file() and p.name != "findings.json":
+            out.append(p)
+    return out
+
+
+def warn_orphan_findings(eng: Path) -> list:
+    """Emit a LOUD stderr warning for every orphan findings file (QW-3). Returns the stray paths (so a caller
+    can surface them too). No-op when there are none."""
+    orphans = orphan_findings_files(eng)
+    for p in orphans:
+        try:
+            rel = p.relative_to(eng)
+        except ValueError:
+            rel = p
+        print(f"[close] WARNING: stray findings file '{rel}' is NOT scanned by the pipeline "
+              f"(discovery keys on the exact name 'findings.json'). Its findings are INVISIBLE to "
+              f"close.py / verify_completion / dedup / reporting — merge it into "
+              f"'{p.parent.name}/findings.json' (append to the array, de-dupe by id) so it is counted.",
+              file=sys.stderr)
+    return orphans
+
+
 def _effective_verdict(f: dict, eng: Path) -> str:
     """A finding's effective verdict — inline review.verdict, else reviews/<id>.verdict.json (root or
     per-skill), else derived from status (verified->accepted, rejected->rejected). Mirrors
@@ -152,6 +189,9 @@ def close(eng: Path, *, session: str = "") -> dict:
     Prefers the engine's diagnostics.assemble()/write() (its transport + empty-vs-clean classification), then
     overlays the layout-aware reportable-finding count so the record agrees with the report regardless of the
     findings layout. Falls back to an import-less record when the cli package is unavailable."""
+    # Orphan-warn FIRST (QW-3): a stray non-canonical findings file would make the count below (and so this
+    # run record's outcome) silently contradict reality — the exact bola-bfla false clean-tested. Loud, early.
+    warn_orphan_findings(eng)
     now = _now_iso()
     sys.path.insert(0, str(ROOT / "cli"))
     try:
@@ -187,6 +227,10 @@ def main(argv=None) -> int:
     record = close(eng, session=args.session)
     print(f"recorded outcome={record['outcome']} findings={record['findings_count']} "
           f"-> {eng / 'runtime' / 'diagnostics.json'}")
+    orphans = orphan_findings_files(eng)   # already warned (stderr) inside close(); echo a one-line nudge here
+    if orphans:
+        print(f"[close] {len(orphans)} stray findings file(s) NOT scanned — see the warning(s) above; "
+              f"merge each into its '<skill>/findings.json'.")
     return 0
 
 

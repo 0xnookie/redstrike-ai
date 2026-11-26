@@ -33,6 +33,19 @@
         "potential_severity": { "enum": ["critical", "high", "medium", "low", "info"], "description": "Optional best-case severity if a blocked precondition were met (e.g. a confirmed SQLi point whose data extraction was blocked by an unseeded DB). Set this when cvss_vector expresses the potential while `severity` reflects what was demonstrated." },
         "composite": { "type": "boolean", "description": "True for a composite/kill-chain finding (from attack-chain-discovery) that re-states already-counted component findings. Reporting lists it under Attack Chains and EXCLUDES it from the severity counts (non-additive)." },
         "cvss_vector": { "type": "string", "description": "CVSS 3.1 base vector. Compute it with scripts/cvss.py (do not hand-assert the score); the reviewer recomputes and flags drift. v4.0 vectors are not yet scored by the tool." },
+        "vrt": {
+          "type": "object",
+          "description": "OPTIONAL bug-bounty Vulnerability Rating Taxonomy (VRT) classification. Stamped only on a program-flagged bug-bounty engagement (scope.yaml program.taxonomy == vrt); ABSENT on an ordinary pentest finding, so existing findings are unaffected. Lifts the VRT determination out of the free-text `impact` string into a structured, validatable field. The `path`/`id` MUST resolve to a real node in the pinned taxonomy (skills/bug-bounty/refs/vrt/vulnerability-rating-taxonomy.json) — scripts/validate.py rejects a FABRICATED path — and `priority` may not be MORE severe than the node's taxonomy baseline unless `priority_basis` is `argued-elevation` with a non-empty `priority_rationale` (anti-INFLATION).",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string", "minLength": 3, "description": "The VRT path: node ids (or node display names) joined by ` > `, e.g. `server_side_injection > content_spoofing > text_injection` or `Server-Side Injection > Content Spoofing > Text Injection`. MUST resolve to a real taxonomy node." },
+            "id": { "type": "string", "description": "The leaf variant/subcategory id (e.g. `text_injection`). Optional disambiguator for `path`." },
+            "priority": { "type": "string", "pattern": "^P[1-5]$", "description": "Technical-severity priority, P1 (most severe) .. P5 (least). Defaults to the path's taxonomy baseline; a value MORE severe than baseline requires priority_basis=argued-elevation + a priority_rationale." },
+            "priority_basis": { "enum": ["baseline", "argued-elevation", "argued-reduction"], "description": "Why `priority` relates to the taxonomy baseline. `baseline` = the taxonomy default. `argued-elevation` / `argued-reduction` deviate from it and REQUIRE a non-empty priority_rationale." },
+            "priority_rationale": { "type": "string", "description": "REQUIRED when priority_basis != baseline — the argument for deviating from the taxonomy baseline (e.g. a demonstrated cross-user impact that a baseline-P5 class does not capture)." }
+          }
+        },
         "confidence": { "enum": ["confirmed", "probable", "tentative"] },
         "status": { "enum": ["open", "verified", "rejected", "duplicate", "remediated"], "description": "Lifecycle state. DERIVED from the reviewer's authoritative `review.verdict`: accepted/blocked -> verified, rejected -> rejected, needs-evidence -> open (the two axes and their mapping are in verify-base.md). `duplicate` and `remediated` are post-report lifecycle states with no verdict equivalent. On any status/verdict discrepancy, `review.verdict` (the `reviews/<id>.verdict.json` file) wins." },
         "evidence": {
