@@ -121,6 +121,12 @@ a parallel multi-model swarm batched by rank, not a single serial pass. This is 
 - **Batch by rank into waves.** Take the `pending` categories in ascending `hunt_plan.json` `rank` (§2.5;
   fall back to routing-map order when no plan) and split them into WAVES of a handful of classes each —
   the highest-value, best-evidenced classes in the first wave.
+- **Before a wave, consult session liveness (§2.5 dead-session front-load).** If the web user session is
+  dead/expiring, the strategist has already front-loaded the session-INDEPENDENT classes and tagged the
+  dependent queue `needs: fresh-session` in `hunt_plan.json`. Run the independent classes now, and
+  **surface the `needs: fresh-session` classes to the operator** to re-capture a session (`redstrike
+  session import <eng> …`) — never burn authed leads into a dead token, and never skip them: they stay
+  `pending` and are re-driven once a session returns.
 - **Fan out each wave as CONCURRENT, PER-CLASS-LABELLED units — one trackable unit per class.** The
   console Task-flow view folds the live `autorun.jsonl` tool-call stream (`console/lib/control.ts`
   `foldRunObject`), and it renders a DISTINCT per-class node only when the class is NAMED in the stream, so
@@ -291,6 +297,24 @@ ladder (the §2d recall audit + `verify-base.md` check #5 are unchanged), whatev
 A class the strategist mis-ranks low or under-budgets therefore still surfaces as a **shallow-clear** and
 is caught before reporting. If `hunt_plan.json` is missing or stale, fall back to map order — hunt
 ordering is an efficiency aid, **never a gate**, so its absence can never block or shrink the hunt.
+
+**Session-dependence-aware ordering (dead-session front-load).** Before a wave — and on each re-rank —
+consult the engagement's web-session liveness (`python -m redstrike_cli session status <eng>` / exit 1 ⇒ an
+identity needs re-capture, or `<eng>/runtime/session_status.json` if present). The strategist crosses that
+with each class's `session_dependence` in `routing-map.json` (`independent` = runs with a dead session:
+jwt/auth-forge, recon, cve-intelligence, exposed-surface, headers/tls/cors/clickjacking, open-redirect,
+crlf, cache-poisoning, host-header, subdomain-takeover, and all unauthenticated probing · `dependent` =
+needs a live user session: idor/authz, bola-bfla, mass-assignment, upload-rce/file, business-logic,
+race-condition · `mixed`/absent = unknown). **On a dead/expiring session it front-loads the
+session-INDEPENDENT classes** (so an expired ~1h token never stalls the whole wave — the session-free work
+runs first) **and tags the dependent queue `needs: fresh-session`** (recorded in `hunt_plan.json`;
+`session_state` records why). Consume that exactly like any other `rank`: run the front-loaded classes, and
+**surface the `needs: fresh-session` queue to the operator** ("re-capture a session: `redstrike session
+import <eng> \"<Copy as cURL>\"`") rather than silently burning authed leads into a dead token. This is the
+SAME invariant: a dead session **reorders + annotates**, it never skips a class, never writes a ledger, and
+never lowers a floor — every dependent class stays `pending` (§2b) and is re-driven the moment a session
+returns, or caught by the §2c coverage gate + §2d recall audit if it is not. A live/unknown/absent signal ⇒
+no reorder (rank on value alone).
 
 ## 2.6 Zero-finding close — classify degraded vs clean (reliability; empty ≠ clean)
 A hunt that produced nothing has TWO very different meanings and they must never be conflated: a **real

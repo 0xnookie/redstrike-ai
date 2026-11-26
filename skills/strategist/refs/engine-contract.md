@@ -36,8 +36,23 @@ for e in sorted(hunt_plan["queue"], key=lambda e: e["rank"]):      # rank — as
   budget only ever ADDS effort; it can never lower the deterministic recall floor (see the ABSOLUTE
   INVARIANT in `SKILL.md`).
 
+## Session-dependence front-load (optional ordering input)
+
+When the engagement's live web user session is dead/expiring, the strategist reorders the queue so every
+session-**independent** class (`rank`s) ahead of every session-**dependent** one, and tags each dependent
+entry `needs: ["fresh-session"]`. The engine reads this exactly like any other ordering:
+
+- It still iterates the queue in ascending `rank` — the front-load IS the ordering, nothing special to do.
+- `queue[i].needs` (optional; `["fresh-session"]`) is an **operator-facing annotation, not a gate**: the
+  class is still `pending`, still owed in full, and still runs the moment a session returns. The engine
+  **surfaces** these classes to the operator ("awaiting a fresh session — re-capture: `redstrike session
+  import <eng> …`") instead of silently burning authed leads into a dead token — but it NEVER drops or
+  skips them. `queue[i].session_dependence` and the root `session_state` are informational/audit only.
+- Absent `needs` / `session_state`, or `session_state.status` live/unknown ⇒ behave exactly as before.
+
 ## Degraded / missing plan
 
 If `hunt_plan.json` is absent or stale, the engine falls back to coverage-map order and treats every class
 as `floor` with `diversity_pass=false`. That is recall-safe (every class is still routed and still owes the
-full ladder) — the plan only optimizes ORDER and DEPTH on top of that floor.
+full ladder) — the plan only optimizes ORDER and DEPTH on top of that floor. A missing or `unknown` session
+signal is likewise recall-safe: it simply means no front-load this pass (rank on value alone).

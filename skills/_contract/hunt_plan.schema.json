@@ -21,6 +21,7 @@
       "description": "MUST remain 'coverage.py' — a constant assertion that the strategist is NOT the ledger owner and wrote no ledger. Informational; the strategist never touches a ledger regardless of this field."
     },
     "queue": { "type": "array", "items": { "$ref": "#/$defs/entry" }, "description": "the ranked hunt queue — one entry per routed class the strategist is ordering." },
+    "session_state": { "$ref": "#/$defs/session_state" },
     "notes": { "type": "string", "description": "free-form strategy rationale for this pass as a whole." }
   },
   "$defs": {
@@ -40,6 +41,15 @@
           "enum": ["high", "unknown", "low"],
           "description": "the recon prior for this class's surface (feeds escalation.assess). Informational here; it does not change the mandatory floor."
         },
+        "session_dependence": {
+          "enum": ["independent", "dependent", "mixed"],
+          "description": "how this class depends on the engagement's LIVE web user session, copied from routing-map.json for readability + audit. independent = runs fine with a dead/expiring session (unauthenticated probing, or it forges/bypasses its own session — jwt/auth-forge, recon, CVE, exposed-surface, headers/tls/cors/clickjacking, open-redirect, crlf, cache-poisoning, host-header, subdomain-takeover). dependent = needs a live authenticated user session (idor/authz, bola-bfla, mass-assignment, upload-rce/file, business-logic, race-condition). mixed/absent = some sub-techniques need a session, some do not (treated as unknown — never force-front-loaded, never annotated). A ranking input ONLY: it changes ORDER on a dead session, never WHETHER a class runs."
+        },
+        "needs": {
+          "type": "array",
+          "items": { "enum": ["fresh-session"] },
+          "description": "optional operator-facing annotations — a class that is STILL fully queued and owed in full, but is awaiting a precondition. 'fresh-session' = this session-DEPENDENT class was ranked BEHIND the session-independent ones because the engagement's web user session is dead/expiring; it is surfaced to the operator as 'needs a fresh session', NOT skipped — queue_state stays queued/deferred and the class runs in full once a session returns. An ANNOTATION, never a coverage status and never a drop; `coverage.py` remains the sole authority on whether a class ran."
+        },
         "signals": { "type": "array", "items": { "type": "string" }, "description": "the routing signals / evidence that drove this class up or down the ranking." },
         "surface_count": { "type": "integer", "minimum": 0, "description": "how many surface_ledger elements route to this class (a breadth input to the ranking)." },
         "severity_ceiling": {
@@ -48,6 +58,20 @@
         },
         "depth_budget": { "$ref": "#/$defs/depth_budget" },
         "rationale": { "type": "string", "description": "why this class sits at this rank and budget — the reviewable reasoning." }
+      }
+    },
+    "session_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "the engagement's LIVE web user-session liveness this ranking pass consulted (from `redstrike session status` / `runtime/session_status.json`). PURELY INFORMATIONAL + an audit trail of WHY session-independent classes were front-loaded this pass. ABSENT or `live`/`unknown` ⇒ no reorder (ranking proceeds on value alone — recall-safe). `expiring`/`expired`/`dead` ⇒ the strategist front-loads the session-INDEPENDENT classes and annotates the session-DEPENDENT ones `needs: [fresh-session]`. It NEVER changes scope: a dead session REORDERS the queue + surfaces the dependent classes to the operator, it never drops, skips, or lowers the floor of any class.",
+      "properties": {
+        "status": {
+          "enum": ["live", "expiring", "expired", "dead", "unknown"],
+          "description": "aggregate web-session liveness. live = an authed identity is live (rank on value only). expiring = within the re-capture skew of its exp. expired = the authed session's exp is past. dead = no usable authed session remains (aggregate of expired/needs-recapture). unknown = not decidable offline (opaque/no-JWT session, or no accounts) — treated as live for ordering (no reorder), so a missing signal can never block or shrink the hunt."
+        },
+        "source": { "type": "string", "description": "where the liveness signal came from (e.g. 'runtime/session_status.json', 'redstrike session status')." },
+        "needs_recapture": { "type": "integer", "minimum": 0, "description": "how many stored identities need re-capture (expired/expiring) per the session-liveness check." },
+        "checked_at": { "type": "string", "description": "ISO-8601 time the session liveness was read for this ranking pass." }
       }
     },
     "depth_budget": {
