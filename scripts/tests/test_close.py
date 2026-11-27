@@ -35,6 +35,16 @@ def _finding(fid="RS-2026-001", verdict="accepted"):
             "review": {"verdict": verdict, "reviewer": "xss-reflected-verify"}}
 
 
+def _write_verdict(eng, fid="RS-2026-001", *, verdict="accepted", reviewer="xss-reflected-verify", subdir=None):
+    """Stage the reviewer's authoritative id-keyed verdict FILE `reviews/<id>.verdict.json` (root vault, or
+    under `<subdir>/reviews/` for the per-skill layout). Option A requires this canonical artifact for a
+    report-bound inline-accepted finding, so close.py's reconciliation passes for an honest engagement."""
+    rd = (eng / subdir / "reviews") if subdir else (eng / "reviews")
+    rd.mkdir(parents=True, exist_ok=True)
+    (rd / f"{fid}.verdict.json").write_text(
+        json.dumps({"verdict": verdict, "reviewer": reviewer}), encoding="utf-8")
+
+
 def _runs(eng):
     doc = json.loads((eng / "runtime" / "diagnostics.json").read_text(encoding="utf-8"))
     return doc["runs"]
@@ -216,6 +226,7 @@ class TestOrphanFindingsWarn(unittest.TestCase):
         eng = self._eng()
         (eng / "bola-bfla").mkdir()
         (eng / "bola-bfla" / "findings.json").write_text(json.dumps([_finding()]), encoding="utf-8")
+        _write_verdict(eng, "RS-2026-001", subdir="bola-bfla")  # the canonical finding is reviewer-reconciled
         (eng / "bola-bfla" / "findings_authed_bfla.json").write_text(
             json.dumps([_finding("RS-2026-050")]), encoding="utf-8")
         r = subprocess.run([sys.executable, str(SCRIPTS / "close.py"), "--engagement", str(eng)],
@@ -230,6 +241,7 @@ class TestCloseCli(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             eng = pathlib.Path(d)
             (eng / "findings.json").write_text(json.dumps([_finding()]), encoding="utf-8")
+            _write_verdict(eng, "RS-2026-001")  # the accepted finding carries its id-keyed verdict file
             r = subprocess.run([sys.executable, str(SCRIPTS / "close.py"), "--engagement", str(eng)],
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -241,6 +253,68 @@ class TestCloseCli(unittest.TestCase):
                             "--engagement", str(SCRIPTS / "no-such-eng-dir")],
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
+
+
+class TestCloseIndependentReviewReconciliation(unittest.TestCase):
+    """Option A (close-time enforcement): a report-bound inline-accepted finding must carry a matching
+    id-keyed reviews/<id>.verdict.json (the authoritative reviewer record) — an inline review{} block alone
+    is self-declarable. close FAILS (exit 2) with the remedy until the reviewer writes the verdict file, so
+    an honest pipeline always emits the canonically-keyed artifact the strict read-gate needs. The
+    diagnostics record is still written (close.py's other behavior is undisturbed)."""
+
+    def _eng(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        return pathlib.Path(self._tmp.name)
+
+    def test_inline_accepted_without_verdict_file_is_unreconciled(self):
+        eng = self._eng()
+        (eng / "findings.json").write_text(json.dumps([_finding("RS-2026-001")]), encoding="utf-8")
+        self.assertEqual(close.unreconciled_inline_accepts(eng), ["RS-2026-001"])
+
+    def test_inline_accepted_with_verdict_file_is_reconciled(self):
+        eng = self._eng()
+        (eng / "findings.json").write_text(json.dumps([_finding("RS-2026-001")]), encoding="utf-8")
+        _write_verdict(eng, "RS-2026-001")
+        self.assertEqual(close.unreconciled_inline_accepts(eng), [])
+
+    def test_per_skill_verdict_file_reconciles(self):
+        eng = self._eng()
+        (eng / "security-headers").mkdir()
+        (eng / "security-headers" / "findings.json").write_text(
+            json.dumps([_finding("RS-2026-010")]), encoding="utf-8")
+        _write_verdict(eng, "RS-2026-010", subdir="security-headers")
+        self.assertEqual(close.unreconciled_inline_accepts(eng), [])
+
+    def test_rejected_finding_needs_no_verdict_file(self):
+        eng = self._eng()
+        (eng / "findings.json").write_text(json.dumps([_finding("RS-2026-002", verdict="rejected")]),
+                                           encoding="utf-8")
+        self.assertEqual(close.unreconciled_inline_accepts(eng), [])
+
+    def test_cli_fails_with_remedy_when_verdict_file_missing(self):
+        """The headline: a reportable accepted finding with no id-keyed verdict file → close FAILS (exit 2)
+        and names the offending id + the remedy. The diagnostics record is still written (other behavior
+        undisturbed)."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "findings.json").write_text(json.dumps([_finding("RS-2026-001")]), encoding="utf-8")
+            r = subprocess.run([sys.executable, str(SCRIPTS / "close.py"), "--engagement", str(eng)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            out = r.stdout + r.stderr
+            self.assertIn("RS-2026-001", out)
+            self.assertIn("reviews/<id>.verdict.json keyed to the finding id", out)
+            self.assertTrue((eng / "runtime" / "diagnostics.json").is_file())  # record still written
+
+    def test_cli_passes_when_verdict_file_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "findings.json").write_text(json.dumps([_finding("RS-2026-001")]), encoding="utf-8")
+            _write_verdict(eng, "RS-2026-001")
+            r = subprocess.run([sys.executable, str(SCRIPTS / "close.py"), "--engagement", str(eng)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":
