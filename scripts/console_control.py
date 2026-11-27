@@ -590,10 +590,8 @@ def make_control_handler(target: Path, token: str):
             return self._run_engagement(eid, body)
 
         def _run_engagement(self, eid: str, body: dict):
-            with _RUNS_LOCK:
-                existing = _RUNS.get(eid)
-                if existing and existing.poll() is None:
-                    return self._json(HTTPStatus.CONFLICT, {"error": "run already in progress", "pid": existing.pid})
+            # Build the argv outside the lock (it touches no shared state), so the critical
+            # section stays tight.
             # Web server has no TTY -> autonomous only (interactive needs a terminal).
             args = ["run", eid, "--autonomous"]
             args += ["--max-turns", str(int(body.get("max_turns", 200)))]
@@ -602,8 +600,16 @@ def make_control_handler(target: Path, token: str):
                 args += ["--allow", str(a)]
             if body.get("resume"):
                 args.append("--resume")
-            proc = _run_cli(args, background=True)
+            # Guard -> spawn -> register must be ATOMIC: hold _RUNS_LOCK across all three so two
+            # near-simultaneous runs for the same eid (e.g. a double-click) can't both pass the
+            # guard and both launch. _run_cli(background=True) is a non-blocking subprocess.Popen
+            # (returns immediately), so holding the lock across it is cheap; the loser of the race
+            # then sees the winner's tracked, still-live proc and returns CONFLICT.
             with _RUNS_LOCK:
+                existing = _RUNS.get(eid)
+                if existing and existing.poll() is None:
+                    return self._json(HTTPStatus.CONFLICT, {"error": "run already in progress", "pid": existing.pid})
+                proc = _run_cli(args, background=True)
                 _RUNS[eid] = proc
                 _ENDED.pop(eid, None)  # a fresh run: forget how the last one ended
             return self._json(HTTPStatus.ACCEPTED, {"ok": True, "pid": proc.pid, "engagement": eid})
