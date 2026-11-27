@@ -1229,6 +1229,53 @@ def check_model_ledger():
 
 check_model_ledger()
 
+
+# 22c — executor-emitted coverage-mark schema (roadmap L-G): the structured artifact an executor writes at
+# <engagement>/<skill-name>/coverage_mark.json that `coverage.py --ingest-marks` folds into the ledger
+# THROUGH the mark() code path. A closed per-mark record, EITHER a single object OR an array of them.
+# Registered here so a drift (a dropped required field, an opened-up mark object, or a status enum that no
+# longer matches coverage.py's _MARK_STATUSES) fails the suite — mirrors the coverage_ledger / diagnostics /
+# model_ledger schema guards. The status vocabulary MUST equal _MARK_STATUSES so the declarative artifact and
+# the ingest code path can never diverge.
+def check_coverage_mark():
+    checked["coverage_mark_schema"] = 1
+    scm = skills_dir / "_contract" / "coverage_mark.schema.json"
+    if not scm.is_file():
+        err("skills/_contract/coverage_mark.schema.json missing (the executor-emitted coverage-mark schema)")
+        return
+    try:
+        cm = json.loads(scm.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        err(f"coverage_mark.schema.json: invalid JSON: {e}")
+        return
+    any_of = cm.get("anyOf")
+    if not (isinstance(any_of, list) and len(any_of) == 2):
+        err("coverage_mark.schema.json: root must be an anyOf of {single mark} | {array of marks} "
+            "(an executor may mark one category or several in one file)")
+    mark_def = ((cm.get("$defs") or {}).get("mark") or {})
+    if mark_def.get("additionalProperties") is not False:
+        err("coverage_mark.schema.json: $defs/mark must be additionalProperties:false (closed per-mark record)")
+    for req in ("category", "status"):
+        if req not in (mark_def.get("required") or []):
+            err(f"coverage_mark.schema.json: $defs/mark must require '{req}'")
+    status_enum = set(((mark_def.get("properties") or {}).get("status") or {}).get("enum") or [])
+    want = None
+    try:
+        import importlib.util
+        _cp = ROOT / "scripts" / "coverage.py"
+        _spec = importlib.util.spec_from_file_location("rs_coverage_mark_lint", _cp)
+        _cov = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_cov)
+        want = set(_cov._MARK_STATUSES)
+    except BaseException:  # noqa: BLE001 — a bad map can sys.exit on load; a drift check shouldn't crash CI
+        want = None
+    if want is not None and status_enum != want:
+        err(f"coverage_mark.schema.json: $defs/mark/status enum {sorted(status_enum)} must match "
+            f"coverage.py _MARK_STATUSES {sorted(want)} (artifact/ingest-path vocabulary drift)")
+
+
+check_coverage_mark()
+
 check_vrt()
 
 # report — guarded so the module can be imported (e.g. by scripts/tests/test_vrt.py) to exercise its
