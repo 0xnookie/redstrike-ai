@@ -431,6 +431,48 @@ def _persist_session(eng: Path, account_id: str, snapshot: dict) -> None:
 
 
 # --- default (real) HTTP client ----------------------------------------------
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _require_http_url(url) -> None:
+    """Reject any non-http(s) request URL before it is opened. A login recipe is replayed inside the
+    CLI process — OUTSIDE the engine's scope gate — so this is the ONLY scheme guard on its step /
+    ``${BASE_URL}`` URLs: a step like ``{"action":"get","url":"file:///etc/passwd"}`` must never read
+    a local file, and ``ftp://`` / ``data:`` / ``gopher://`` are refused likewise. Defense-in-depth —
+    recipes are operator-authored and gitignored (trusted), but the player stays http(s)-only."""
+    from urllib.parse import urlsplit
+    scheme = urlsplit(str(url or "")).scheme.lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise RecipeError(
+            f"refusing to fetch {url!r}: scheme {scheme or '(none)'!r} is not http/https "
+            "— login-recipe steps may only use http(s) URLs")
+
+
+def _build_http_only_opener(cookie_jar):
+    """A urllib opener restricted to http/https: it keeps the http(s) transport + cookie + redirect +
+    error handlers but OMITS the default ``FileHandler`` / ``FTPHandler`` / ``DataHandler`` that
+    ``build_opener`` would otherwise include — so neither a direct step URL nor a redirect target can
+    reach a ``file://`` / ``ftp://`` / ``data:`` scheme. Pairs with ``_require_http_url`` (the
+    per-request scheme guard); a redirect to a non-http(s) scheme then has no handler and errors
+    instead of being followed blindly."""
+    import urllib.request
+    handlers = [
+        urllib.request.ProxyHandler(),
+        urllib.request.UnknownHandler(),
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPRedirectHandler(),
+        urllib.request.HTTPErrorProcessor(),
+        urllib.request.HTTPCookieProcessor(cookie_jar),
+    ]
+    if hasattr(urllib.request, "HTTPSHandler"):
+        handlers.append(urllib.request.HTTPSHandler())
+    opener = urllib.request.OpenerDirector()
+    for h in handlers:
+        opener.add_handler(h)
+    return opener
+
+
 class _Resp:
     __slots__ = ("status", "text")
 
@@ -446,7 +488,6 @@ class UrllibClient:
 
     def __init__(self, *, cookie_jar_path=None, timeout: int = 20):
         import http.cookiejar
-        import urllib.request
         self._cj = http.cookiejar.MozillaCookieJar()
         self._jar_path = str(cookie_jar_path) if cookie_jar_path else None
         if self._jar_path and Path(self._jar_path).is_file():
@@ -454,7 +495,9 @@ class UrllibClient:
                 self._cj.load(self._jar_path, ignore_discard=True, ignore_expires=True)
             except Exception:
                 pass
-        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self._cj))
+        # http(s)-only opener: no FileHandler/FTPHandler/DataHandler, so a step URL (or a redirect
+        # target) can never reach a file:// / ftp:// / data: scheme (SSRF / local-file read).
+        self._opener = _build_http_only_opener(self._cj)
         self._timeout = timeout
         self._hdrs: dict = {}
         self._manual_cookie = ""
@@ -469,6 +512,7 @@ class UrllibClient:
         import urllib.error
         import urllib.request
         from urllib.parse import urlencode
+        _require_http_url(url)  # http(s) only — never a file:// / ftp:// step URL (SSRF / LFI)
         h = dict(self._hdrs)
         h.update(headers or {})
         if self._manual_cookie and not any(k.lower() == "cookie" for k in h):

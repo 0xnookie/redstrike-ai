@@ -1,6 +1,7 @@
 import io
 import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -167,6 +168,51 @@ class TestAutorunParser(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(s.non_json_lines, 2)
             self.assertEqual(s.non_json_sample, "a stray warning line")
+
+
+class _FakeProc:
+    """A mock Popen for the interrupt-teardown path. In `hang` mode the first bounded wait times out
+    (modelling a `claude -p` leg that ignores the polite terminate), forcing a hard kill."""
+
+    def __init__(self, *, exits_within_grace=False, pid=4321):
+        self.pid = pid
+        self.returncode = 0 if exits_within_grace else None
+        self._exits_within_grace = exits_within_grace
+        self.killed = False
+        self.terminated = False
+        self.signals = []
+
+    def send_signal(self, sig):
+        self.signals.append(sig)
+
+    def terminate(self):
+        self.terminated = True
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        if self._exits_within_grace or self.killed:
+            return self.returncode
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=timeout)
+
+
+class TestInterruptTeardown(unittest.TestCase):
+    def test_bounded_wait_then_hard_kill(self):
+        # A leg that ignores the polite terminate (wait times out) must be HARD-killed, not waited on
+        # forever — and the returncode still comes back.
+        proc = _FakeProc()
+        rc = autorun._terminate_proc_group(proc, stream=io.StringIO(), grace=0.01)
+        self.assertTrue(proc.killed)
+        self.assertEqual(rc, -9)
+
+    def test_clean_exit_within_grace_no_kill(self):
+        # A leg that honours the terminate within the grace window is NOT hard-killed.
+        proc = _FakeProc(exits_within_grace=True)
+        rc = autorun._terminate_proc_group(proc, stream=io.StringIO(), grace=0.01)
+        self.assertFalse(proc.killed)
+        self.assertEqual(rc, 0)
 
 
 class TestAutonomousRoe(unittest.TestCase):

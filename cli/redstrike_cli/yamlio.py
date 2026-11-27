@@ -29,11 +29,15 @@ def load(path: str | Path) -> dict:
 
 # --- stdlib fallback reader ------------------------------------------------
 def _strip_comment(s: str) -> str:
-    out, q = [], None
+    out, q, esc = [], None, False
     for ch in s:
         if q:
             out.append(ch)
-            if ch == q:
+            if esc:
+                esc = False                 # this char was escaped — consume it literally
+            elif ch == "\\" and q == '"':
+                esc = True                  # backslash escape inside a double-quoted scalar
+            elif ch == q:
                 q = None
         elif ch in ('"', "'"):
             q = ch
@@ -45,6 +49,27 @@ def _strip_comment(s: str) -> str:
     return "".join(out).rstrip()
 
 
+def _unescape_double_quoted(s: str) -> str:
+    """Decode the escapes a double-quoted YAML scalar carries (the ones `render_scope_yaml`'s `_q`
+    emits, plus the common C-style ones): ``\\\\`` ``\\"`` ``\\n`` ``\\r`` ``\\t``. Keeps this
+    stdlib fallback reader in step with PyYAML so an escaped value round-trips to the exact original
+    (scope.yaml is re-parsed to drive the scope gate — a dropped escape would mangle an entry)."""
+    if "\\" not in s:
+        return s
+    out: list[str] = []
+    i, n = 0, len(s)
+    _esc = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t"}
+    while i < n:
+        ch = s[i]
+        if ch == "\\" and i + 1 < n:
+            out.append(_esc.get(s[i + 1], s[i + 1]))
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def _scalar(v: str) -> Any:
     v = v.strip()
     if v in ("", "~") or v.lower() == "null":
@@ -53,7 +78,9 @@ def _scalar(v: str) -> Any:
         return []
     if v == "{}":
         return {}
-    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        return _unescape_double_quoted(v[1:-1])
+    if len(v) >= 2 and v[0] == "'" and v[-1] == "'":
         return v[1:-1]
     low = v.lower()
     if low == "true":
@@ -143,10 +170,22 @@ def _mini_load(text: str) -> dict:
 
 
 # --- scope.yaml render -----------------------------------------------------
+def _q(value: Any) -> str:
+    """Escape ``value`` into a VALID double-quoted YAML scalar: backslash, double-quote and the
+    control chars (newline / carriage-return / tab). scope.yaml is the signed canonical authorization
+    record that `load` re-parses to drive the scope gate, so an unescaped ``"`` / ``\\`` / newline in
+    a free-text field (``authorized_by``, ``engagement``, ``notes``, a domain/URL, ``source.*`` …)
+    would produce malformed YAML and silently drop or mangle an entry. Round-trips back via `load`."""
+    s = "" if value is None else str(value)
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    s = s.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+    return f'"{s}"'
+
+
 def _yaml_list(items: list[str], indent: str) -> str:
     if not items:
         return " []"
-    return "\n" + "\n".join(f'{indent}- "{s}"' for s in items)
+    return "\n" + "\n".join(f"{indent}- {_q(s)}" for s in items)
 
 
 def render_scope_yaml(fields: dict) -> str:
@@ -158,24 +197,24 @@ def render_scope_yaml(fields: dict) -> str:
     phase_block = "\n".join(f"    - {p}" for p in phases)
     src = fields.get("source") or {}
     # White-box source audit: the shared `source:` block. Its PRESENCE marks the engagement
-    # source-granted (the orchestrator runs the white-box pipeline). Emitted before `notes:` so the
-    # folded notes scalar stays last; absent for ordinary black-box engagements.
+    # source-granted (the orchestrator runs the white-box pipeline). Emitted before `notes:` so
+    # `notes:` stays last; absent for ordinary black-box engagements.
     source_block = ""
     if src:
         source_block = (
             "\nsource:                 # white-box: audit the cloned repo at this commit\n"
-            f"  repo_url: \"{src.get('repo_url', '')}\"\n"
-            f"  local_path: \"{src.get('local_path', 'source/')}\"\n"
-            f"  commit: \"{src.get('commit', '')}\"\n"
-            f"  branch: \"{src.get('branch', '')}\"\n"
+            f"  repo_url: {_q(src.get('repo_url', ''))}\n"
+            f"  local_path: {_q(src.get('local_path', 'source/'))}\n"
+            f"  commit: {_q(src.get('commit', ''))}\n"
+            f"  branch: {_q(src.get('branch', ''))}\n"
         )
     return f"""# Per-engagement scope & rules of engagement. Authored by the `redstrike` CLI.
 # The RoE gate (_contract/roe-gate.md) reads this before any ACTIVE action;
 # out-of-scope / closed-window => HARD STOP. This file is the signed canonical
 # authorization record; runtime/scope.json is a generated machine projection.
 
-engagement: "{fields['engagement']}"
-authorized_by: "{fields['authorized_by']}"
+engagement: {_q(fields['engagement'])}
+authorized_by: {_q(fields['authorized_by'])}
 window:
   start: {fields['window']['start']}
   end:   {fields['window']['end']}
@@ -199,8 +238,7 @@ rules:
 {phase_block}
 
 oob:
-  collaborator: "{fields.get('oob', {}).get('collaborator', '')}"
+  collaborator: {_q(fields.get('oob', {}).get('collaborator', ''))}
 {source_block}
-notes: >
-  {fields.get('notes', 'Written authorization on file before the window opens.')}
+notes: {_q(fields.get('notes', 'Written authorization on file before the window opens.'))}
 """
