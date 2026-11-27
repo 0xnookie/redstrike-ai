@@ -572,7 +572,7 @@ class _RateLock:
                 os.close(fd)
                 self.held = True
                 return True
-            except FileExistsError:
+            except (FileExistsError, PermissionError):  # Windows: EACCES on a pending-delete .lock
                 try:                                    # steal a stale lock (crashed holder)
                     if time.time() - os.path.getmtime(self.path) > self.stale:
                         os.unlink(self.path)
