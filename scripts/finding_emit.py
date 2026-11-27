@@ -84,7 +84,7 @@ class _FileLock:
         while True:
             try:
                 fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
+            except (FileExistsError, PermissionError):  # Windows: EACCES on a pending-delete .lock
                 try:
                     if time.time() - os.path.getmtime(self._path) > self._stale:
                         os.unlink(self._path)

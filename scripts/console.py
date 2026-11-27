@@ -429,15 +429,32 @@ def files_for(engagement: Path) -> dict:
     return files
 
 
+# scope_for() is on the same hot path as files_for(): the manifest poll calls it every 15s per
+# engagement, and each cold call is an uncached pruned tree walk (_shallowest for scope.json, then
+# scope.yaml). Without this, the poll + open-burst re-walk the tree for scope on every request,
+# defeating the _FILES_CACHE that already covers files_for(). Cache the resolved scope dict per
+# engagement under the SAME short TTL — same scope data returned, just not re-walked each time.
+_SCOPE_CACHE: dict = {}
+
+
 def scope_for(engagement: Path):
-    """A scope dict for one engagement: a real scope.json if present, else scope.yaml."""
+    """A scope dict for one engagement: a real scope.json if present, else scope.yaml. Cached per
+    engagement under _FILES_TTL so the manifest poll does not re-walk the tree on every request."""
+    key = str(engagement)
+    now = time.monotonic()
+    cached = _SCOPE_CACHE.get(key)
+    if cached and (now - cached[0]) < _FILES_TTL:
+        return cached[1]
     sj = _shallowest(engagement, "scope.json")
     if sj:
-        return _read_json(sj)
-    sy = engagement / "scope.yaml"
-    if not sy.exists():
-        sy = _shallowest(engagement, "scope.yaml")
-    return scope_yaml_to_json(sy) if (sy and sy.exists()) else None
+        scope = _read_json(sj)
+    else:
+        sy = engagement / "scope.yaml"
+        if not sy.exists():
+            sy = _shallowest(engagement, "scope.yaml")
+        scope = scope_yaml_to_json(sy) if (sy and sy.exists()) else None
+    _SCOPE_CACHE[key] = (now, scope)
+    return scope
 
 
 def _read_json(path):

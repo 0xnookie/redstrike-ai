@@ -159,6 +159,25 @@ class TestFallbackRecord(unittest.TestCase):
         close._fallback_write(eng, rec)
         self.assertEqual(len(_runs(eng)), 2)
 
+    def test_fallback_write_uses_shared_atomic_helper(self):
+        """The robustness fix: _fallback_write goes through the shared atomicio.atomic_write (temp
+        file + os.replace) so a crash mid-write never leaves a torn diagnostics.json."""
+        self.assertEqual(close.atomic_write.__name__, "atomic_write")
+        self.assertIn("atomicio", close.atomic_write.__module__)
+
+    def test_fallback_write_is_atomic_no_tmp_residue(self):
+        eng = self._eng()
+        (eng / "findings.json").write_text(json.dumps([]), encoding="utf-8")
+        rec = close._fallback_record(eng, session="", now="2026-01-01T00:00:00Z")
+        close._fallback_write(eng, rec)
+        runtime = eng / "runtime"
+        # atomic_write replaces via a temp file in the SAME dir and cleans it up on success
+        leftovers = sorted(p.name for p in runtime.iterdir() if p.name != "diagnostics.json")
+        self.assertEqual(leftovers, [])
+        # and the file is complete/valid JSON (never torn)
+        doc = json.loads((runtime / "diagnostics.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(doc["runs"]), 1)
+
 
 class TestOrphanFindingsWarn(unittest.TestCase):
     """QW-3: a stray non-canonical findings file (the bola-bfla/findings_authed_bfla.json incident) is NOT

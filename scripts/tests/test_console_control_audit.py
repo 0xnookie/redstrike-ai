@@ -117,5 +117,41 @@ class TestAuditRoute(unittest.TestCase):
             self.assertIn("clone failed", body["error"])
 
 
+class TestStreamTailReplay(unittest.TestCase):
+    """The SSE run-log tail (`_tail_boundary_lines`) replays the CURRENT run from the last run-boundary
+    marker, reading only a BOUNDED tail of autorun.jsonl instead of loading the whole (append-only,
+    unbounded) log into RAM for every connecting client."""
+
+    def _replay(self, data: bytes, max_bytes=cc._TAIL_BYTES):
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(data)
+            p = pathlib.Path(tf.name)
+        self.addCleanup(lambda: p.unlink(missing_ok=True))
+        with p.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            out = cc._tail_boundary_lines(f, size, max_bytes)
+            self.assertEqual(f.tell(), size)   # left positioned at EOF for the follow loop
+        return [s for s in out if s]
+
+    def test_replays_from_last_boundary(self):
+        data = b'# run 1\n{"a":1}\n# run 2\n{"b":2}\n{"c":3}\n'
+        self.assertEqual(self._replay(data), ['# run 2', '{"b":2}', '{"c":3}'])
+
+    def test_bounded_tail_finds_run_in_small_window(self):
+        """A large pre-run history must NOT be read: a tiny window still lands on the final run's
+        boundary (the whole-file readlines() path would have loaded all ~1MB of history)."""
+        history = b'{"old":0}\n' * 100000                      # ~1 MB of prior output
+        current = b'# run A\n{"z":9}\n# run N\n{"x":1}\n{"y":2}\n'
+        self.assertEqual(self._replay(history + current, max_bytes=64),
+                         ['# run N', '{"x":1}', '{"y":2}'])
+
+    def test_no_boundary_replays_window(self):
+        self.assertEqual(self._replay(b'{"a":1}\n{"b":2}\n'), ['{"a":1}', '{"b":2}'])
+
+    def test_empty_file(self):
+        self.assertEqual(self._replay(b''), [])
+
+
 if __name__ == "__main__":
     unittest.main()

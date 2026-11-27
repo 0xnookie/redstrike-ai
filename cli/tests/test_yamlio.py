@@ -64,6 +64,39 @@ class TestMiniYaml(unittest.TestCase):
             self.assertEqual(y["authorized_by"], "sec@acme / auth-123")
             self.assertEqual(y["oob"]["collaborator"], "oob.example.net")
 
+    def test_special_chars_roundtrip(self):
+        # A free-text field containing " / \ / newline / tab would break naive `"{value}"`
+        # interpolation and silently mangle this signed authorization record. With `_q` it stays
+        # valid YAML and round-trips to the EXACT original — via the stdlib reader AND PyYAML.
+        fields = engagement.build_fields(
+            client="Acme Corp", authorized_by="x", domains=["*.acme.com"],
+        )
+        nasty_auth = 'sec@acme "quoted" \\path\nsecond-line\ttab'
+        nasty_notes = 'line1 "q"\nline2 \\ end # not-a-comment'
+        nasty_eng = 'eng-"x"\\y'
+        nasty_dom = 'a"b\\c.example.com'
+        fields["authorized_by"] = nasty_auth
+        fields["notes"] = nasty_notes
+        fields["engagement"] = nasty_eng
+        fields["in_scope"]["domains"] = [nasty_dom]
+        fields.setdefault("oob", {})["collaborator"] = 'oob"x.net'
+        text = yamlio.render_scope_yaml(fields)
+
+        got = yamlio._mini_load(text)  # the stdlib fallback reader (used when PyYAML is absent)
+        self.assertEqual(got["authorized_by"], nasty_auth)
+        self.assertEqual(got["notes"], nasty_notes)
+        self.assertEqual(got["engagement"], nasty_eng)
+        self.assertEqual(got["in_scope"]["domains"], [nasty_dom])
+        self.assertEqual(got["oob"]["collaborator"], 'oob"x.net')
+
+        if HAVE_YAML:  # and it is valid, exactly-equal YAML for PyYAML too
+            y = yaml.safe_load(text)
+            self.assertEqual(y["authorized_by"], nasty_auth)
+            self.assertEqual(y["notes"], nasty_notes)
+            self.assertEqual(y["engagement"], nasty_eng)
+            self.assertEqual(y["in_scope"]["domains"], [nasty_dom])
+            self.assertEqual(y["oob"]["collaborator"], 'oob"x.net')
+
 
 if __name__ == "__main__":
     unittest.main()

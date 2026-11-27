@@ -263,6 +263,53 @@ class TestRefreshGate(unittest.TestCase):
             self.assertEqual(results[0].status, lr.SKIPPED)
 
 
+class TestHttpOnlyClient(unittest.TestCase):
+    """SSRF / local-file hardening — the stdlib login-replay client is http(s)-only. A login recipe
+    is replayed in the CLI process, OUTSIDE the engine's scope gate, so a step URL (or a redirect
+    target) must never reach a file:// / ftp:// / data: scheme (local-file read / SSRF)."""
+
+    def test_non_http_scheme_steps_refused(self):
+        client = lr.UrllibClient()
+        for bad in ("file:///etc/passwd", "ftp://host/secret", "data:text/plain,hi", "gopher://x/"):
+            with self.assertRaises(lr.RecipeError):
+                client.get(bad)
+        with self.assertRaises(lr.RecipeError):
+            client.post("file:///etc/passwd", data={"a": "b"})
+
+    def test_opener_omits_file_and_ftp_handlers(self):
+        import urllib.request
+        client = lr.UrllibClient()
+        for h in client._opener.handlers:
+            self.assertNotIsInstance(h, urllib.request.FileHandler)
+            self.assertNotIsInstance(h, urllib.request.FTPHandler)
+
+    def test_http_step_builds_and_opens_without_network(self):
+        # The normal http(s) flow is unchanged: the request is built and handed to the opener. The
+        # opener is mocked so NO real fetch happens.
+        client = lr.UrllibClient()
+
+        class _FakeHTTPResp:
+            status = 200
+
+            def read(self):
+                return b"LOGIN-OK"
+
+        class _FakeOpener:
+            def __init__(self):
+                self.opened = []
+
+            def open(self, req, timeout=None):
+                self.opened.append(req.full_url)
+                return _FakeHTTPResp()
+
+        fake = _FakeOpener()
+        client._opener = fake
+        resp = client.get("https://in-scope.example.com/login")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.text, "LOGIN-OK")
+        self.assertEqual(fake.opened, ["https://in-scope.example.com/login"])
+
+
 class TestLoadRecipes(unittest.TestCase):
     def test_shapes(self):
         with tempfile.TemporaryDirectory() as tmp:

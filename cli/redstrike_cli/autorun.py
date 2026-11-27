@@ -137,6 +137,56 @@ def _print_summary(s: RunSummary, rc: int, stream) -> None:
         print(ui.kv("note", s.result_text.strip().splitlines()[0][:120], stream=stream), file=stream)
 
 
+def _terminate_proc_group(proc, *, stream=None, grace: float = 5.0) -> int:
+    """Tear down an interrupted engine leg AND its child process group — bounded and cross-platform.
+
+    The leg is spawned in its own process group (POSIX session / Windows CREATE_NEW_PROCESS_GROUP) so
+    its tool children (nmap/sqlmap/ffuf) can be signalled as a GROUP and don't orphan. A polite
+    group-terminate goes out first; a ``claude -p`` leg that ignores it is HARD-killed after ``grace``
+    seconds (so a hung leg can't wedge the CLI). A second Ctrl+C during the bounded wait is swallowed
+    here and falls through to the hard kill — it never escapes uncaught (which would skip
+    ``audit.close()`` + the summary)."""
+    import os
+    import signal
+
+    def _group_terminate() -> None:
+        try:
+            if sys.platform == "win32":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)  # delivered to the new process group
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:
+            try:
+                proc.terminate()   # fall back to the leader if the group signal is unavailable
+            except Exception:
+                pass
+
+    def _group_kill() -> None:
+        if sys.platform != "win32":
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                pass
+        try:
+            proc.kill()            # hard-kill the leader (Windows: TerminateProcess)
+        except Exception:
+            pass
+
+    _group_terminate()
+    try:
+        return proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        pass
+    except KeyboardInterrupt:
+        if stream is not None:
+            print(ui.warn("second interrupt — hard-killing engine", stream=stream), file=stream)
+    _group_kill()
+    try:
+        return proc.wait(timeout=grace)
+    except Exception:
+        return proc.returncode if proc.returncode is not None else -1
+
+
 def run_autonomous(
     claude_bin: str, argv: list[str], cwd: Path, audit_path: Path, pending_path: Path | None = None,
     stream=None, audit_head: str | None = None,
@@ -150,10 +200,18 @@ def run_autonomous(
         audit.write(audit_head or f"# --- redstrike autonomous run {_dt.datetime.now(_dt.timezone.utc).isoformat()} ---\n")
     except Exception:
         audit = None
+    # Spawn the leg in its OWN process group (POSIX session / Windows CREATE_NEW_PROCESS_GROUP) so an
+    # interrupt teardown can signal the whole group and its tool children (nmap/sqlmap/ffuf) don't
+    # orphan. No effect on the normal stdout-stream-then-wait path below.
+    group_kwargs: dict = {}
+    if sys.platform == "win32":
+        group_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        group_kwargs["start_new_session"] = True
     try:
         proc = subprocess.Popen(
             argv, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1, encoding="utf-8", errors="replace",
+            text=True, bufsize=1, encoding="utf-8", errors="replace", **group_kwargs,
         )
     except FileNotFoundError:
         print(ui.err("`claude` not found on PATH", stream=stream), file=stream)
@@ -179,10 +237,12 @@ def run_autonomous(
                     s.non_json_sample = line[:200]
                 continue
             handle_event(o, s, stream)
+        rc = proc.wait()
     except KeyboardInterrupt:
-        proc.terminate()
         print(ui.warn("interrupted — terminating engine", stream=stream), file=stream)
-    rc = proc.wait()
+        # Bounded, cross-platform teardown of the leg + its process group (no unbounded wait that a
+        # SIGTERM-ignoring leg could hang on, no second Ctrl+C escaping past the cleanup below).
+        rc = _terminate_proc_group(proc, stream=stream)
     if audit:
         audit.close()
     if s.deferred and pending_path is not None:

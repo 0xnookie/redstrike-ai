@@ -61,6 +61,14 @@ def _roundup(x: float) -> float:
     return (i // 10000 + 1) / 10.0
 
 
+def _round_half_up(x: float) -> float:
+    """CVSS 3.0 rounding: round to one decimal place with ties going UP — NOT the 3.1 ceil-to-tenth
+    Roundup (3.1 introduced Roundup precisely because 3.0's 'round to 1 decimal' is a plain rounding).
+    Integer math on the hundred-thousandths mirrors _roundup's FP-drift guard."""
+    i = int(round(x * 100000))         # x in hundred-thousandths, drift-safe
+    return ((i + 5000) // 10000) / 10.0  # nearest tenth, halves rounding up
+
+
 def rating_for(score: float) -> str:
     """CVSS 3.x qualitative severity rating for a base score."""
     if score <= 0:
@@ -103,7 +111,10 @@ def base_score(metrics: dict) -> float:
     if impact <= 0:
         return 0.0
     raw = (1.08 * (impact + exploitability)) if scope_changed else (impact + exploitability)
-    return _roundup(min(raw, 10.0))
+    # v3.0 rounds half-up to one decimal; v3.1 uses the ceil-to-tenth Roundup. Branch on the parsed
+    # version so a CVSS:3.0 vector is not over-rounded by the 3.1 rule (the docstring claims v3.0).
+    rounder = _round_half_up if version.startswith("3.0") else _roundup
+    return rounder(min(raw, 10.0))
 
 
 def score_vector(vector: str):
