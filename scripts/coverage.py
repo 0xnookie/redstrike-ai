@@ -21,6 +21,19 @@ Two jobs, one source of truth (skills/_contract/routing-map.json):
               sets ONE leg's (sub-surface) status; the family's top-level status is then a derived
               ROLL-UP (worst-case / least-covered) so no family status can mask an untested leg.
 
+  --ingest-marks  Fold EXECUTOR-EMITTED coverage into the ledger. An executor writes a STRUCTURED
+              `<engagement>/<skill-name>/coverage_mark.json` (schema coverage_mark.schema.json) declaring
+              the coverage it achieved; this discovers every such file, validates it, and applies each mark
+              THROUGH the --mark code path — so depth-substance, sub-surface roll-up and refusal logic all
+              still apply. The declarative alternative to hand-running --mark. (Needs --engagement.)
+
+  --reaffirm  Re-affirm an already-worked category against its ALREADY-RETAINED depth payload, with NO new
+              free-text note (`--reaffirm <id>` [--subsurface <leg>]). Recomputes depth_substantiated purely
+              from what the entry already carries; succeeds if that substantiates the clear, REFUSES with the
+              specific gap otherwise. Kills the copy-paste-note loop (re-asserting a worked class by
+              re-typing the same --depth-note) that tripped the oversight/duplication classifier. (Needs
+              --engagement.)
+
 The point of Phase 1: make "not attempted" a first-class, visible state. A category that never ran
 and a category that ran-and-found-nothing must look different.
 
@@ -33,7 +46,9 @@ Stdlib only. Examples:
   python scripts/coverage.py --selftest
 """
 import argparse
+import contextlib
 import datetime
+import io
 import json
 import os
 import sys
@@ -496,19 +511,33 @@ def plan(m: dict, signals: set, requested_phases: set, engagement: str = "") -> 
 _VC_MOD = None
 
 
+def _load_vc():
+    """Lazy-load the _contract/verify_completion module BY PATH (scripts/ may not be a package on the path).
+    Shared by the findings-discovery cross-check and the coverage-mark schema validation — both reuse this
+    one loader. Returns the module, or None if it can't be loaded (callers then degrade gracefully)."""
+    global _VC_MOD
+    if _VC_MOD is None:
+        try:
+            import importlib.util
+            p = ROOT / "skills" / "_contract" / "verify_completion.py"
+            spec = importlib.util.spec_from_file_location("rs_vc_coverage", p)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _VC_MOD = mod
+        except Exception:  # noqa: BLE001
+            _VC_MOD = None
+    return _VC_MOD
+
+
 def _discover_findings(eng: Path):
     """Reuse verify_completion's multi-layout finding discovery (root / per-skill / consolidated) so the
     soft cross-check fires on the REAL per-skill layout (<eng>/*/findings.json), not only a root
     findings.json. Returns a flat list, or None when none/unparseable (cross-check then skipped)."""
-    global _VC_MOD
+    vc = _load_vc()
+    if vc is None:
+        return None
     try:
-        if _VC_MOD is None:
-            import importlib.util
-            p = ROOT / "skills" / "_contract" / "verify_completion.py"
-            spec = importlib.util.spec_from_file_location("rs_vc_coverage", p)
-            _VC_MOD = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(_VC_MOD)
-        findings, _src = _VC_MOD._discover_engagement_findings(eng)
+        findings, _src = vc._discover_engagement_findings(eng)
         return findings
     except Exception:  # noqa: BLE001
         return None
@@ -700,8 +729,35 @@ def selftest() -> int:
     for _leg in _fam:                                      # cover every leg -> family rolls up attempted
         _apply_subsurface(_e, _fam, _leg, "attempted", "ran", 0)
     assert _e["status"] == "attempted" and not _e.get("pending_subsurfaces"), _e
+    # EXECUTOR-EMITTED COVERAGE MARKS (roadmap L-G): a coverage_mark.json folds in through mark(), and
+    # --reaffirm re-asserts a worked class from its retained payload with no new note.
+    import tempfile
+    with tempfile.TemporaryDirectory() as _d:
+        _eng = Path(_d)
+        _led = plan(m, None, {"web"}, _eng.name)
+        atomic_write(_eng / LEDGER_NAME, json.dumps(_led, indent=2) + "\n")
+        (_eng / "sqli").mkdir()
+        atomic_write(_eng / "sqli" / MARK_NAME, json.dumps(
+            {"category": "sqli", "status": "attempted", "findings_count": 0, "attempts": 6,
+             "variants": ["derive-not-assume", "encoding-ladder"],
+             "depth_note": "boolean/time/union differential all negative on id,q,search"}) + "\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            _rc = ingest_marks(_eng, require_depth=True)
+        assert _rc == 0, "a substantiated executor mark must ingest clean"
+        _back = json.loads((_eng / LEDGER_NAME).read_text(encoding="utf-8"))
+        _sqli = next(c for c in _back["categories"] if c["id"] == "sqli")
+        assert _sqli["status"] == "attempted" and _sqli["depth_substantiated"] is True, _sqli
+        assert _sqli["variants_tried"] == ["derive-not-assume", "encoding-ladder"], _sqli
+        # --reaffirm against the now-retained payload succeeds with NO new note.
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert reaffirm(_eng, "sqli") == 0
+        # a bare clear with no retained depth (cors is pending, zero payload) is REFUSED by --reaffirm
+        # (it never invents a note).
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert reaffirm(_eng, "cors") == 2, "an un-substantiated clear cannot be reaffirmed"
     print("coverage.py selftest: OK "
-          f"({len(ids)} categories, {len(set(agents))} executors, orphans wired, phases auto-activate)")
+          f"({len(ids)} categories, {len(set(agents))} executors, orphans wired, phases auto-activate, "
+          f"executor-marks ingest + reaffirm)")
     return 0
 
 
@@ -1033,6 +1089,231 @@ def update_ledger(eng: Path, mutate):
         return out
 
 
+# --- EXECUTOR-EMITTED COVERAGE MARKS (roadmap L-G) ------------------------------------------------- #
+# Today the orchestrator marks coverage by hand-running `coverage.py --mark <cat> --status attempted
+# --depth-note "..." --evidence ...`. Two problems the retro flagged: an executor can't emit its OWN
+# coverage declaratively, and re-affirming an already-worked category forced copy-pasting the same
+# free-text depth note (which tripped an oversight/duplication classifier). This block adds:
+#   * a STRUCTURED, executor-emitted artifact `<engagement>/<skill-name>/coverage_mark.json` (schema
+#     coverage_mark.schema.json) that `--ingest-marks` folds into the ledger THROUGH the existing mark()
+#     path — so every depth-substance, sub-surface roll-up and refusal rule still applies, nothing is
+#     bypassed; and
+#   * a `--reaffirm <CATEGORY>` op that re-affirms a category against its ALREADY-RETAINED depth payload
+#     with NO new free-text note, killing the copy-paste-note loop.
+MARK_NAME = "coverage_mark.json"
+MARK_SCHEMA_REL = "skills/_contract/coverage_mark.schema.json"
+
+
+def _validate_mark_doc(data):
+    """Validate a loaded coverage_mark.json document (a single mark object OR an array of them) against
+    coverage_mark.schema.json, REUSING verify_completion's schema validator (the `jsonschema` package when
+    present, else the repo's stdlib subset checker) — the same approach the artifact gate uses. Returns
+    (ok, note). DEGRADES GRACEFULLY: if the validator module can't be loaded at all, returns
+    (True, "...unavailable") so ingest still proceeds — mark() re-enforces status/reason/depth itself, so a
+    malformed mark can't slip through even when schema pre-validation is skipped."""
+    vc = _load_vc()
+    if vc is None or not hasattr(vc, "_validate_against_schema"):
+        return True, "schema check unavailable (validator not importable)"
+    try:
+        return vc._validate_against_schema(data, MARK_SCHEMA_REL)
+    except Exception as e:  # noqa: BLE001
+        return True, f"schema check error: {e} (skipped)"
+
+
+def _apply_mark_obj(eng: Path, obj: dict, require_depth: bool = True):
+    """Apply ONE validated mark object THROUGH the existing mark() code path (so depth-substance, family
+    roll-up and refusal logic are never bypassed), capturing mark()'s message. Returns (rc, detail):
+    rc==0 => applied, rc!=0 => refused by mark()'s own rules (under-depth, missing reason, un-named family
+    block, unknown category/leg). Pure field mapping from the artifact vocabulary onto mark()'s signature."""
+    cat = str(obj.get("category") or "").strip()
+    status = str(obj.get("status") or "").strip()
+    count = obj.get("findings_count")
+    if isinstance(count, bool):            # JSON true/false is never a count
+        count = None
+    attempts = obj.get("attempts")
+    if isinstance(attempts, bool):
+        attempts = None
+    variants = [str(v).strip() for v in (obj.get("variants") or []) if str(v).strip()] or None
+    escalations = [str(v).strip() for v in (obj.get("escalations") or []) if str(v).strip()] or None
+    blocked_sub = [str(v).strip() for v in (obj.get("blocked_subsurfaces") or []) if str(v).strip()] or None
+    note = obj.get("reason")
+    depth_note = obj.get("depth_note")
+    if depth_note is None:                 # `differential` is the documented alias for depth_note
+        depth_note = obj.get("differential")
+    evidence = obj.get("evidence")
+    subsurface = obj.get("subsurface") or None
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = mark(eng, cat, status, count=count, note=note, as_json=False,
+                  escalations=escalations, attempts=attempts, variants=variants,
+                  depth_note=depth_note, evidence=evidence, require_depth=require_depth,
+                  blocked_subsurfaces=blocked_sub, subsurface=subsurface)
+    return rc, buf.getvalue().strip()
+
+
+def ingest_marks(eng: Path, as_json: bool = False, require_depth: bool = True) -> int:
+    """Discover every `<eng>/*/coverage_mark.json`, validate each against coverage_mark.schema.json, and fold
+    each mark into coverage_ledger.json THROUGH the existing mark() path (so all depth-substance, sub-surface
+    roll-up and refusal logic still applies — nothing is bypassed). Idempotent + concurrency-safe: each
+    mark() call takes the ledger lock on its own (ingest never holds an outer lock, so a wave subagent's
+    concurrent --mark can't deadlock against it). A successfully-ingested mark FILE is LEFT IN PLACE and
+    logged — engagement artifacts are never silently deleted, and leaving the file keeps ingest idempotent
+    (re-applying the same mark is a no-op in effect). Returns 0 only when every discovered mark applied
+    cleanly; 2 when a mark file was malformed/schema-invalid or any individual mark was REFUSED (the per-mark
+    report says which, so the orchestrator knows what stays re-drivable)."""
+    eng = Path(eng)
+    ledger_path = eng / LEDGER_NAME
+    if not ledger_path.is_file():
+        msg = f"[!] no {LEDGER_NAME} at {eng} (run: scripts/coverage.py --plan --engagement {eng})"
+        print(json.dumps({"engagement": str(eng), "error": msg}, indent=2) if as_json else msg)
+        return 2
+    files = sorted(eng.glob("*/" + MARK_NAME))
+    results = []
+    rc_overall = 0
+    for mf in files:
+        rel = mf.relative_to(eng).as_posix()
+        try:
+            data = json.loads(mf.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            results.append({"file": rel, "ok": False, "applied": False,
+                            "detail": f"unreadable / invalid JSON: {e}"})
+            rc_overall = 2
+            continue
+        ok_schema, note = _validate_mark_doc(data)
+        if not ok_schema:
+            results.append({"file": rel, "ok": False, "applied": False, "detail": f"schema: {note}"})
+            rc_overall = 2
+            continue
+        objs = data if isinstance(data, list) else [data]
+        for idx, obj in enumerate(objs):
+            if not isinstance(obj, dict):
+                results.append({"file": rel, "index": idx, "ok": False, "applied": False,
+                                "detail": "mark is not an object"})
+                rc_overall = 2
+                continue
+            rc, detail = _apply_mark_obj(eng, obj, require_depth)
+            applied = rc == 0
+            results.append({"file": rel, "index": idx, "category": obj.get("category"),
+                            "subsurface": obj.get("subsurface"), "status": obj.get("status"),
+                            "ok": True, "applied": applied, "detail": detail})
+            if not applied:
+                rc_overall = 2
+    if as_json:
+        print(json.dumps({"engagement": str(eng), "mark_files": len(files),
+                          "results": results, "pass": rc_overall == 0}, indent=2))
+    else:
+        if not files:
+            print(f"ingest-marks: no {MARK_NAME} files under {eng} (nothing to ingest)")
+        else:
+            n_applied = sum(1 for r in results if r.get("applied"))
+            n_refused = sum(1 for r in results if r.get("ok") and not r.get("applied"))
+            n_bad = sum(1 for r in results if not r.get("ok"))
+            print(f"ingest-marks: {len(files)} file(s); {n_applied} applied, "
+                  f"{n_refused} refused, {n_bad} invalid")
+            for r in results:
+                tag = "applied" if r.get("applied") else ("INVALID" if not r.get("ok") else "REFUSED")
+                where = r["file"] + (f"[{r['index']}]" if "index" in r else "")
+                cat = r.get("category") or ""
+                leg = f"/{r['subsurface']}" if r.get("subsurface") else ""
+                st = r.get("status") or ""
+                detail = ("  — " + r["detail"]) if r.get("detail") else ""
+                print(f"  [{tag:^8}] {where}: {cat}{leg} -> {st}{detail}")
+            print("\nNote: ingested mark files are left in place (engagement artifacts are never deleted).")
+    return rc_overall
+
+
+def _entry_substance_gap(hit: dict, m: dict):
+    """The depth-substance gap of a ledger entry computed PURELY from its already-retained fields (attempts +
+    variants_tried/escalations + an existing depth_note/differential/evidence, or >=1 finding) — no new
+    input. None => the retained payload substantiates an `attempted` clear."""
+    return attempted_substance_gap(hit, depth_thresholds(m, str(hit.get("id") or "")))
+
+
+def reaffirm(eng: Path, cat_id: str, subsurface=None, as_json: bool = False) -> int:
+    """Re-affirm an already-worked category against its ALREADY-RETAINED depth payload, with NO new free-text
+    note — the replacement for the copy-paste-note loop (re-running `--mark <cat> --status attempted
+    --depth-note "<the same note again>"` to re-assert a worked category tripped an oversight/duplication
+    classifier). Recomputes depth_substantiated PURELY from the entry's retained fields: if the retained
+    payload SUBSTANTIATES the clear, sets status=attempted (refreshing the ledger timestamp) and succeeds; if
+    it is absent or insufficient, REFUSES (rc=2) naming the specific gap — it never invents a note. Supports
+    --subsurface to re-affirm ONE family leg from its retained state, re-deriving the family roll-up.
+    Concurrency-safe (own read-modify-write under the ledger lock)."""
+    ledger_path = eng / LEDGER_NAME
+    if not ledger_path.is_file():
+        print(f"[!] no {LEDGER_NAME} at {eng} (run: scripts/coverage.py --plan --engagement {eng})")
+        return 2
+    m = _safe_map()
+    with _FileLock(ledger_path):
+        try:
+            led = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"[!] {LEDGER_NAME} invalid JSON: {e}")
+            return 2
+        cats = led.get("categories", [])
+        hit = next((c for c in cats if c.get("id") == cat_id), None)
+        if hit is None:
+            ids = ", ".join(sorted(str(c.get("id")) for c in cats))
+            print(f"[!] no category {cat_id!r} in ledger. known ids: {ids}")
+            return 2
+        fam = family_agents(m, cat_id)
+        # --- sub-surface (family leg) reaffirm --------------------------------------------------------
+        if subsurface:
+            if not fam:
+                print(f"[!] --subsurface is only valid on a `pattern: family` category (>1 sub-agents); "
+                      f"{cat_id!r} is not one")
+                return 2
+            if subsurface not in fam:
+                print(f"[!] {subsurface!r} is not a sub-agent of family {cat_id!r} (legs: {', '.join(fam)})")
+                return 2
+            legmap = subsurface_map(hit, fam)
+            cur = legmap.get(subsurface)
+            if cur is None:
+                print(f"[!] refusing to reaffirm leg {subsurface!r} of {cat_id!r} — it has no retained "
+                      f"status to reaffirm (mark the leg first).")
+                return 2
+            existing = next((s for s in (hit.get("subsurfaces") or [])
+                             if str(s.get("agent") or s.get("id") or "").strip() == subsurface), {})
+            roll = _apply_subsurface(hit, fam, subsurface, cur,
+                                     existing.get("reason"), existing.get("findings_count"))
+            led["generated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+            if as_json:
+                print(json.dumps({"id": cat_id, "subsurface": subsurface, "subsurface_status": cur,
+                                  "status": roll, "reaffirmed": True}, indent=2))
+            else:
+                print(f"ok: reaffirmed {cat_id} leg {subsurface} -> {cur}; family roll-up -> {roll}")
+            return 0
+        # --- category-level reaffirm ------------------------------------------------------------------
+        # A family that records per-leg detail must NOT be reaffirmed while a leg is still uncovered — that
+        # would mask an untested leg (the sub-surface rule). Refuse and name the uncovered legs.
+        if fam:
+            legmap = subsurface_map(hit, fam)
+            uncovered = [a for a in fam if legmap.get(a) in ("pending", "blocked")]
+            if legmap and uncovered:
+                print(f"[!] refusing to reaffirm {cat_id!r} — family leg(s) {', '.join(uncovered)} are not "
+                      f"covered (pending/blocked); reaffirm/mark those legs first. A family can't be "
+                      f"reaffirmed over an untested leg.")
+                return 2
+        gap = _entry_substance_gap(hit, m)
+        if gap is not None:
+            print(f"[!] refusing to reaffirm {cat_id!r} — the retained depth payload does not substantiate "
+                  f"the clear: {gap}. Re-run the class with the depth payload (--attempts / --variants / "
+                  f"--depth-note or --evidence) or record findings; reaffirm will not invent a note. The "
+                  f"category stays re-drivable.")
+            return 2
+        hit["status"] = "attempted"
+        hit["depth_substantiated"] = True
+        led["generated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        atomic_write(ledger_path, json.dumps(led, indent=2) + "\n")
+    if as_json:
+        print(json.dumps({"id": cat_id, "status": "attempted", "depth_substantiated": True,
+                          "reaffirmed": True, "findings_count": hit.get("findings_count")}, indent=2))
+    else:
+        print(f"ok: reaffirmed {cat_id} -> attempted (depth_substantiated from the retained payload; "
+              f"no new note)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Redstrike deterministic routing + coverage ledger.")
     ap.add_argument("--plan", action="store_true", help="emit a coverage ledger from map + signals")
@@ -1064,6 +1345,14 @@ def main() -> int:
                     "category — `--mark <family> --subsurface <agent> --status <attempted|blocked|skipped|"
                     "pending|n/a>`. The family's top-level status becomes a derived worst-case roll-up so no "
                     "family status can mask an untested leg")
+    ap.add_argument("--ingest-marks", action="store_true", dest="ingest_marks",
+                    help="discover every <eng>/*/coverage_mark.json, validate each against "
+                         "coverage_mark.schema.json, and fold it into the ledger THROUGH the --mark path "
+                         "(the declarative, executor-emitted coverage path; needs --engagement)")
+    ap.add_argument("--reaffirm", metavar="CATEGORY_ID",
+                    help="re-affirm a category from its ALREADY-RETAINED depth payload with NO new note "
+                         "(needs --engagement) — replaces the copy-paste-note loop. Add --subsurface for a "
+                         "family leg. Refuses if the retained payload doesn't substantiate the clear")
     ap.add_argument("--close", action="store_true",
                     help="reconcile the ledger's findings_count+status from the engagement's findings at "
                          "close (needs --engagement); use --source-category for a white-box run")
@@ -1106,6 +1395,17 @@ def main() -> int:
             if not args.as_json:
                 _print_plan_human(led)
         return 0
+
+    if args.ingest_marks:
+        if not args.engagement:
+            ap.error("--ingest-marks needs --engagement")
+        return ingest_marks(Path(args.engagement), args.as_json)
+
+    if args.reaffirm:
+        if not args.engagement:
+            ap.error("--reaffirm needs --engagement")
+        return reaffirm(Path(args.engagement), args.reaffirm,
+                        subsurface=args.subsurface, as_json=args.as_json)
 
     if args.close:
         if not args.engagement:
@@ -1161,7 +1461,8 @@ def main() -> int:
                   + ("accounts for every category." if ok else "has gaps (see above)."))
         return 0 if ok else 2
 
-    ap.error("choose one of --plan / --validate / --list / --selftest")
+    ap.error("choose one of --plan / --validate / --mark / --ingest-marks / --reaffirm / --close / "
+             "--list / --selftest")
 
 
 if __name__ == "__main__":
