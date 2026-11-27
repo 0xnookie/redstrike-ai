@@ -1458,34 +1458,84 @@ def _independent_review_check(eng: Path, findings: list) -> tuple:
     return hard, warns
 
 
-# --- CVSS-drift HARD gate (R7) ------------------------------------------------------------------- #
-# The gate recomputes each finding's CVSS vector (scripts/cvss.py). A declared `severity` that differs
-# from the recomputed rating, with NO `potential_severity` set, is DRIFT — the severity the report would
-# print is not what the vector proves. This USED to only warn; now it follows the self-attestation
-# escalation shape: a soft warning while hunting, a HARD fail once a report exists (a report must not
-# ship a finding whose severity contradicts its own CVSS vector and isn't flagged demonstrated-vs-
-# potential). A finding carrying `potential_severity` is a legitimate demonstrated-vs-potential gap and
-# is never drift.
+# --- Three-axis severity reconciliation + CVSS-drift HARD gate (R7 / L-C) ------------------------ #
+# Redstrike rates a finding on THREE axes (see severity-model.md): (1) the CVSS vector — arithmetic,
+# computed deterministically by scripts/cvss.py, never hand-overridden; (2) the business `severity` —
+# what the evidence DEMONSTRATED; (3) the VRT headline (vrt{}, governed by _vrt_governance_check) on a
+# bug-bounty program. This gate reconciles axis (2) against axis (1): it recomputes each finding's vector
+# and compares the DECLARED severity's rank to the computed rating's rank (critical=5 .. info=1; a CVSS
+# "none"/0.0 rating compares as info). A clean match is never drift. A divergence is DRIFT unless it is
+# EXPLAINED by `severity_basis`, and the two directions are NOT symmetric:
+#   * DEFLATION (declared < computed — the report under-states, the conservative/safe direction): the
+#     vector expresses the potential best-case while `severity` reflects what was demonstrated, so a set
+#     `potential_severity` EXPLAINS it (demonstrated-vs-potential). A missing potential_severity is drift.
+#   * INFLATION (declared > computed — the report over-states vs the arithmetic, the DANGEROUS direction
+#     the L-C narrowing closes): only `severity_basis == "argued-elevation"` WITH a non-empty
+#     `severity_rationale` explains it. `potential_severity` ALONE no longer excuses inflation — that was
+#     the overload the gate used to blanket-skip, letting an inflated severity ship unchecked.
+# Escalation shape is unchanged (self-attestation style): a soft warning while hunting, a HARD fail once
+# the gates are armed. An unmappable rating / severity is skipped (preserves the prior except->continue).
+_SEVERITY_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+
+
+def _severity_label_rank(label):
+    """Rank a severity label (critical=5 .. info=1); None when it is not a known label."""
+    return _SEVERITY_RANK.get(str(label or "").strip().lower())
+
+
+def _cvss_rating_rank(rating):
+    """Rank a computed CVSS rating. A 'None' (score 0.0) rating compares as 'info' (rank 1). None when
+    the rating is otherwise unmappable (the caller then skips the finding)."""
+    r = str(rating or "").strip().lower()
+    if r == "none":
+        return 1
+    return _SEVERITY_RANK.get(r)
+
+
 def _cvss_drift_check(eng: Path, findings: list, cvss_mod) -> tuple:
-    """(hard_errors, warnings) for the CVSS-drift gate (R7). [] / [] when cvss.py is unavailable."""
+    """(hard_errors, warnings) for the CVSS-drift gate (R7 / L-C). [] / [] when cvss.py is unavailable."""
     if not cvss_mod:
         return [], []
     armed = _gates_armed(eng, findings)
     hard, warns = [], []
     for f in findings:
-        if not isinstance(f, dict) or not f.get("cvss_vector") or f.get("potential_severity"):
+        if not isinstance(f, dict) or not f.get("cvss_vector"):
             continue
         try:
             score, rating, _ = cvss_mod.score_vector(f["cvss_vector"])
         except Exception:  # noqa: BLE001 — the per-finding 'not scorable' warning already surfaces this
             continue
+        computed_rank = _cvss_rating_rank(rating)
+        if computed_rank is None:
+            continue  # an unmappable rating -> skip (preserve the prior except->continue behaviour)
         declared = str(f.get("severity", "")).lower()
-        if rating.lower() == declared:
-            continue
+        declared_rank = _severity_label_rank(declared)
+        if declared_rank is None or declared_rank == computed_rank:
+            continue  # unrankable severity, or a clean match (incl. info-vs-"none") -> no drift
         fid = f.get("id", "<no-id>")
-        msg = (f"{fid}: declared severity '{declared}' != recomputed CVSS rating '{rating.lower()}' "
-               f"({score}) with no potential_severity set — fix the vector/severity (do not hand-override "
-               f"the score), or set potential_severity (demonstrated-vs-potential)")
+        if declared_rank < computed_rank:
+            # DEFLATION — the report prints a LOWER, more conservative severity than the vector computes.
+            # A set `potential_severity` flags the legitimate demonstrated-vs-potential gap (the vector
+            # expresses the best case); the clean shape has rank(potential) >= the computed rank, but a
+            # lower potential_severity merely under-states and deflation is the safe direction, so any
+            # potential-flagged finding is explained — preserving the prior skip for it.
+            if f.get("potential_severity") is not None:
+                continue
+            msg = (f"{fid}: declared severity '{declared}' != recomputed CVSS rating '{rating.lower()}' "
+                   f"({score}) with no potential_severity set — fix the vector/severity (do not hand-override "
+                   f"the score), or set potential_severity (demonstrated-vs-potential)")
+        else:
+            # INFLATION — the report prints a HIGHER severity than the vector computes (the dangerous
+            # direction). ONLY an argued elevation (severity_basis=argued-elevation + a non-empty
+            # severity_rationale) explains it; potential_severity alone does NOT (the L-C narrowing).
+            basis = str(f.get("severity_basis", "")).strip().lower()
+            rationale = str(f.get("severity_rationale", "") or "").strip()
+            if basis == "argued-elevation" and rationale:
+                continue
+            msg = (f"{fid}: declared severity '{declared}' is MORE severe than the recomputed CVSS rating "
+                   f"'{rating.lower()}' ({score}) — fix the vector/severity (do not hand-override the score), "
+                   f"or set severity_basis=argued-elevation + a severity_rationale (demonstrated business "
+                   f"impact exceeds the CVSS arithmetic)")
         if armed:
             hard.append("cvss-drift gate (report present → a finding's severity must match its recomputed "
                         f"CVSS rating or be flagged demonstrated-vs-potential): {msg}")
@@ -2275,8 +2325,9 @@ def validate_engagement(eng: Path, as_json: bool) -> bool:
                   "before reporting.")
         if cvss_errors:
             print("A finding's declared severity contradicts its recomputed CVSS vector => fix the "
-                  "vector/severity (don't hand-override the score), or set potential_severity "
-                  "(demonstrated-vs-potential), before reporting.")
+                  "vector/severity (don't hand-override the score); for a conservative under-statement set "
+                  "potential_severity (demonstrated-vs-potential), for an argued over-statement set "
+                  "severity_basis=argued-elevation + a severity_rationale, before reporting.")
         if vrt_errors:
             print("A bug-bounty (program.taxonomy=vrt) finding is missing its VRT, points at a "
                   "fabricated VRT path, or claims an inflated priority => stamp/repair finding.vrt with a "

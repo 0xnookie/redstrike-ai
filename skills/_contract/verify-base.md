@@ -235,9 +235,12 @@ Keep payloads benign and read-only; prefer the smallest deterministic proof over
 
 Recompute the vector deterministically with `scripts/cvss.py` — do not eyeball the score, and apply
 `severity-calibration.md` to the metric choices (the High/Critical acceptance checklist + the anti-inflation
-and deflation guards). If the computed rating differs from the declared `severity`, that is either inflation
-(fix the metrics and re-derive — never hand-override the score) or a demonstrated-vs-potential gap (set
-`potential_severity`). The consolidated gate (`verify_completion.py --engagement <dir>`) surfaces this drift
-automatically.
+and deflation guards). If the computed rating differs from the declared `severity`, reconcile the two axes
+honestly (see `severity-model.md`): a **deflation** (demonstrated `severity` BELOW the vector) is the
+demonstrated-vs-potential gap — set `potential_severity`; an **inflation** (demonstrated `severity` ABOVE
+the vector) is NOT excused by `potential_severity` — either fix the metrics and re-derive (never
+hand-override the score) or, when the demonstrated business impact genuinely exceeds the CVSS arithmetic,
+set `severity_basis: argued-elevation` with a non-empty `severity_rationale`. The consolidated gate
+(`verify_completion.py --engagement <dir>`) surfaces unexplained drift automatically.
 
 Only `accepted` and `blocked` findings flow to the reporting skill (`blocked` strictly with its caveat).
