@@ -33,8 +33,18 @@ import sys
 from pathlib import Path
 
 _URL = re.compile(r"https?://[^\s\"'<>|)\]}]+", re.IGNORECASE)
-_HOST = re.compile(r"(?<![\w.-])(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?![\w.-])")
+# Host regex allows an OPTIONAL FQDN trailing dot (`evil.com.`): without the `\.?` the final-label
+# lookahead trips on that dot and the whole host is missed (fail-open). normalize_host() already
+# strips the trailing dot before classify() sees it, mirroring the URL path.
+_HOST = re.compile(r"(?<![\w.-])(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\.?(?![\w.-])")
 _IPV4 = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
+# IPv6 literals: a bracketed authority ([2001:db8::1] — incl. inside a URL, whose char class _URL
+# truncates at the ']') and a bare literal (`nc 2001:db8::1 80`). The alternatives over-capture
+# colon/hex runs; extract_targets() validates each candidate via _as_ip and drops non-IPs.
+_IPV6 = re.compile(
+    r"\[[0-9A-Fa-f:]+\]"
+    r"|(?<![\w:.])[0-9A-Fa-f:]*::[0-9A-Fa-f:]*(?![\w:.])"
+    r"|(?<![\w:.])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![\w:.])")
 _IGNORABLE_TLDS = (".localhost", ".test", ".example", ".invalid")
 # Final labels that mark a dotted token as a FILESYSTEM PATH, not a network host. The bare-host
 # regex (_HOST) otherwise reads `scope.json`, `homepage.html`, `scan.txt`, `wp-config.php` and
@@ -84,13 +94,62 @@ def write_gate_enabled() -> bool:
     return v.strip().lower() not in ("0", "off", "false", "no", "disable", "disabled")
 
 
+# rs_http invocation recognition (write-gate exemption). The exemption must fire ONLY when the
+# LEADING program genuinely IS the rs_http helper — a bare `rs_http`/`rs_http.py` entry point, a
+# `python …/rs_http.py …` script, or `python -m ….rs_http`. A mere mention of the token elsewhere
+# (a comment, an argument, another chained command) is NOT an invocation and must fall through to
+# normal gating — the earlier substring check (`"rs_http" in cmd.lower()`) let any such mention skip
+# the write-gate. Fail safe: anything we cannot confidently resolve to rs_http returns False (⇒ gate).
+_RS_HTTP_PROG = re.compile(r"rs_http(?:\.py)?$", re.IGNORECASE)        # a program/script basename
+_RS_HTTP_MODULE = re.compile(r"(?:^|\.)rs_http$", re.IGNORECASE)      # a `-m` module name
+_PY_INTERP = re.compile(r"^(?:python|python\d(?:\.\d+)?|py|pypy\d?)$", re.IGNORECASE)
+_ENV_ASSIGN = re.compile(r"^\w+=")
+
+
+def _program_basename(tok: str) -> str:
+    """Basename of a program/script token: drop surrounding quotes and any directory (either slash)."""
+    return tok.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+
+
+def _invokes_rs_http(cmd: str) -> bool:
+    """True iff the LEADING program of `cmd` genuinely invokes the rs_http helper (see the note above).
+    Resolves the leading program token past any env-assignments; for `python X.py` it inspects X.py's
+    basename and the `-m <module>` form. Conservative: unresolved ⇒ False, so the command is gated."""
+    toks = cmd.split()
+    i = 0
+    while i < len(toks) and _ENV_ASSIGN.match(toks[i]):   # skip leading FOO=bar env-assignments
+        i += 1
+    if i >= len(toks):
+        return False
+    prog = _program_basename(toks[i])
+    if _RS_HTTP_PROG.search(prog):                        # bare `rs_http …` / `./rs_http.py …`
+        return True
+    if not _PY_INTERP.match(prog):                        # leading program is not a python interpreter
+        return False
+    j = i + 1
+    while j < len(toks):                                  # `python … rs_http.py` / `python -m ….rs_http`
+        t = toks[j]
+        if t == "-c" or t.startswith("-c"):              # `python -c '<code>'` — inline code, not a script
+            return False
+        if t in ("-m", "--module"):                      # `python -m <module>`
+            mod = toks[j + 1] if j + 1 < len(toks) else ""
+            return bool(_RS_HTTP_MODULE.search(mod.strip("'\"")))
+        if t.startswith("-m") and len(t) > 2:            # `python -m<module>` (glued)
+            return bool(_RS_HTTP_MODULE.search(t[2:].strip("'\"")))
+        if t.startswith("-"):                            # any other interpreter flag → skip
+            j += 1
+            continue
+        return bool(_RS_HTTP_PROG.search(_program_basename(t)))   # first non-flag token = the script
+    return False
+
+
 def detect_mutating_http(cmd: str):
     """Best-effort: is this shell command a MUTATING HTTP request to a URL? Returns (method, host,
-    path) or None. rs_http.py commands return None (rs_http self-enforces the write-gate, so the hook
-    does not double-gate them). A probe declared on an rs_http command (`--probe`) is likewise rs_http's
-    to allow. Safety net, not a boundary."""
-    low = cmd.lower()
-    if "rs_http" in low:
+    path) or None. A command whose LEADING program genuinely invokes rs_http.py returns None (rs_http
+    self-enforces the write-gate, so the hook does not double-gate it); a probe declared on such a
+    command (`--probe`) is likewise rs_http's to allow. A bare MENTION of the token (comment/arg) is
+    NOT an invocation and still gates. Safety net, not a boundary."""
+    if _invokes_rs_http(cmd):
         return None
     m = _HTTP_METHOD_FLAG.search(cmd)
     if not m:
@@ -311,6 +370,12 @@ def extract_targets(text: str) -> list[str]:
             found.append(h)
     for m in _IPV4.finditer(text):
         found.append(m.group(0))
+    for m in _IPV6.finditer(text):
+        cand = m.group(0).strip("[]")
+        # Keep only candidates that parse as a real IP (drops hex:colon fragments, MACs, a bare "::")
+        # and that actually carry a hex digit (so `::` alone is not read as a host).
+        if any(c in "0123456789abcdefABCDEF" for c in cand) and _as_ip(cand) is not None:
+            found.append(cand)
     for m in _HOST.finditer(text):
         tok = normalize_host(m.group(0))
         # A bare dotted token ending in a known file/code extension is a path argument

@@ -975,6 +975,55 @@ for orphan in sorted(_exec_names - _agent_verify):
 for orphan in sorted(_agent_verify - _exec_names):
     err(f"binding: .claude/agents/{orphan}-verify.md has no matching skills/{orphan}/verify.md")
 
+# 13b — skill-tool binding symmetry: check #13 one layer UP. Every INVOKABLE canonical skill dir
+# (skills/<x>/) must carry its hand-maintained Skill-tool binding at .claude/skills/redstrike-<x>/SKILL.md,
+# else the orchestrator's `redstrike-<x>` Skill call is a DEAD invocation that silently no-ops. This is the
+# gap that let `skills/strategist/` ship with no binding — the §2.5 hunt-strategy step of EVERY engagement
+# invoked a non-existent `redstrike-strategist`. The ONLY canonical dir under skills/ that is NOT an
+# invokable skill is `_contract` (the shared contract library — it has no SKILL.md and is never invoked);
+# determined empirically, every OTHER skills/<x>/ has (or now needs) a binding, so the invokable set is
+# exactly "skills/* minus _contract" — the same selector checks #1/#2/#3/#11/#12 use. Additionally, every
+# `redstrike-<token>` referenced in ANY SKILL.md must resolve to a binding dir, directly or as a
+# family-glob prefix (`redstrike-xss-*` / `redstrike-ad-*` name a whole class family) — a reference to a
+# binding that does not exist is itself a dead Skill call. Written as a pure function so a test can point it
+# at a fixture; the module-level call below runs it against the real tree.
+def skill_tool_binding_errors(skills_root, cskills_root):
+    """Return error strings for missing Skill-tool bindings + unresolved redstrike-<token> references.
+    `skills_root` = the canonical skills/ dir; `cskills_root` = .claude/skills/. Empty list = symmetric."""
+    out = []
+    if not skills_root.is_dir():
+        return out
+    binding_dirs = ({p.name for p in cskills_root.iterdir() if p.is_dir()}
+                    if cskills_root.is_dir() else set())
+    for sk in sorted(p for p in skills_root.iterdir() if p.is_dir() and p.name != "_contract"):
+        binding = f"redstrike-{sk.name}"
+        if binding not in binding_dirs or not (cskills_root / binding / "SKILL.md").is_file():
+            out.append(f"binding: skills/{sk.name}/ (invokable skill) has no Skill-tool binding "
+                       f".claude/skills/{binding}/SKILL.md (dead Skill invocation)")
+
+    _tok_re = re.compile(r"redstrike-[a-z0-9-]+")
+
+    def _resolves(token):
+        t = token.rstrip("-")  # a trailing '-' is a family glob (redstrike-xss-* -> redstrike-xss)
+        return any(b == t or b.startswith(t + "-") for b in binding_dirs)
+
+    for base in (skills_root, cskills_root):
+        if not base.is_dir():
+            continue
+        for smd in sorted(base.glob("*/SKILL.md")):
+            text = smd.read_text(encoding="utf-8", errors="replace")
+            for tok in sorted(set(_tok_re.findall(text))):
+                if not _resolves(tok):
+                    out.append(f"binding: {smd.parent.name}/SKILL.md references '{tok.rstrip('-')}' "
+                               f"which resolves to no .claude/skills binding (dead Skill reference)")
+    return out
+
+
+checked["skill_bindings"] = len([p for p in skills_dir.iterdir()
+                                 if p.is_dir() and p.name != "_contract"]) if skills_dir.is_dir() else 0
+for _be in skill_tool_binding_errors(skills_dir, cskills):
+    err(_be)
+
 # 14 — findings-artifact schema check: any manifest artifact that is a findings file must declare the
 # finding schema, else verify_completion.check_artifact silently skips schema validation for it.
 for sk in sorted(p for p in skills_dir.iterdir() if p.is_dir() and p.name != "_contract"):

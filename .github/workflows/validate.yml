@@ -57,6 +57,12 @@ jobs:
           redstrike --no-banner --no-color init "CI Test" --authorized-by "ci / auth-ref" \
             --domain '*.ci.test' --i-confirm-authorization
           redstrike --no-banner --no-color run "ci-test-$(date -u +%F)" --dry-run
+      - name: Framework validate + scripts/tests unit suite (stdlib; cross-platform)
+        # validate.py + the scripts/tests/* suite are stdlib-only, so exercise them across the same
+        # os × python matrix as the CLI (the `validate` job above runs them on ubuntu/3.11 only).
+        run: |
+          python scripts/validate.py
+          for t in scripts/tests/test_*.py; do echo "· $t"; python "$t" || exit 1; done
 
   console:
     # Type + lint gate for the web console (TypeScript/Next.js).
