@@ -46,7 +46,9 @@ The problem with LLM-driven offensive tooling is two failure modes: it **halluci
 
 ## 🏗️ Architecture
 
-Three tiers. Lower tiers produce typed artifacts; higher tiers consume and orchestrate them — all coordination happens through shared contracts on disk (`finding.schema.json`, `<class>_context.schema.json`, the evidence vault), never ad-hoc chatter, so the whole engagement is auditable and replayable.
+Two complementary views of the same engine: a **three-tier structure** (what the agents are and how they stack) and an **engagement flow** (how they run end to end). Lower tiers produce typed artifacts; higher tiers consume and orchestrate them — all coordination happens through shared contracts on disk (`finding.schema.json`, `<class>_context.schema.json`, the evidence vault), never ad-hoc chatter, so the whole engagement is auditable and replayable.
+
+### The three tiers
 
 ```mermaid
 graph TD
@@ -79,11 +81,9 @@ graph TD
 - **Tier 2 — Vuln categories** are the finding producers. **Compound** classes (XSS, SQLi, SSRF, …) decompose into a `<class>-context` feeder + one agent per variant; **atomic** classes (CSRF, open-redirect, …) are a single agent. See [`skills/_contract/vuln-catalog.md`](skills/_contract/vuln-catalog.md).
 - **Tier 3 — Mission & capability agents** (the "red team") orchestrate the lower tiers. See [`skills/_contract/agent-tiers.md`](skills/_contract/agent-tiers.md).
 
----
+### The engagement flow
 
-## 🔄 How an Engagement Runs
-
-The tiers above are the *structure*; this is the *flow*. Authorization → recon → a gated, model-diverse hunt that feeds its own discoveries back into recon → a cross-model exhaustion check → report. Every finding passes an independent reviewer, every category must prove depth (a merely *blocked* class can't pass as covered), and nothing reaches the report until a **different-model** adversary fails to find a gap.
+Those tiers are the *structure*; this is the *flow*. Authorization → recon → a gated, model-diverse hunt that feeds its own discoveries back into recon → a cross-model exhaustion check → report. Every finding passes an independent reviewer, every category must prove depth (a merely *blocked* class can't pass as covered), and nothing reaches the report until a **different-model** adversary fails to find a gap.
 
 ```mermaid
 flowchart TD
