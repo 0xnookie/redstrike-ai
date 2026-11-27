@@ -196,6 +196,25 @@ a parallel multi-model swarm batched by rank, not a single serial pass. This is 
   These writers are concurrency-safe; `coverage.py` stays the SOLE ledger owner. Then re-invoke
   `redstrike-strategist` (§2.5) to re-rank the REMAINING queue and run the next wave — until no `pending`
   category remains.
+- **DECLARATIVE coverage — prefer an executor-emitted `coverage_mark.json` over hand-running `--mark`.** An
+  executor can declare the coverage it achieved by writing a STRUCTURED
+  `<engagement>/<skill-name>/coverage_mark.json` (schema `skills/_contract/coverage_mark.schema.json`): one
+  mark object, or an array of them, carrying `category`/`status` plus the depth payload (`attempts`,
+  `variants`, `depth_note`/`evidence`, `escalations`, `findings_count`) and — for a family — `subsurface` or
+  `blocked_subsurfaces`. Fold every wave's marks in with **`python scripts/coverage.py --ingest-marks
+  --engagement <dir>`**: it validates each file against the schema and applies each mark THROUGH the same
+  `--mark` code path, so depth-substance, sub-surface roll-up and the refusal rules still bite (an under-depth
+  or un-reasoned mark is REFUSED and reported, never stamped; ingested files are left in place). This is the
+  declarative path — the executor states its coverage as data instead of the orchestrator typing free-text
+  `--mark` flags by hand.
+- **Re-asserting an already-worked class → `--reaffirm`, NEVER a copied `--depth-note`.** To re-affirm a
+  category you already worked (e.g. after a later wave re-touches it), run **`python scripts/coverage.py
+  --reaffirm <class> --engagement <dir>`** (add `--subsurface <leg>` for a family leg). It recomputes the
+  clear PURELY from the depth payload already retained on the entry and refreshes it with NO new note —
+  succeeding if that payload substantiates the clear, REFUSING with the specific gap otherwise (it never
+  invents a note). Do **not** re-run `--mark <class> --status attempted --depth-note "<the same note again>"`
+  to re-affirm — copy-pasting an identical depth note across marks trips the oversight/duplication classifier;
+  `--reaffirm` is the clean, note-free re-assertion.
 - **Depth per class.** Let each class's `hunt_plan.json` `depth_budget` tune how much breadth beyond the
   escalation floor its executor spends (`standard`/`deep` → invoke `parameter-optimization` proactively on
   high-value sinks; `deep` → the diversity pass above). The depth budget can only ADD effort — every

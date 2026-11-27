@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redstrike.ai/schemas/coverage_mark.schema.json",
+  "title": "Redstrike Executor Coverage Mark",
+  "description": "A STRUCTURED, executor-emitted coverage declaration. An executor writes this at <engagement>/<skill-name>/coverage_mark.json to declare the coverage it achieved for one (or several) routing-map categories/legs, DECLARATIVELY — instead of the orchestrator hand-running `coverage.py --mark <cat> --status attempted --depth-note \"...\"` with free text. `coverage.py --ingest-marks --engagement <dir>` discovers every <eng>/*/coverage_mark.json, validates each against this schema, and folds it into coverage_ledger.json THROUGH the existing mark() code path, so every depth-substance, sub-surface roll-up and refusal rule still applies (an under-depth or un-reasoned mark is REFUSED, not stamped). Each mark object reuses the coverage_ledger entry's vocabulary so ingest is a clean field mapping. The file holds EITHER a single mark object OR an array of them (an executor may mark several categories or family legs in one pass). A successfully-ingested mark file is LEFT IN PLACE (never silently deleted) and logged. Additive: an engagement that never emits coverage_mark.json behaves byte-identically.",
+  "anyOf": [
+    { "$ref": "#/$defs/mark" },
+    { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/mark" } }
+  ],
+  "$defs": {
+    "mark": {
+      "type": "object",
+      "required": ["category", "status"],
+      "additionalProperties": false,
+      "description": "One category (or family-leg) coverage declaration — a per-executor slice of a coverage_ledger entry. Maps 1:1 onto `coverage.py --mark`: category->the category id, status->--status, reason->--note, findings_count->--count, attempts->--attempts, variants->--variants, depth_note->--depth-note, evidence->--evidence, escalations->--escalations, subsurface->--subsurface, blocked_subsurfaces->--blocked-subsurfaces.",
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the routing-map category id this mark is for (the coverage_ledger entry id), e.g. sqli / auth / cors. Must exist in the engagement's ledger or ingest refuses the mark."
+        },
+        "status": {
+          "enum": ["pending", "attempted", "blocked", "skipped", "n/a", "pipeline"],
+          "description": "the coverage status to record. attempted=the surface was worked; blocked=worked but demonstration blocked by environment (needs a reason); skipped=deliberately not run (needs a reason); n/a=not in scope (needs a reason); pending=routed, not yet run; pipeline=capability stage. When `subsurface` is set this is the LEG status and must be one of attempted|blocked|skipped|pending|n/a (pipeline is never a per-leg state)."
+        },
+        "subsurface": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SUB-SURFACE / PER-LEG GRANULARITY: a family sub-agent / leg id (e.g. jwt, oauth, sqli-blind). When present `status` sets THAT leg's coverage and the family's top-level status becomes a derived worst-case / least-covered roll-up — so no family status masks an untested leg. Only valid on a `pattern: family` category; ingest refuses it on a single-agent category or an unknown leg."
+        },
+        "findings_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "accepted findings this executor produced for the category/leg. >=1 finding self-evidently substantiates an `attempted` clear (the finding is the proof)."
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "DEPTH-SUBSTANCE BAR: count of distinct probe attempts run. A zero-finding `attempted` clear must meet the class's depth_substance.min_attempts or the mark is refused (re-drivable, not stamped)."
+        },
+        "variants": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "DEPTH-SUBSTANCE BAR: distinct technique-variant ids actually tried; MERGED into the entry's variants_tried and counted toward depth_substance.min_variants (unioned with escalations)."
+        },
+        "depth_note": {
+          "type": "string",
+          "description": "DEPTH-SUBSTANCE BAR: a differential/blocker note of real length recording what the depth work observed — satisfies the note requirement for a zero-finding clear."
+        },
+        "differential": {
+          "type": "string",
+          "description": "alias for depth_note — the observed differential/blocker on the worked surface (the longer of the two is used)."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "DEPTH-SUBSTANCE BAR: an evidence pointer for the depth work (notebook/log/path) — an alternative to depth_note for proving a zero-finding clear."
+        },
+        "escalations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "escalation-ladder technique ids already climbed for this category (scripts/escalation.py tokens); MERGED into the entry's escalations list and counted toward the variant bar."
+        },
+        "reason": {
+          "type": "string",
+          "description": "why this status. REQUIRED when status is skipped / n/a / blocked (ingest enforces this through mark(), mirroring the ledger's needs-a-reason rule) — a mark that omits it for those statuses is refused, never defaulted. Applied as the entry's (or the leg's) reason."
+        },
+        "blocked_subsurfaces": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "for a `blocked` mark on a `pattern: family` category: the sub-agent id(s)/host(s) that are blocked. REQUIRED to block a family (a block that names nothing is refused) so one leg's block can't silently absorb an untested in-scope sibling; un-named siblings stay pending (re-drivable)."
+        }
+      }
+    }
+  }
+}

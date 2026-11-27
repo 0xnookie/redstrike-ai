@@ -45,6 +45,16 @@ This is no longer advisory. Once `report/findings_consolidated.json` exists, `ve
 shallow-clear gaps — exactly this). Clear a gap by escalating + re-running the class, **or**, for a gap that
 is genuinely unclosable in this environment, record an honest accept.
 
+### Re-affirming an already-worked class — `--reaffirm`, not a copied note
+To re-assert a class you genuinely worked (a later wave re-touches it, or the recall engine re-flags a clear
+you already substantiated), use **`python scripts/coverage.py --reaffirm <class> --engagement <dir>`**
+(`--subsurface <leg>` for a family leg). It recomputes `depth_substantiated` PURELY from the depth payload
+already retained on the ledger entry and refreshes it with **no new free-text note** — succeeding when that
+payload substantiates the clear, refusing with the specific gap otherwise. This replaces the copy-paste-note
+loop (re-running `--mark <class> --status attempted --depth-note "<the same note again>"` to re-affirm),
+which trips the oversight/duplication classifier. `--reaffirm` never invents a note, so it cannot fabricate a
+clear — an un-substantiated entry is refused, not stamped.
+
 ### Honest-accept — the first-choice close for a genuinely-unclosable gap
 Do **not** hand-fake a clear (`coverage.py --mark <class> --status attempted --count 0 --escalations <full
 ladder>` deterministically clears a shallow-clear with no reason — the fabrication the safety classifier
