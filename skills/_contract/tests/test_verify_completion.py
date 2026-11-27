@@ -29,6 +29,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import verify_completion as vc  # noqa: E402
 import model_ledger as ml  # noqa: E402 — the cross-model dispatch ledger the diversity check reads
+import validate as rs_validate  # noqa: E402 — stdlib linter; its top-level scan runs once on import
 
 
 # --------------------------------------------------------------------------- #
@@ -2037,6 +2038,124 @@ class TestModelDiversityVisibility(unittest.TestCase):
             payload, _ = self._run(eng)
             self.assertFalse(payload["pass"], payload)                # found_gaps still HARD-fails
             self.assertTrue(payload["exhaustion_review_errors"])
+
+
+# --------------------------------------------------------------------------- #
+# L-C: three-axis severity model — the narrowed CVSS-drift gate. The old gate
+# blanket-skipped ANY finding with potential_severity, so an UPWARD (inflation)
+# drift escaped entirely. The narrowing: deflation is explained by
+# potential_severity; inflation is explained ONLY by severity_basis=argued-
+# elevation + a non-empty severity_rationale.
+# --------------------------------------------------------------------------- #
+# known ratings (from scripts/cvss.py self-test):
+_VEC_CRITICAL = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"   # 9.8 Critical
+_VEC_HIGH = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"       # 7.5 High
+_VEC_MEDIUM = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"     # 5.3 Medium
+_VEC_NONE = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"       # 0.0 None
+
+
+class TestCvssDriftThreeAxis(unittest.TestCase):
+    def setUp(self):
+        self.cvss = vc._try_import_cvss()
+        self.assertIsNotNone(self.cvss, "scripts/cvss.py must import for this test")
+
+    def _drift(self, finding, *, armed=False):
+        """Return (hard, warns) from the drift gate for a single finding. When armed, write a consolidated
+        report so _gates_armed fires the HARD path; otherwise the eng is mid-hunt (warnings)."""
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        eng = pathlib.Path(self._tmp.name)
+        if armed:
+            (eng / "report").mkdir(parents=True, exist_ok=True)
+            (eng / "report" / "findings_consolidated.json").write_text(
+                json.dumps({"engagement": "acme", "findings": []}), encoding="utf-8")
+        return vc._cvss_drift_check(eng, [finding], self.cvss)
+
+    def _flagged(self, finding, **kw):
+        hard, warns = self._drift(finding, **kw)
+        return bool(hard or warns)
+
+    # (a) deflation + potential_severity -> passes (no drift)
+    def test_deflation_with_potential_passes(self):
+        f = {"id": "RS-2026-001", "severity": "medium", "cvss_vector": _VEC_HIGH,
+             "potential_severity": "high"}
+        self.assertFalse(self._flagged(f))
+        self.assertFalse(self._flagged(f, armed=True))
+
+    # deflation WITHOUT potential_severity -> flagged (unchanged from before)
+    def test_deflation_without_potential_flagged(self):
+        f = {"id": "RS-2026-002", "severity": "medium", "cvss_vector": _VEC_HIGH}
+        self.assertTrue(self._flagged(f))
+
+    # (b) inflation + potential_severity ONLY (no basis) -> now flagged (the regression this fixes)
+    def test_inflation_potential_only_now_flagged(self):
+        f = {"id": "RS-2026-003", "severity": "high", "cvss_vector": _VEC_MEDIUM,
+             "potential_severity": "high"}
+        hard, warns = self._drift(f)
+        self.assertTrue(hard or warns)
+        self.assertIn("MORE severe", (hard + warns)[0])
+        # and it is a HARD error once the gates are armed
+        hard2, _ = self._drift(f, armed=True)
+        self.assertTrue(hard2)
+        self.assertIn("cvss-drift gate", hard2[0])
+
+    # (c) inflation + severity_basis=argued-elevation + non-empty rationale -> passes
+    def test_inflation_argued_elevation_passes(self):
+        f = {"id": "RS-2026-004", "severity": "high", "cvss_vector": _VEC_MEDIUM,
+             "potential_severity": "high", "severity_basis": "argued-elevation",
+             "severity_rationale": "demonstrated cross-tenant data-integrity impact the base vector under-weights"}
+        self.assertFalse(self._flagged(f))
+        self.assertFalse(self._flagged(f, armed=True))
+
+    # argued-elevation with an EMPTY rationale does NOT excuse inflation
+    def test_inflation_argued_elevation_blank_rationale_flagged(self):
+        f = {"id": "RS-2026-005", "severity": "high", "cvss_vector": _VEC_MEDIUM,
+             "severity_basis": "argued-elevation", "severity_rationale": "   "}
+        self.assertTrue(self._flagged(f))
+
+    # (d) baseline match -> passes
+    def test_baseline_match_passes(self):
+        f = {"id": "RS-2026-006", "severity": "critical", "cvss_vector": _VEC_CRITICAL}
+        self.assertFalse(self._flagged(f))
+        self.assertFalse(self._flagged(f, armed=True))
+
+    # (e) info finding with a 0.0/"none" vector -> not flagged (None rating compares as info)
+    def test_info_with_none_rating_not_flagged(self):
+        f = {"id": "RS-2026-007", "severity": "info", "cvss_vector": _VEC_NONE}
+        self.assertFalse(self._flagged(f))
+        self.assertFalse(self._flagged(f, armed=True))
+
+    # a finding with no cvss_vector is untouched
+    def test_no_vector_skipped(self):
+        f = {"id": "RS-2026-008", "severity": "high"}
+        self.assertFalse(self._flagged(f))
+
+
+# --------------------------------------------------------------------------- #
+# L-C: validate.py severity_basis field-internal consistency selftest cases,
+# exercised here in the same CI step (mirrors how the vrt selftest is covered).
+# --------------------------------------------------------------------------- #
+class TestSeverityBasisValidate(unittest.TestCase):
+    v = rs_validate
+
+    def test_builtin_selftest_passes(self):
+        self.assertEqual(self.v.severity_basis_selftest(), [])
+
+    def test_absent_is_ok(self):
+        self.assertEqual(self.v.severity_basis_errors({"id": "RS-2026-001", "severity": "high"}), [])
+
+    def test_bad_value_fails(self):
+        self.assertTrue(self.v.severity_basis_errors({"severity_basis": "nope"}))
+
+    def test_argued_elevation_requires_rationale(self):
+        self.assertTrue(self.v.severity_basis_errors({"severity_basis": "argued-elevation"}))
+        self.assertEqual(self.v.severity_basis_errors(
+            {"severity_basis": "argued-elevation", "severity_rationale": "a real argument"}), [])
+
+    def test_demonstrated_vs_potential_requires_potential(self):
+        self.assertTrue(self.v.severity_basis_errors({"severity_basis": "demonstrated-vs-potential"}))
+        self.assertEqual(self.v.severity_basis_errors(
+            {"severity_basis": "demonstrated-vs-potential", "potential_severity": "high"}), [])
 
 
 if __name__ == "__main__":

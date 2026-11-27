@@ -232,6 +232,32 @@ def vrt_finding_errors(finding, flat, where="finding"):
     return out
 
 
+def severity_basis_errors(finding, where="finding"):
+    """Validate a single finding's OPTIONAL `severity_basis` axis-reconciliation field for pure
+       field-INTERNAL consistency (mirrors vrt_finding_errors). validate.py is stdlib-only and does NOT
+       compute CVSS, so it does NOT check the drift DIRECTION (declared-vs-computed) — that is
+       verify_completion._cvss_drift_check's job; here we only enforce the field's own invariants. Returns
+       error strings (empty = OK). A finding without `severity_basis` is unaffected (default = baseline)."""
+    out = []
+    if not isinstance(finding, dict):
+        return out
+    basis = finding.get("severity_basis")
+    if basis is None:
+        return out  # absent -> baseline, nothing to check
+    if basis not in ("baseline", "demonstrated-vs-potential", "argued-elevation"):
+        out.append(f"{where}: severity_basis {basis!r} must be "
+                   f"baseline/demonstrated-vs-potential/argued-elevation")
+        return out
+    rationale = str(finding.get("severity_rationale") or "").strip()
+    if basis == "argued-elevation" and not rationale:
+        out.append(f"{where}: severity_basis 'argued-elevation' requires a non-empty severity_rationale "
+                   f"(the argument for rating business severity above the CVSS arithmetic)")
+    if basis == "demonstrated-vs-potential" and finding.get("potential_severity") is None:
+        out.append(f"{where}: severity_basis 'demonstrated-vs-potential' requires potential_severity to be "
+                   f"set (the vector's best-case the demonstrated severity is measured against)")
+    return out
+
+
 def scope_program_errors(program, known=None, where="scope.yaml"):
     """Validate a scope.yaml `program` mapping (a dict). Returns error strings. Absent program => an
        ordinary pentest engagement, nothing to check."""
@@ -326,6 +352,40 @@ def vrt_selftest(flat):
     return fails
 
 
+def severity_basis_selftest():
+    """Deterministic severity_basis-validation self-check (mirrors vrt_selftest). Pure field-internal
+       consistency only (no CVSS). Returns a list of failure strings; [] = all cases behaved as expected."""
+    fails = []
+
+    def expect(name, errs, want_fail):
+        got_fail = bool(errs)
+        if got_fail != want_fail:
+            fails.append(f"severity_basis selftest [{name}]: expected {'FAIL' if want_fail else 'PASS'} "
+                         + (f"but got FAIL {errs}" if got_fail else "but got PASS"))
+
+    # absent -> baseline, unaffected (an ordinary finding)
+    expect("absent", severity_basis_errors({"id": "RS-2026-001", "severity": "high"}), False)
+    # explicit baseline -> PASS
+    expect("baseline", severity_basis_errors({"severity_basis": "baseline"}), False)
+    # an unknown basis value -> FAIL
+    expect("bad-value", severity_basis_errors({"severity_basis": "made-up"}), True)
+    # argued-elevation WITH a rationale -> PASS (the shopware RS-2026-* inflation shape)
+    expect("argued-ok", severity_basis_errors(
+        {"severity_basis": "argued-elevation", "severity_rationale": "cross-tenant data integrity impact"}), False)
+    # argued-elevation with NO rationale -> FAIL
+    expect("argued-norationale", severity_basis_errors({"severity_basis": "argued-elevation"}), True)
+    # argued-elevation with a blank/whitespace rationale -> FAIL
+    expect("argued-blank", severity_basis_errors(
+        {"severity_basis": "argued-elevation", "severity_rationale": "   "}), True)
+    # demonstrated-vs-potential WITH potential_severity set -> PASS
+    expect("dvp-ok", severity_basis_errors(
+        {"severity_basis": "demonstrated-vs-potential", "severity": "low", "potential_severity": "high"}), False)
+    # demonstrated-vs-potential WITHOUT potential_severity -> FAIL
+    expect("dvp-nopotential", severity_basis_errors(
+        {"severity_basis": "demonstrated-vs-potential", "severity": "low"}), True)
+    return fails
+
+
 def check_vrt():
     """23 — pinned VRT taxonomy + finding-vrt fabrication/inflation + scope program.taxonomy (the QW
        reporting-VRT primitives; wired here like the cvss/coverage self-tests)."""
@@ -358,6 +418,11 @@ def check_vrt():
             "server_side_injection>content_spoofing>text_injection must be baseline P5 "
             f"(got {flat['id_paths'].get(anchor)!r}) — pinned-taxonomy drift")
     for f in vrt_selftest(flat):
+        err(f)
+    # severity_basis axis-reconciliation field self-check (L-C) — the demonstrated-severity-vs-CVSS
+    # reconciliation field validated alongside the VRT headline axis; wired here like vrt_selftest.
+    checked["severity_basis"] = 1
+    for f in severity_basis_selftest():
         err(f)
     # (c) the TEMPLATE scope.yaml program.taxonomy must reference a known/pinned taxonomy
     tmpl = ROOT / "engagements" / "_template" / "scope.yaml"
