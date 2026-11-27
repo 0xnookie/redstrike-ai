@@ -73,6 +73,27 @@ def write_evidence(eng: pathlib.Path, finding: dict) -> None:
                          encoding="utf-8")
 
 
+def write_verdicts(eng: pathlib.Path, findings=None) -> None:
+    """Stage the reviewer-written verdict FILE the real contract requires. For every finding carrying an
+    inline review{} block with a verdict, write a matching `reviews/<id>.verdict.json` (mirroring the inline
+    verdict + reviewer object, keyed by the finding id) into the engagement's root reviews/ dir. Option A
+    makes this id-keyed file AUTHORITATIVE and REQUIRED for an inline-accepted reportable finding, so a
+    report-ready fixture must emit it exactly as a real `<class>-verify` reviewer does — the verdict mirrors
+    the inline block (no verdict is invented). `findings` defaults to the engagement's discovered findings."""
+    if findings is None:
+        findings, _src = vc._discover_engagement_findings(eng)
+    rd = eng / "reviews"
+    for f in (findings or []):
+        if not isinstance(f, dict):
+            continue
+        review = f.get("review")
+        fid = f.get("id")
+        if not (isinstance(review, dict) and review.get("verdict") and fid):
+            continue
+        rd.mkdir(parents=True, exist_ok=True)
+        (rd / f"{fid}.verdict.json").write_text(json.dumps(dict(review)), encoding="utf-8")
+
+
 def substantiate_attempted(led: dict) -> dict:
     """Give every zero-finding `attempted` category in a coverage ledger the depth evidence the coverage
     gate's depth-substance bar requires, i.e. model a legitimately deeply-probed-but-empty clear (not a
@@ -594,6 +615,7 @@ class TestCoverageHardGate(unittest.TestCase):
             json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
         (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
 
     def test_report_with_pending_category_fails(self):
         cov = self._cov()
@@ -915,6 +937,7 @@ class TestIndependentReviewGate(unittest.TestCase):
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         if accept_reason is not None:
             (eng / "reviews").mkdir(parents=True, exist_ok=True)
             (eng / "reviews" / "self_verified_accepts.json").write_text(
@@ -984,6 +1007,112 @@ class TestIndependentReviewGate(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Option A: the verdict FILE is authoritative + REQUIRED for an inline-accepted
+# reportable finding (an inline review{} block alone is self-declarable).
+# --------------------------------------------------------------------------- #
+class TestVerdictFileRequiredGate(unittest.TestCase):
+    """The reviewer-written verdict FILE (reviews/<id>.verdict.json, keyed by the finding id) is
+    AUTHORITATIVE and REQUIRED for an inline-accepted reportable finding. An inline review{accepted} block
+    alone is self-declarable — an executor could forge it in its own findings.json — so once a report exists
+    it clears the HARD gate ONLY with a matching verdict file whose reviewer the inline block does not
+    contradict. A verdict that comes from the file ALONE already passes (the file is the authoritative record)."""
+
+    def _stage(self, d, *, inline_review, verdict_file):
+        """A report-present engagement satisfying every OTHER hard gate, whose single finding carries
+        `inline_review` (its review{} block, or None to omit it) and — only when `verdict_file` is given — a
+        matching reviews/<id>.verdict.json. So ONLY the verdict-file read-gate varies between cases."""
+        eng = pathlib.Path(d)
+        f = valid_finding()
+        if inline_review is None:
+            f.pop("review", None)       # a file-only verdict — status still derives a reportable finding
+            f["status"] = "verified"
+        else:
+            f["review"] = inline_review
+        (eng / "report").mkdir(parents=True, exist_ok=True)
+        for item in f["evidence"]:
+            p = eng / item["ref"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("req\n\nHTTP/1.1 200\n<svg/onload=alert(1)>\n", encoding="utf-8")
+        (eng / "report" / "findings_consolidated.json").write_text(
+            json.dumps({"engagement": "acme-2026", "findings": [f]}), encoding="utf-8")
+        (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+        cov = vc._try_import_coverage()
+        led = cov.plan(cov.load_map(), None, {"web"})
+        for c in led["categories"]:
+            if c["status"] == "pending":
+                c["status"], c["findings_count"] = "attempted", 0
+        substantiate_attempted(led)
+        (eng / "coverage_ledger.json").write_text(json.dumps(led), encoding="utf-8")
+        sf = vc._try_import_surface()
+        sled = sf.plan_from_items("acme-2026", [{"kind": "endpoint", "value": "/s", "discovered_by": "recon"}])
+        for s in sled["surfaces"]:
+            if s["status"] == "discovered":
+                s["status"] = "tested"
+        (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        if verdict_file is not None:
+            (eng / "reviews").mkdir(parents=True, exist_ok=True)
+            (eng / "reviews" / f"{f['id']}.verdict.json").write_text(
+                json.dumps(verdict_file), encoding="utf-8")
+        return eng
+
+    def _run(self, eng):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            vc.validate_engagement(eng, as_json=True)
+        return json.loads(buf.getvalue())
+
+    _INLINE = {"verdict": "accepted", "reviewer": "xss-reflected-verify",
+               "scope_ok": True, "rubric": {"reflection_vs_execution": "pass"}}
+
+    def test_inline_accepted_without_verdict_file_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._stage(d, inline_review=self._INLINE, verdict_file=None))
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(payload["review_errors"])
+            self.assertTrue(any("inline review" in e for e in payload["review_errors"]), payload["review_errors"])
+
+    def test_inline_accepted_with_matching_verdict_file_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._stage(
+                d, inline_review=self._INLINE,
+                verdict_file={"verdict": "accepted", "reviewer": "xss-reflected-verify"}))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["review_errors"], [])
+
+    def test_inline_reviewer_disagrees_with_verdict_file_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._stage(
+                d, inline_review=self._INLINE,
+                verdict_file={"verdict": "accepted", "reviewer": "sqli-inband-verify"}))
+            self.assertFalse(payload["pass"], payload)
+            self.assertTrue(any("disagrees with the authoritative verdict file" in e
+                                for e in payload["review_errors"]), payload["review_errors"])
+
+    def test_verdict_file_alone_no_inline_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = self._run(self._stage(
+                d, inline_review=None,
+                verdict_file={"verdict": "accepted", "reviewer": "xss-reflected-verify"}))
+            self.assertTrue(payload["pass"], payload)
+            self.assertEqual(payload["review_errors"], [])
+
+    def test_verdict_file_rejected_overrides_inline_accepted(self):
+        """The verdict FILE is authoritative (the contract tiebreaker): a file 'rejected' wins over an
+        inline 'accepted', so _review_of returns the file's verdict + reviewer."""
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "reviews").mkdir(parents=True, exist_ok=True)
+            (eng / "reviews" / "RS-2026-001.verdict.json").write_text(
+                json.dumps({"verdict": "rejected", "reviewer": "xss-reflected-verify",
+                            "rejection_class": "false-positive"}), encoding="utf-8")
+            f = valid_finding(review={"verdict": "accepted", "reviewer": "xss-reflected-verify"})
+            verdict, reviewer = vc._review_of(f, eng)
+            self.assertEqual(verdict, "rejected")       # file wins over the inline 'accepted'
+            self.assertEqual(reviewer, "xss-reflected-verify")
+
+
+# --------------------------------------------------------------------------- #
 # P0-1: coordination-artifact integrity gate — no report over an artifact that
 # broke its OWN vocabulary (out-of-vocab signal / out-of-enum surface kind).
 # --------------------------------------------------------------------------- #
@@ -1037,6 +1166,7 @@ class TestCoordinationIntegrityGate(unittest.TestCase):
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         return eng, led, sled
 
     def _run(self, eng):
@@ -1175,6 +1305,7 @@ class TestRecallAuditGate(unittest.TestCase):
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         if accept is not None:
             (eng / "reviews").mkdir(parents=True, exist_ok=True)
             (eng / "reviews" / "recall_audit_accepts.json").write_text(json.dumps(accept), encoding="utf-8")
@@ -1363,6 +1494,7 @@ class TestAttackChainGate(unittest.TestCase):
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         return eng
 
     def _run(self, eng):
@@ -1547,6 +1679,7 @@ class TestDiagnosticsZeroFindingGate(unittest.TestCase):
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         return eng
 
     def _run(self, eng):
@@ -1640,6 +1773,7 @@ class TestDiagnosticsZeroFindingGate(unittest.TestCase):
                     s["status"] = "tested"
             (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
             write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete'
+            write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative)
             payload = self._run(eng)
             self.assertTrue(payload["pass"], payload)
             self.assertEqual(payload["diagnostics_errors"], [])
@@ -1684,6 +1818,7 @@ class TestDiagnosticsAutoPopulateIntegration(unittest.TestCase):
                                        degraded_reason="WAF blocked the engagement",
                                        blocked_hosts=[("app.acme.com", 0.95, "cloudflare")]))
             write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete'
+            write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative)
             payload = self._run(eng)
             # the ledger was auto-rewritten: no web category left pending (would have been a coverage gap)
             after = {c["id"]: c for c in json.loads(
@@ -1759,6 +1894,7 @@ class TestDiagnosticsStaleFindingsGate(unittest.TestCase):
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
         write_exhaustion_review(eng)  # cross-model adversary could not disprove 'complete' (report-ready)
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         return eng
 
     def _run(self, eng):
@@ -1846,6 +1982,7 @@ class TestExhaustionAdversaryGate(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         return eng
 
     def _run(self, eng):
@@ -1997,6 +2134,7 @@ class TestModelDiversityVisibility(unittest.TestCase):
             if s["status"] == "discovered":
                 s["status"] = "tested"
         (eng / "surface_ledger.json").write_text(json.dumps(sled), encoding="utf-8")
+        write_verdicts(eng)  # Option A: the independent reviewer's id-keyed verdict file (authoritative, required)
         return eng
 
     def _run(self, eng):

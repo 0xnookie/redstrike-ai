@@ -152,6 +152,50 @@ def reportable_count(eng: Path) -> int:
     return n
 
 
+# --- Option A: independent-review reconciliation (close-time enforcement) ------------------------------- #
+# The independent-review HARD gate (verify_completion._independent_review_check) clears a reportable finding
+# only when the reviewer's AUTHORITATIVE verdict FILE (reviews/<id>.verdict.json, keyed by the finding id)
+# exists — an inline review{} block alone is self-declarable, so an executor could forge acceptance in its
+# own findings.json. close.py runs BEFORE verify_completion / reporting, with the findings AND the verdict
+# files both in hand, so it ENFORCES the canonical id-keying at CLOSE time: a report-bound, inline-accepted
+# finding with no matching verdict file FAILS the close with a clear remedy. This guarantees an honest
+# pipeline emits the canonically-keyed verdict file the strict read-gate needs (so an honest run with a
+# mis-keyed file is fixed here, not left to break silently at read time).
+
+def _has_verdict_file(eng: Path, fid: str) -> bool:
+    """True iff an id-keyed reviewer verdict file reviews/<id>.verdict.json exists (root vault or per-skill
+    reviews/ dir) — the authoritative reviewer record Option A requires for an inline-accepted reportable
+    finding. Mirrors verify_completion._collect_verdict_ids' discovery (root + <eng>/*/reviews)."""
+    if not fid:
+        return False
+    for vp in [eng / "reviews" / f"{fid}.verdict.json"] + sorted(eng.glob(f"*/reviews/{fid}.verdict.json")):
+        if vp.is_file():
+            return True
+    return False
+
+
+def unreconciled_inline_accepts(eng: Path) -> list:
+    """Reportable findings whose acceptance is declared ONLY in the inline review{} block (verdict
+    accepted/blocked) with NO matching id-keyed reviews/<id>.verdict.json. An inline block is
+    self-declarable, so Option A REQUIRES the independent reviewer's verdict FILE (the authoritative record).
+    Returns the offending finding ids, sorted/unique. A duplicate (lifecycle status) or composite is not a
+    reportable, independently-reviewed finding and is skipped; a finding whose verdict comes from the file
+    alone (no inline block) already satisfies the rule, so it never appears here."""
+    missing = []
+    for f in _discover_findings(eng):
+        if not isinstance(f, dict) or f.get("composite") or f.get("_composite"):
+            continue
+        if str(f.get("status")) == "duplicate":
+            continue  # a de-duped finding does not reach the report
+        review = f.get("review")
+        if not isinstance(review, dict) or review.get("verdict") not in ("accepted", "blocked"):
+            continue  # not an INLINE-accepted finding → the file-alone / rejected / clean-pass paths are fine
+        fid = f.get("id")
+        if fid and not _has_verdict_file(eng, str(fid)):
+            missing.append(str(fid))
+    return sorted(set(missing))
+
+
 def _fallback_record(eng: Path, *, session: str, now: str) -> dict:
     """A minimal, HONEST run record built without the cli diagnostics package (the rare case it can't be
     imported). Outcome is derived from the layout-aware reportable-finding count; transport is left empty
@@ -242,6 +286,18 @@ def main(argv=None) -> int:
     if orphans:
         print(f"[close] {len(orphans)} stray findings file(s) NOT scanned — see the warning(s) above; "
               f"merge each into its '<skill>/findings.json'.")
+    # Option A: FAIL the close when a report-bound inline-accepted finding lacks its authoritative, id-keyed
+    # verdict file — the diagnostics record above is still written (honest), but the close does not SUCCEED
+    # until the independent reviewer's reviews/<id>.verdict.json exists (an inline review{} block alone is
+    # self-declarable and cannot clear the independent-review gate downstream).
+    unreconciled = unreconciled_inline_accepts(eng)
+    if unreconciled:
+        print(f"[close] independent-review reconciliation FAILED: {len(unreconciled)} reportable "
+              f"inline-accepted finding(s) have NO matching id-keyed reviews/<id>.verdict.json "
+              f"({', '.join(unreconciled)}) — the reviewer must write reviews/<id>.verdict.json keyed to "
+              f"the finding id (an inline review{{}} block alone is self-declarable and cannot clear the "
+              f"independent-review gate).", file=sys.stderr)
+        return 2
     return 0
 
 

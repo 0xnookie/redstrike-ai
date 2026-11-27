@@ -1399,26 +1399,35 @@ def _is_independent_reviewer(name: str, roster: set) -> bool:
     return n.endswith("-verify")
 
 
+def _verdict_file_review(eng: Path, fid) -> tuple:
+    """(verdict, reviewer) from the id-keyed reviewer verdict FILE `reviews/<id>.verdict.json` (root vault,
+    else per-skill `<eng>/*/reviews/`), or (None, None) when no such file exists / it is unparseable / it
+    carries no verdict. This is the AUTHORITATIVE reviewer record (verify-base.md: the finding id lives in
+    the FILENAME, and the verdict file is the tiebreaker on any discrepancy)."""
+    if not fid:
+        return None, None
+    for vp in [eng / "reviews" / f"{fid}.verdict.json"] + sorted(eng.glob(f"*/reviews/{fid}.verdict.json")):
+        if vp.is_file():
+            try:
+                vd = json.loads(vp.read_text(encoding="utf-8")) or {}
+            except Exception:  # noqa: BLE001
+                continue
+            if vd.get("verdict"):
+                return vd.get("verdict"), (vd.get("reviewer") or "")
+    return None, None
+
+
 def _review_of(f: dict, eng: Path) -> tuple:
-    """(verdict, reviewer) for a finding, preferring the inline `review{}` block and falling back to
-    `reviews/<id>.verdict.json` (root or per-skill). verdict defaults from `status` when neither
-    carries one (verified→accepted, rejected→rejected)."""
-    r = f.get("review") or {}
-    verdict, reviewer = r.get("verdict"), r.get("reviewer")
-    if not (verdict and reviewer):
-        fid = f.get("id")
-        if fid:
-            cands = [eng / "reviews" / f"{fid}.verdict.json"] + sorted(eng.glob(f"*/reviews/{fid}.verdict.json"))
-            for vp in cands:
-                if vp.is_file():
-                    try:
-                        vd = json.loads(vp.read_text(encoding="utf-8")) or {}
-                    except Exception:  # noqa: BLE001
-                        continue
-                    verdict = verdict or vd.get("verdict")
-                    reviewer = reviewer or vd.get("reviewer")
-                    if verdict and reviewer:
-                        break
+    """(verdict, reviewer) for a finding. The reviewer-written verdict FILE is AUTHORITATIVE: when an
+    id-keyed `reviews/<id>.verdict.json` exists it WINS over the inline `review{}` block (the contract
+    tiebreaker — an inline block is self-declarable). Only when no verdict file exists is the inline block
+    used; `status` derives a verdict when neither carries one (verified→accepted, rejected→rejected)."""
+    inline = f.get("review") or {}
+    file_verdict, file_reviewer = _verdict_file_review(eng, f.get("id"))
+    if file_verdict:
+        verdict, reviewer = file_verdict, (file_reviewer or inline.get("reviewer") or "")
+    else:
+        verdict, reviewer = inline.get("verdict"), inline.get("reviewer")
     if not verdict:
         st = f.get("status")
         verdict = "accepted" if st == "verified" else "rejected" if st == "rejected" else ""
@@ -1452,36 +1461,70 @@ def _self_verified_accepts(eng: Path) -> dict:
 
 def _independent_review_check(eng: Path, findings: list) -> tuple:
     """(hard_errors, warnings) for the independent-review gate. Only findings that actually reach
-    reporting (effective verdict accepted/blocked) are in scope. A report present makes an
-    un-reviewed, un-accepted finding a HARD error; before a report it is a soft warning."""
+    reporting (effective verdict accepted/blocked) are in scope. A report present makes a defective
+    finding a HARD error; before a report it is a soft warning.
+
+    A reportable finding clears the gate ONLY when its acceptance rests on a REAL independent reviewer
+    record, not a self-declarable inline block:
+      * its effective reviewer is a roster `*-verify` agent (never self/orchestrator-attested), AND
+      * if the finding carries an inline-ACCEPTED `review{}` block, it clears ONLY when a matching id-keyed
+        `reviews/<id>.verdict.json` exists (fid ∈ `_collect_verdict_ids(eng)`) AND the inline reviewer does
+        not contradict the authoritative verdict file's reviewer (no inline reviewer, or they match).
+    A finding whose verdict comes from the verdict FILE alone (no inline block) already passes — the file is
+    the authoritative record. This promotes the former soft hygiene warning to a hard close-gate: an inline
+    `review{accepted}` with no verdict file is self-attestation, the exact forge Option A closes."""
     roster = _verify_roster()
     accepts = _self_verified_accepts(eng)
     report = _gates_armed(eng, findings)
+    verdict_ids = _collect_verdict_ids(eng)
     flagged, accepted = [], []
     for f in findings:
         if not isinstance(f, dict):
             continue
-        verdict, reviewer = _review_of(f, eng)
+        verdict, reviewer = _review_of(f, eng)  # verdict FILE is authoritative over the inline block
         if verdict not in ("accepted", "blocked"):
             continue  # not reportable → the gate doesn't apply
-        if _is_independent_reviewer(reviewer, roster):
-            continue
         fid = f.get("id", "<no-id>")
         cat = f.get("category") or {}
         hint = cat.get("owasp") or cat.get("cwe") or cat.get("wstg") or "uncategorized"
         who = reviewer or "(none)"
-        (accepted if fid in accepts else flagged).append((fid, hint, who))
+        inline = f.get("review") if isinstance(f.get("review"), dict) else {}
+        inline_verdict = inline.get("verdict")
+        inline_reviewer = str(inline.get("reviewer") or "").strip()
+        _, file_reviewer = _verdict_file_review(eng, f.get("id"))
+
+        msg = None
+        if not _is_independent_reviewer(reviewer, roster):
+            # self/orchestrator-attested, a human, blank, or a non-roster name (the original gate).
+            msg = (f"{fid} [{hint}] reviewed by '{who}', not an independent *-verify agent — "
+                   f"self/orchestrator-attested. Route it to the matching <class>-verify reviewer, or record "
+                   f"an operator-accept in reviews/self_verified_accepts.json "
+                   f"(\"{fid}\": \"why no reviewer covers this class\")")
+        elif inline_verdict in ("accepted", "blocked"):
+            # An inline-accepted finding is self-declarable: it clears the gate ONLY with a matching id-keyed
+            # verdict FILE (the authoritative record), whose reviewer the inline block must not contradict.
+            if fid not in verdict_ids:
+                msg = (f"{fid} [{hint}] is accepted ONLY in its inline review{{}} block (reviewer '{who}') "
+                       f"with NO matching reviews/{fid}.verdict.json — an inline block is self-declarable, so "
+                       f"the independent reviewer's verdict FILE (keyed to the finding id) is required. Route "
+                       f"it to the matching <class>-verify reviewer, or record an operator-accept in "
+                       f"reviews/self_verified_accepts.json")
+            elif inline_reviewer and inline_reviewer.lower() != str(file_reviewer or "").lower():
+                msg = (f"{fid} [{hint}] inline review.reviewer '{inline_reviewer}' disagrees with the "
+                       f"authoritative verdict file reviews/{fid}.verdict.json reviewer "
+                       f"'{file_reviewer or '(none)'}' — the verdict file is the tiebreaker; make the inline "
+                       f"block match it (or drop the inline reviewer)")
+        if msg is None:
+            continue
+        (accepted if fid in accepts else flagged).append((fid, hint, who, msg))
     hard, warns = [], []
-    for fid, hint, who in flagged:
-        msg = (f"{fid} [{hint}] reviewed by '{who}', not an independent *-verify agent — "
-               f"self/orchestrator-attested. Route it to the matching <class>-verify reviewer, or record "
-               f"an operator-accept in reviews/self_verified_accepts.json (\"{fid}\": \"why no reviewer covers this class\")")
+    for fid, hint, who, msg in flagged:
         if report:
             hard.append("independent-review gate (report present → every reportable finding needs an "
-                        f"independent *-verify reviewer): {msg}")
+                        f"independent *-verify reviewer with a matching verdict file): {msg}")
         else:
             warns.append(msg + " [becomes a hard gate once a report exists]")
-    for fid, hint, who in accepted:
+    for fid, hint, who, msg in accepted:
         warns.append(f"self-verification operator-accepted: {fid} [{hint}] by '{who}' — "
                      f"{accepts[fid]} (backfill a {hint} *-verify reviewer to remove this exception)")
     return hard, warns
