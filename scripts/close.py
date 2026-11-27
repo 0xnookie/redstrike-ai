@@ -36,6 +36,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# atomic_write: the one shared atomic file-write helper (same resolution as dedup.py / coverage.py).
+# A crash mid-write must never leave a torn runtime/diagnostics.json behind for the gate/console.
+try:
+    from atomicio import atomic_write
+except ImportError:  # pragma: no cover - only hit under path-based loading without scripts/ on sys.path
+    import importlib.util as _ilu
+    _aspec = _ilu.spec_from_file_location("atomicio", str(Path(__file__).resolve().parent / "atomicio.py"))
+    _amod = _ilu.module_from_spec(_aspec)
+    _aspec.loader.exec_module(_amod)
+    atomic_write = _amod.atomic_write
+
 
 def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
@@ -178,9 +189,9 @@ def _fallback_write(eng: Path, record: dict) -> Path:
     if not isinstance(runs, list):
         runs = []
     runs.append(record)
-    diag_path.write_text(json.dumps(
+    atomic_write(diag_path, json.dumps(
         {"engagement": doc.get("engagement") or eng.name, "generated_at": _now_iso(), "runs": runs},
-        indent=2) + "\n", encoding="utf-8")
+        indent=2) + "\n")
     return diag_path
 
 

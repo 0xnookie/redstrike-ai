@@ -275,6 +275,31 @@ class TestScopeParsing(unittest.TestCase):
             got = c.scope_for(eng)
             self.assertEqual(got["source"], "scope.json")
 
+    def test_scope_for_caches_tree_walk(self):
+        """The perf fix: scope_for() is on the 15s manifest-poll hot path and otherwise re-walks the
+        pruned tree each call. A warm call must be served from cache — one walk, same scope data."""
+        c._SCOPE_CACHE.clear()
+        self.addCleanup(c._SCOPE_CACHE.clear)
+        with tempfile.TemporaryDirectory() as d:
+            eng = pathlib.Path(d)
+            (eng / "scope.yaml").write_text(SCOPE_YAML, encoding="utf-8")
+            calls = []
+            orig = c._shallowest
+
+            def counting(root, name):
+                calls.append(name)
+                return orig(root, name)
+
+            c._shallowest = counting
+            try:
+                first = c.scope_for(eng)
+                second = c.scope_for(eng)   # served from cache -> no second tree walk
+            finally:
+                c._shallowest = orig
+            self.assertEqual(first, second)
+            self.assertEqual(first["engagement"], "acme-2026")   # unchanged scope data
+            self.assertEqual(len(calls), 1)                      # exactly one walk across both calls
+
 
 # --------------------------------------------------------------------------- #
 # Phase 2 (reliability): runtime/diagnostics.json is served + summarized

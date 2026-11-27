@@ -193,6 +193,14 @@ def start_login(provider: str) -> dict:
         raw = "".join(cur["out"])
         cur["url"] = cur.get("url") or _extract_login_url(raw)
         return {"ok": True, "running": True, "output": _strip_ansi(raw)[-2000:], "url": cur.get("url")}
+    # A prior login for this provider has exited (else we returned above). Its PTY master is
+    # normally closed by _pump_pty's finally, but close it defensively before we replace the entry
+    # so a retry can never leak the old master fd (double-close is harmless).
+    if cur and cur.get("master") is not None:
+        try:
+            os.close(cur["master"])
+        except OSError:
+            pass
     out: list[str] = []
     master = None
     try:
@@ -230,6 +238,10 @@ def start_login(provider: str) -> dict:
                     del out[: len(out) - 800]
         finally:
             _login_capture(provider, spec, out)
+            try:
+                os.close(fd)  # release the PTY master fd on exit (otherwise it leaks per login)
+            except OSError:
+                pass
 
     def _pump_pipe(stream):
         try:
@@ -362,6 +374,31 @@ def _terminate(proc: subprocess.Popen) -> None:
         )
     else:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+
+
+# The SSE run-log tail reads only the last _TAIL_BYTES of autorun.jsonl to find the current run's
+# boundary marker, instead of loading the whole (append-only, unbounded) log into RAM for every
+# connecting client. 256 KiB comfortably spans one run's boundary line + its live output.
+_TAIL_BYTES = 256 * 1024
+
+
+def _tail_boundary_lines(f, size: int, max_bytes: int = _TAIL_BYTES) -> list[str]:
+    """Replay lines for the CURRENT run — from the last run-boundary marker (a line starting with
+    '#') to EOF — read from a BOUNDED tail (the last `max_bytes`) of the open binary file `f`,
+    not the whole file. Leaves `f` positioned at EOF so the caller follows new appends with no gap.
+    When no boundary is found within the window, replays the whole window (best effort)."""
+    start = max(0, size - max_bytes)
+    f.seek(start)
+    chunk = f.read()  # read to EOF; f is now positioned to tail new appends
+    raw = chunk.split(b"\n")
+    if start > 0 and raw:
+        raw = raw[1:]  # we sliced into the middle of a line — drop that partial first fragment
+    boundary = 0
+    for i in range(len(raw) - 1, -1, -1):
+        if raw[i].lstrip().startswith(b"#"):
+            boundary = i
+            break
+    return [b.decode("utf-8", "replace") for b in raw[boundary:]]
 
 
 # --- request handler --------------------------------------------------------
@@ -774,25 +811,22 @@ def make_control_handler(target: Path, token: str):
                     self.wfile.write(b": no-run\n\n")
                     self.wfile.flush()
                     return
-                f = path.open("r", encoding="utf-8", errors="replace")
-                # Replay the CURRENT run (from the last run-boundary marker) so a refresh or
-                # late join rebuilds the live view, THEN follow new lines appended after.
-                lines = f.readlines()  # reads to EOF; f is now positioned to tail new appends
-                start = 0
-                for i in range(len(lines) - 1, -1, -1):
-                    if lines[i].lstrip().startswith("#"):
-                        start = i
-                        break
-                for ln in lines[start:]:
-                    s = ln.rstrip("\n")
+                # Replay the CURRENT run (from the last run-boundary marker) so a refresh or late
+                # join rebuilds the live view, THEN follow new lines appended after. Read only a
+                # BOUNDED tail to find the boundary — autorun.jsonl is append-only and unbounded, so
+                # f.readlines() would load the whole run history into RAM for every SSE client.
+                f = path.open("rb")
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                for s in _tail_boundary_lines(f, size):  # leaves f positioned at EOF for the follow
                     if s:
                         self.wfile.write(b"data: " + s.encode("utf-8") + b"\n\n")
                 self.wfile.flush()
                 gone_since = None  # when we first hit EOF with the run no longer live
                 while time.time() < deadline:
-                    line = f.readline()
+                    line = f.readline()  # bytes (f is binary) — may be a partial line at EOF
                     if line:
-                        self.wfile.write(b"data: " + line.rstrip("\n").encode("utf-8") + b"\n\n")
+                        self.wfile.write(b"data: " + line.rstrip(b"\n") + b"\n\n")
                         self.wfile.flush()
                         gone_since = None
                         continue
