@@ -224,11 +224,31 @@ def _stdlib_schema_errors(data, schema, root=None, path="<root>"):
     return errs
 
 
+def _try_import_structvalidate():
+    """Import scripts/structvalidate.py by PATH (the shared, reusable structural validator) so nothing on
+    sys.path can shadow it. It covers the full _contract keyword subset — crucially `patternProperties`
+    and `anyOf`-with-siblings, which the local `_stdlib_schema_errors` subset does not. None when
+    unavailable (the caller then falls back to the local subset so the gate still runs)."""
+    try:
+        import importlib.util
+        p = _repo_root() / "scripts" / "structvalidate.py"
+        if not p.is_file():
+            return None
+        spec = importlib.util.spec_from_file_location("rs_structvalidate", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _validate_against_schema(data, schema_rel: str):
     """Best-effort JSON-Schema validation for an artifact that declares `schema`.
-    Returns (ok, note). Prefers the `jsonschema` package; falls back to a stdlib
-    subset validator (`_stdlib_schema_errors`) so a real violation still FAILS even
-    without the dependency. A missing schema file SKIPS (ok=True)."""
+    Returns (ok, note). Prefers the `jsonschema` package; in the no-jsonschema path it uses the shared
+    structural validator (scripts/structvalidate.py) — which handles `patternProperties` +
+    `additionalProperties` and `anyOf`-with-siblings correctly — falling back to the local
+    `_stdlib_schema_errors` subset only if structvalidate itself is unavailable, so a real violation still
+    FAILS even without the dependency. A missing schema file SKIPS (ok=True)."""
     schema_path = _repo_root() / schema_rel
     if not schema_path.is_file():
         return True, f"schema {schema_rel} not found (skipped)"
@@ -245,7 +265,16 @@ def _validate_against_schema(data, schema_rel: str):
             return False, f"{e.message} (at {loc})"
         return True, "schema ok"
     except ImportError:
-        errs = _stdlib_schema_errors(data, schema)
+        sv = _try_import_structvalidate()
+        if sv is not None:
+            # STRICT (default): enforce required / additionalProperties:false / pattern, matching the
+            # jsonschema path. structvalidate correctly treats a patternProperties-matched key as expected
+            # and keeps anyOf's sibling checks (required/type/properties) alive.
+            viols = sv.validate(data, schema)
+            errs = [f"{v.get('path', '<root>')}: expected {v.get('expected')}, got {v.get('got')}"
+                    for v in viols]
+        else:
+            errs = _stdlib_schema_errors(data, schema)  # last-resort local subset
         if errs:
             return False, "; ".join(errs[:4]) + (" …" if len(errs) > 4 else "") + " (stdlib check)"
         return True, "schema ok (stdlib check)"

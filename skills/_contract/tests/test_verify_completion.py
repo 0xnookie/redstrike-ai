@@ -199,6 +199,65 @@ class TestStdlibSchemaValidator(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# validator-correctness fix: the no-jsonschema path of _validate_against_schema
+# now routes through the shared structural validator (scripts/structvalidate.py),
+# which — unlike the local _stdlib_schema_errors subset — supports patternProperties
+# alongside additionalProperties:false (a pattern-matched key is EXPECTED, not an
+# "unexpected property") and keeps an anyOf node's SIBLING checks alive instead of
+# early-returning on the anyOf result. These pin both behaviours.
+# --------------------------------------------------------------------------- #
+class TestSchemaValidatorPatternAndAnyOf(unittest.TestCase):
+    def _valid_diag(self, statuses):
+        """A fully schema-valid runtime/diagnostics.json whose host_health.statuses == `statuses` — the
+        real _contract node that combines patternProperties `^[0-9]{3}$` with additionalProperties:false."""
+        host = {"host": "api.acme.com", "requests": 100, "blocks": 0, "block_rate": 0.0,
+                "statuses": statuses, "challenges": 0, "waf": None, "classification": "healthy",
+                "first_block_ts": None, "last_ok_ts": "2026-01-01T00:00:00Z"}
+        run = {"session": "s1", "mode": "autonomous", "started": "2026-01-01T00:00:00Z",
+               "ended": "2026-01-01T01:00:00Z", "engine_rc": 0, "gate_rc": 0, "outcome": "clean-tested",
+               "degraded_reason": None, "findings_count": 0, "tool_failures": [], "exceptions": [],
+               "transport_health": {"hosts": [host],
+                                    "overall": {"block_rate": 0.0, "worst_host": None, "status": "healthy"}},
+               "empty_recon": {"flag": False, "surface_discovered": 3, "signals": 1, "hosts_live": 1},
+               "phase_tally": [],
+               "gate_summary": {"coverage": "ok", "surface": "ok", "recall": "ok", "findings": 0}}
+        return {"engagement": "acme-2026", "generated_at": "2026-01-01T01:00:00Z", "runs": [run]}
+
+    def test_patternproperties_key_accepted_nonmatching_rejected(self):
+        # a pattern-matched status key ("200"/"404") is ACCEPTED (the local subset false-failed this)
+        schema = "skills/_contract/diagnostics.schema.json"
+        ok, note = vc._validate_against_schema(self._valid_diag({"200": 5, "404": 1}), schema)
+        self.assertTrue(ok, note)
+        # additionalProperties:false still bites a key that does NOT match the ^[0-9]{3}$ pattern
+        ok2, _ = vc._validate_against_schema(self._valid_diag({"200": 5, "frobnicate": 1}), schema)
+        self.assertFalse(ok2)
+
+    def test_local_subset_false_fails_but_routed_validator_accepts(self):
+        """Pin the exact bug + its fix in isolation: the local _stdlib subset (still the last-resort
+        fallback) has NO patternProperties support, so under additionalProperties:false it wrongly rejects a
+        pattern-matched key; the routed structvalidate path accepts it."""
+        node = {"type": "object",
+                "patternProperties": {"^[0-9]{3}$": {"type": "integer", "minimum": 0}},
+                "additionalProperties": False}
+        self.assertTrue(vc._stdlib_schema_errors({"200": 5}, node))  # local subset: false-fails (the bug)
+        sv = vc._try_import_structvalidate()
+        self.assertIsNotNone(sv, "structvalidate must be importable so the no-jsonschema path can route to it")
+        self.assertEqual(sv.validate({"200": 5}, node), [])          # routed validator: accepts it
+
+    def test_anyof_node_still_enforces_sibling_required(self):
+        # the exhaustion gap $def has anyOf [{required:[category]},{required:[host]}] AS A SIBLING of
+        # required:[gap,remediation]; a gap that satisfies the anyOf but drops the sibling-required keys MUST fail
+        schema = "skills/_contract/exhaustion_review.schema.json"
+        doc = {"verdict": "found_gaps", "model": "sonnet", "reviewer": "exhaustion-adversary",
+               "checked": ["findings"], "gaps": [{"category": "sqli"}]}
+        ok, _ = vc._validate_against_schema(doc, schema)
+        self.assertFalse(ok, "an anyOf-satisfying gap missing its sibling-required gap/remediation must FAIL")
+        # the local subset's anyOf early-return WOULD have dropped those sibling checks (the bug being fixed)
+        froot = json.loads((REPO / "skills/_contract/exhaustion_review.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(vc._stdlib_schema_errors({"category": "sqli"}, froot["$defs"]["gap"], froot), [])
+
+
+# --------------------------------------------------------------------------- #
 # per-artifact checks (the --skill / per-skill mode)
 # --------------------------------------------------------------------------- #
 class TestCheckArtifact(unittest.TestCase):
