@@ -350,6 +350,12 @@ function toEngagement(entry: any): Engagement {
   };
 }
 
+/** Structural signature of an engagement header. /engagements.json is re-discovered server-side on
+ *  every poll, so an unchanged engagement still yields a fresh toEngagement() object each time; two
+ *  headers with the same signature are byte-identical, so the prior object reference can be kept
+ *  (letting React bail out of the whole consumer subtree). Mirrors ControlProvider's useStableState. */
+const engagementSig = (e: Engagement): string => JSON.stringify(e);
+
 export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   const [engagements, setEngagements] = useState<Engagement[]>(emptyData.engagements);
   const [datasets, setDatasets] = useState<Record<string, Dataset>>({});
@@ -534,7 +540,14 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
   }, [activeId]);
 
   const classify = useCallback((json: unknown, _name: string): string => {
-    if (Array.isArray(json)) { patchActive({ findings: json as Finding[] }); return "findings"; }
+    // Dropped files are normalized through the same coercers the served path uses (datasetFromFiles),
+    // so a malformed drop (missing id, non-array evidence/steps, bad severity) can't reach a leaf
+    // render and blank a panel the served path would survive.
+    if (Array.isArray(json)) {
+      const findings = (json as Finding[]).map(normFinding).filter((f): f is Finding => f !== null);
+      patchActive({ findings });
+      return "findings";
+    }
     if (json && typeof json === "object") {
       const o = json as Record<string, unknown>;
       if (Array.isArray(o.items) && (o.count_7d != null || o.count_30d != null || o.generated_at != null)) {
@@ -587,15 +600,22 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
         patchActive({ services, assets: buildAssets(o, hostRoot(services, activeEngagement.target)), apiEndpoints: apiEndpointsOf(o), hostRaw: o });
         return "host_discovery";
       }
-      if (Array.isArray(o.chains)) { patchActive({ chains: o.chains as AttackChain[] }); return "chains"; }
+      if (Array.isArray(o.chains)) {
+        const chains = (o.chains as AttackChain[]).map(normChain).filter((c): c is AttackChain => c !== null);
+        patchActive({ chains });
+        return "chains";
+      }
       if (Array.isArray(o.attack_chains) && (o.attack_chains as any[])[0]?.steps) {
-        patchActive({ chains: o.attack_chains as AttackChain[] }); return "chains";
+        const chains = (o.attack_chains as AttackChain[]).map(normChain).filter((c): c is AttackChain => c !== null);
+        patchActive({ chains });
+        return "chains";
       }
       if (Array.isArray(o.findings)) {
         let findings = o.findings as Finding[];
         if (Array.isArray(o.attack_chains) && !(o.attack_chains as any[])[0]?.steps) {
           findings = [...findings, ...(o.attack_chains as Finding[]).map((f) => ({ ...f, composite: true }))];
         }
+        findings = findings.map(normFinding).filter((f): f is Finding => f !== null);
         patchActive({ findings });
         patchEngagement({
           name: (o.engagement as string) || activeEngagement.name,
@@ -684,9 +704,22 @@ export function ConsoleProvider({ children }: { children: React.ReactNode }) {
       const next: Engagement[] = manifest.engagements.map(toEngagement);
       const byId = new Map(next.map((e) => [e.id, e]));
       setEngagements((prev) => {
-        const merged = prev.map((e) => byId.get(e.id) ?? e); // refresh known headers in place
-        for (const e of next) if (!prev.some((p) => p.id === e.id)) merged.push(e); // append new ones
-        return merged;
+        // Refresh known headers in place, but PRESERVE the prior object reference whenever an
+        // engagement's header is byte-identical to this poll's (the common case — the manifest is
+        // re-built server-side each hit, so a quiet engagement still yields a fresh object). Only
+        // genuinely-changed engagements get the new object, and when NOTHING changed we return the
+        // same array ref so React bails: no churn of every useConsole() consumer (and the derived
+        // activeEngagement) every 15s, which otherwise cascaded into an exploration-graph rebuild.
+        let changed = false;
+        const merged = prev.map((e) => {
+          const n = byId.get(e.id);
+          if (!n) return e; // not in the manifest — never removed here (control-plane delete owns that)
+          if (engagementSig(n) === engagementSig(e)) return e; // unchanged — keep the ref
+          changed = true;
+          return n;
+        });
+        for (const e of next) if (!prev.some((p) => p.id === e.id)) { merged.push(e); changed = true; } // append new ones
+        return changed ? merged : prev;
       });
     } finally {
       manifestRefreshing.current = false;

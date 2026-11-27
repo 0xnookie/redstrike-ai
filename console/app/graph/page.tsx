@@ -27,13 +27,22 @@ export default function GraphPage() {
     return () => { live = false; };
   }, [activeId]);
 
+  // Key the graph input on the engagement's STABLE identity fields (target/name strings), not the
+  // activeEngagement object ref. The store hands back a fresh engagement object on manifest polls even
+  // when nothing changed; depending on the object would rebuild `input` — and both graph builds below —
+  // every poll. With a stable `input`, the maximal KPI build and the view build recompute only when the
+  // surface data (assets/services/findings/chains/…) actually changes.
+  const engTarget = activeEngagement?.target;
+  const engName = activeEngagement?.name;
   const input: EngagementGraphInput = useMemo(() => ({
-    target: activeEngagement?.target,
-    engagementName: activeEngagement?.name,
+    target: engTarget,
+    engagementName: engName,
     assets, services, findings, chains, content, hostRaw, history, trace,
-  }), [activeEngagement, assets, services, findings, chains, content, hostRaw, history, trace]);
+  }), [engTarget, engName, assets, services, findings, chains, content, hostRaw, history, trace]);
 
-  // headline totals (full build — every surface + producer)
+  // headline totals (full build — every surface + producer). One memoized maximal build; the view's
+  // own (filtered) build lives in EngagementGraph. Both are keyed off the stable `input` above, so a
+  // no-op poll re-renders neither.
   const totals = useMemo(
     () => buildEngagementGraph(input, { allRoutes: true, showServices: true, showAgents: true }).stats,
     [input],
