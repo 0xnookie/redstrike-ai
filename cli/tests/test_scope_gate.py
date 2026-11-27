@@ -443,5 +443,101 @@ class TestPortScopedDomain(unittest.TestCase):
         self.assertEqual(sg.classify("elsewhere.com", self.PORT_SCOPE), "unknown")
 
 
+class TestRsHttpInvocation(unittest.TestCase):
+    """The write-gate's rs_http exemption must fire ONLY when the LEADING program genuinely IS the
+    rs_http helper. A mere mention of the token (a comment / an argument / another chained command)
+    must still be gated — the old `"rs_http" in cmd.lower()` substring check let any such mention
+    bypass the mutating-HTTP write-gate."""
+
+    def test_comment_mention_is_not_an_invocation(self):
+        # `# rs_http` in a comment must NOT skip the write-gate — the curl POST is still detected
+        self.assertEqual(
+            sg.detect_mutating_http("curl -X POST https://host/api/delete  # rs_http"),
+            ("POST", "host", "/api/delete"))
+
+    def test_arg_mention_is_not_an_invocation(self):
+        self.assertEqual(
+            sg.detect_mutating_http("curl -X POST https://host/x -d note=rs_http")[0], "POST")
+
+    def test_real_rs_http_script_invocation_returns_none(self):
+        self.assertIsNone(
+            sg.detect_mutating_http("python scripts/rs_http.py --method POST --url https://host/x"))
+
+    def test_bare_rs_http_entrypoint_returns_none(self):
+        self.assertIsNone(sg.detect_mutating_http("rs_http --method POST --url https://host/x"))
+
+    def test_rs_http_module_invocation_returns_none(self):
+        self.assertIsNone(
+            sg.detect_mutating_http("python -m tools.rs_http --method DELETE --url https://host/x"))
+
+    def test_rs_http_probe_returns_none(self):
+        # a --probe declared on a real rs_http command is rs_http's to allow
+        self.assertIsNone(
+            sg.detect_mutating_http("python scripts/rs_http.py --probe POST https://host/x"))
+
+    def test_comment_bypass_denied_at_gate(self):
+        # end-to-end: the commented curl POST to an IN-scope host with no grant is DENIED, not skipped
+        out = sg.evaluate("Bash",
+                          {"command": "curl -X POST https://app.acme.com/api/delete  # rs_http"},
+                          SCOPE, PROT, CWD, defer=True, bash_allow=["*"])
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("no covering approval", out["reason"])
+
+    def test_real_rs_http_still_passes_at_gate(self):
+        # a genuine rs_http command still falls through the write-gate (it self-enforces)
+        out = sg.evaluate("Bash",
+                          {"command": "python scripts/rs_http.py --engagement e POST "
+                                      "https://app.acme.com/api/comments"},
+                          SCOPE, PROT, CWD, defer=True, bash_allow=["*"])
+        self.assertEqual(out["decision"], "pass")
+
+
+class TestIpv6AndTrailingDot(unittest.TestCase):
+    """Schemeless trailing-dot FQDNs (evil.com.) and IPv6 literals ([2001:db8::1] / bare) were
+    invisible to extract_targets, so an explicitly out-of-scope host skipped classify() and failed
+    OPEN. They must now be extracted and classified/gated."""
+
+    V6_SCOPE = {
+        "in_scope": {"domains": ["*.acme.com"], "cidrs": ["203.0.113.0/24"], "urls": []},
+        "out_of_scope": {"domains": ["evil.com"], "cidrs": ["2001:db8::/32"]},
+    }
+
+    def _d(self, cmd):
+        return sg.evaluate("Bash", {"command": cmd}, self.V6_SCOPE, PROT, CWD)
+
+    # --- extraction ---
+    def test_extract_trailing_dot_fqdn(self):
+        self.assertIn("evil.com", sg.extract_targets("curl evil.com./p"))
+
+    def test_extract_bracketed_ipv6(self):
+        self.assertIn("2001:db8::1", sg.extract_targets("curl http://[2001:db8::1]/p"))
+
+    def test_extract_bare_ipv6(self):
+        self.assertIn("2001:db8::1", sg.extract_targets("nc 2001:db8::1 80"))
+
+    # --- classification / gate: explicitly out-of-scope ⇒ DENY ---
+    def test_trailing_dot_out_of_scope_denied(self):
+        out = self._d("curl evil.com./p")
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("OUT-of-scope", out["reason"])
+
+    def test_bracketed_ipv6_out_of_scope_denied(self):
+        out = self._d("curl http://[2001:db8::1]/p")
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("OUT-of-scope", out["reason"])
+
+    def test_bare_ipv6_out_of_scope_denied(self):
+        out = self._d("nc 2001:db8::1 80")
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("OUT-of-scope", out["reason"])
+
+    # --- in-scope still passes (no regression / dot stripped before classify) ---
+    def test_in_scope_host_still_passes(self):
+        self.assertEqual(self._d("curl https://app.acme.com/x")["decision"], "pass")
+
+    def test_in_scope_trailing_dot_passes(self):
+        self.assertEqual(self._d("curl https://app.acme.com./x")["decision"], "pass")
+
+
 if __name__ == "__main__":
     unittest.main()
